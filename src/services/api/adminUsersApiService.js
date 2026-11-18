@@ -111,8 +111,9 @@ export function uiFormToUserCreate(form, { role = 'admin' } = {}) {
 export async function createAdminUserApi(form, options = {}) {
   const blocked = requireLive()
   if (blocked) return blocked
-  const payload = uiFormToUserCreate(form, { role: options.role || 'admin' })
-  const res = await apiClient.post('/api/v1/admin/users', payload, { skipMock: true, ...options })
+  const { role = 'admin', ...requestOptions } = options
+  const payload = uiFormToUserCreate(form, { role })
+  const res = await apiClient.post('/api/v1/admin/users', payload, { skipMock: true, ...requestOptions })
   if (!res.success) return res
   return { ...res, data: mapAdminUserToUi(res.data || {}) }
 }

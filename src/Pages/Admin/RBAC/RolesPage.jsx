@@ -20,12 +20,14 @@ import {
     setPermissionsForRole,
 } from '../../../Common/RBAC/rolePermissionsData'
 import { paginateRows } from '../../../Common/ui/dataTableState'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 
 const EDITABLE_ROLES = ['teacher', 'coordinator']
 const ENFORCED_MODULE_KEYS = ['lessonPlans', 'taskManagement', 'unitTests', 'markEntry', 'deliverables']
 const editableModules = ROLE_PERMISSION_MODULES.filter((module) => ENFORCED_MODULE_KEYS.includes(module.key))
 
 const RolesPage = () => {
+    const live = isLiveApiEnabled()
     const roles = getAllRolesForManagement()
     const [selectedRole, setSelectedRole] = useState('teacher')
     const [savedPermissions, setSavedPermissions] = useState(() => getPermissionsForRole('teacher'))
@@ -50,10 +52,19 @@ const RolesPage = () => {
     }
 
     const togglePermission = (key) => {
+        if (live) {
+            toast.error('Permission matrix write is blocked. Backend only exposes read APIs for role permissions.')
+            return
+        }
         setDraftPermissions((current) => ({ ...current, [key]: !current[key] }))
     }
 
     const savePermissions = () => {
+        if (live) {
+            toast.error('Permission matrix write is blocked until a backend write contract exists.')
+            setConfirmOpen(false)
+            return
+        }
         setPermissionsForRole(selectedRole, draftPermissions)
         setSavedPermissions(draftPermissions)
         setConfigured(true)
@@ -89,9 +100,11 @@ const RolesPage = () => {
             />
 
             <IntegrationNotice
-                state='demo'
-                title='Frontend policy prototype'
-                description='Teacher and Coordinator navigation policies are enforced in this browser. Production authorization must be loaded from the backend and checked again on every API request.'
+                state={live ? 'failed' : 'demo'}
+                title={live ? 'Permission writes blocked' : 'Frontend policy prototype'}
+                description={live
+                    ? 'Live mode: role permission matrix can be viewed for planning only. Saving or toggling modules is blocked — FastAPI mounts read endpoints only (no POST/PATCH for permission matrices). User account create/status uses /api/v1/admin/users instead.'
+                    : 'Teacher and Coordinator navigation policies are enforced in this browser. Production authorization must be loaded from the backend and checked again on every API request.'}
             />
 
             <div className='grid grid-cols-1 gap-5 xl:grid-cols-[minmax(18rem,0.75fr)_minmax(0,1.25fr)]'>
@@ -144,10 +157,10 @@ const RolesPage = () => {
                     <button
                         type='button'
                         onClick={() => setConfirmOpen(true)}
-                        disabled={configured && changes.changedCount === 0}
+                        disabled={live || (configured && changes.changedCount === 0)}
                         className='mt-5 inline-flex min-h-10 items-center gap-2 rounded-lg bg-[var(--erp-indigo)] px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45'
                     >
-                        <Save aria-hidden='true' size={16} /> Review and save policy
+                        <Save aria-hidden='true' size={16} /> {live ? 'Save blocked in live mode' : 'Review and save policy'}
                     </button>
                 </Surface>
 

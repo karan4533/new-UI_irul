@@ -109,7 +109,7 @@ Do not start the next role until the current role checkpoint is reported.
 
 **RBAC spot-check:** teacher `GET /api/v1/admin/users` → **403**. Super Admin can create `role=admin` (seed API create `ADM-0001`).
 
-**Super Admin checkpoint:** Priority slice complete. Do **not** start Admin role until acknowledged.
+**Super Admin checkpoint:** Priority slice complete (acked via push + Admin start).
 
 ### Files modified (this slice)
 
@@ -128,9 +128,71 @@ Do not start the next role until the current role checkpoint is reported.
 
 ---
 
+## Admin — Phase A audit
+
+**Login:** `admin@qmis.edu` / `admin123` → JWT role `admin` → `/admin/dashboard`  
+**Layout:** `Layout/AdminLayout.jsx` → `Routes/AdminRoutes.jsx`  
+**Creatable roles (server):** Principal, PRM, Teacher, Coordinator, Librarian, Gate Keeper Manager, Gate Keeper (+ ops managers per backend). **Cannot** create `admin` / `superadmin`.
+
+### Feature inventory (priority)
+
+| Area | Routes / pages | Was | Backend |
+|---|---|---|---|
+| Dashboard | `/admin/dashboard` | OperationalBriefing mock | `GET /api/v1/admin/dashboard` |
+| User creation | `/admin/rbac/user-creation*` | localStorage `createdUsersData` | `GET/POST/PATCH /api/v1/admin/users` |
+| Roles / permissions | `/admin/rbac/roles` | localStorage matrix write | **BLOCKED** write (read-only honest UI) |
+| Student directory | `/admin/user-management/student-database*` | hardcoded list | `GET /api/v1/students` |
+| Employee directory | `/admin/user-management/employee-database*` | hardcoded list | Shared HR portal employees |
+| Announcements | `/admin/announcement*` | Common | **LIVE** (shared) |
+
+---
+
+## Admin — Phase B mapping (priority slice)
+
+| Feature | Endpoint | Status |
+|---|---|---|
+| Dashboard KPIs | `GET /api/v1/admin/dashboard` | **LIVE** |
+| Staff user list / create / status | `/api/v1/admin/users*` | **LIVE** (deactivate only; no hard delete) |
+| Roles permission write | — | **BLOCKED** |
+| Students list/detail | `/api/v1/students*` | **LIVE** |
+| Employees list/detail | HR portal employees | **LIVE** (shared `hrApiService`) |
+| Announcements | existing | **LIVE** |
+| Remaining Admin modules | admissions, attendance, TC, leave, etc. | **MOCK** until later slices |
+
+---
+
+## Admin — status board
+
+| Feature | Status | UAT |
+|---|---|---|
+| Auth / login | LIVE | **UAT VERIFIED** (`admin@qmis.edu` → `/admin/dashboard`) |
+| Dashboard KPIs | LIVE | **UAT VERIFIED** (Students 1, Employees 6, live strip) |
+| Staff user provisioning | LIVE | **UAT VERIFIED** (live list; API create `TEA-0001`) |
+| Permission matrix write | BLOCKED | **UAT VERIFIED** (Save blocked in live mode) |
+| Student directory | LIVE | **UAT VERIFIED** (1 of 1; live students banner) |
+| Employee directory | LIVE | **UAT VERIFIED** (6 of 6; shared HR portal) |
+| Announcements | LIVE | shared |
+| Other Admin modules | MOCK | — |
+
+**Admin checkpoint:** Priority slice complete. Do **not** start HR role remount until acknowledged.
+
+### Files modified (Admin slice)
+
+- `ERP_QMIS/src/Pages/Admin/RBAC/UserCreationPage.jsx`
+- `ERP_QMIS/src/Pages/Admin/RBAC/CreateUserPage.jsx`
+- `ERP_QMIS/src/Pages/Admin/RBAC/RolesPage.jsx`
+- `ERP_QMIS/src/Pages/Admin/Dashboard/Dashboard.jsx`
+- `ERP_QMIS/src/Pages/Admin/UserManagement/StudentDatabase/*`
+- `ERP_QMIS/src/Pages/Admin/UserManagement/EmployeeDatabase/*`
+- `ERP_QMIS/src/services/api/adminUsersApiService.js` (do not forward `role` into apiClient options)
+
+---
+
 ## Change log
 
 | Date | Change |
 |---|---|
 | 2026-11-18 | Created tracker; Super Admin audit + priority slice plan; begin Super Admin LIVE wiring |
 | 2026-11-18 | Super Admin priority slice LIVE + UAT: dashboard KPIs, admin users, students, employees (shared HR) |
+| 2026-11-18 | Pushed ERP_QMIS to https://github.com/karan4533/new-UI_irul ; started Admin priority LIVE slice |
+| 2026-11-18 | Admin priority slice LIVE + UAT: dashboard KPIs, staff users, students, employees; roles write BLOCKED |

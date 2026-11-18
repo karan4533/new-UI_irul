@@ -1,8 +1,11 @@
-import React from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import mo_user from '../../../../assets/images/no-profile.png'
+import { FeedbackState } from '../../../../Common/ui'
 import { ROUTE_BASE, getEmployeeById } from './employeeDatabaseData'
+import { isLiveApiEnabled } from '../../../../services/api/tokenStore'
+import { getEmployee, listPortalEmployees } from '../../../../services/api/hrApiService'
 
 const Section = ({ title, children }) => (
     <div className='bg-white rounded-2xl shadow-md p-4'>
@@ -21,7 +24,50 @@ const Field = ({ label, value }) => (
 const ViewEmployee = () => {
     const { id } = useParams()
     const navigate = useNavigate()
-    const employee = getEmployeeById(id)
+    const live = isLiveApiEnabled()
+    const [employee, setEmployee] = useState(() => (live ? null : getEmployeeById(id)))
+    const [loading, setLoading] = useState(Boolean(live))
+    const [error, setError] = useState('')
+
+    const loadLive = useCallback(async () => {
+        setLoading(true)
+        setError('')
+        const portal = await listPortalEmployees()
+        if (portal.success) {
+            const found = (portal.data || []).find((row) => String(row.id) === String(id))
+            if (found) {
+                setEmployee({ ...found, employeeId: found.id, role: found.role || found.designation })
+                setLoading(false)
+                return
+            }
+        }
+        const typed = await getEmployee(id)
+        setLoading(false)
+        if (!typed.success) {
+            setEmployee(null)
+            setError(typeof typed.error === 'string' ? typed.error : 'Employee was not found on the server.')
+            return
+        }
+        setEmployee({ ...typed.data, employeeId: typed.data.id, role: typed.data.designation })
+    }, [id])
+
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            setEmployee(getEmployeeById(id))
+            setLoading(false)
+            return
+        }
+        loadLive()
+    }, [id, loadLive])
+
+    if (loading) {
+        return (
+            <section className='space-y-6'>
+                <button type='button' onClick={() => navigate(ROUTE_BASE)} className='inline-flex items-center gap-2 text-sm text-[#515DEF] border border-[#515DEF] rounded-md px-4 py-2'><ArrowLeft size={18} /> Back to list</button>
+                <FeedbackState kind='loading' title='Loading employee' description={`Fetching ${id}…`} />
+            </section>
+        )
+    }
 
     if (!employee) {
         return (
@@ -30,12 +76,10 @@ const ViewEmployee = () => {
                     <ArrowLeft size={18} />
                     Back to list
                 </button>
-                <div className='bg-white rounded-2xl shadow-md p-8 text-center text-[#667085]'>Employee not found.</div>
+                <div className='bg-white rounded-2xl shadow-md p-8 text-center text-[#667085]'>{error || 'Employee not found.'}</div>
             </section>
         )
     }
-
-    const displayName = [employee.firstName, employee.middleName, employee.lastName].filter(Boolean).join(' ')
 
     return (
         <section className='space-y-6'>
@@ -43,6 +87,7 @@ const ViewEmployee = () => {
                 <ArrowLeft size={18} />
                 Back to list
             </button>
+            {live ? <p className='text-xs font-medium text-[#027A48]'>Live employee · shared HR API</p> : null}
 
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='flex flex-col sm:flex-row sm:items-center gap-4'>
@@ -50,71 +95,30 @@ const ViewEmployee = () => {
                     <div>
                         <h1 className='text-2xl font-semibold text-black'>{employee.name}</h1>
                         <p className='text-sm text-[#667085] mt-1'>
-                            <span className='font-medium text-[#1E1E1E]'>Employee ID: {employee.employeeId}</span>
+                            <span className='font-medium text-[#1E1E1E]'>Employee ID: {employee.employeeId || employee.id}</span>
                             {' · '}
-                            <span className='text-[#808080]'>Department: {employee.department}</span>
+                            <span className='text-[#808080]'>Department: {employee.department || '—'}</span>
                             {' · '}
-                            <span className='text-[#808080]'>Role: {employee.role}</span>
+                            <span className='text-[#808080]'>Role: {employee.role || employee.designation || '—'}</span>
                         </p>
                     </div>
                 </div>
             </div>
 
-            <Section title='Personal information'>
-                <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6'>
-                    <Field label='Name' value={displayName} />
-                    <Field label='Employee ID' value={employee.employeeId} />
-                    <Field label='Department' value={employee.department} />
-                    <Field label='Role' value={employee.role} />
-                    <Field label='Gender' value={employee.gender} />
-                    <Field label='Date of birth' value={employee.dateOfBirth} />
-                    <Field label='Blood group' value={employee.bloodGroup} />
-                    <Field label='Height' value={employee.height} />
-                    <Field label='Weight' value={employee.weight} />
-                    <Field label='Medical history' value={employee.medicalHistory} />
-                    <div className='lg:col-span-3'><Field label='Street / full address' value={employee.address.address} /></div>
-                    <Field label='Country' value={employee.address.country} />
-                    <Field label='State' value={employee.address.state} />
-                    <Field label='City' value={employee.address.city} />
-                    <Field label='Zip code' value={employee.address.zipCode} />
-                    <Field label='Mobile number' value={employee.contact.mobileNumber} />
-                    <Field label='Alternative number' value={employee.contact.alternativeNumber} />
-                    <Field label='Email' value={employee.contact.email} />
-                </div>
-            </Section>
-
-            <Section title='Professional information'>
-                <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6'>
-                    <Field label='Qualification' value={employee.professionalInfo.qualification} />
-                    <Field label='Subject' value={employee.professionalInfo.subject} />
-                    <Field label='Years of experience' value={employee.professionalInfo.yearsOfExperience} />
-                    <Field label='Previous school' value={employee.professionalInfo.previousSchool} />
-                    <Field label='Joining date' value={employee.professionalInfo.joiningDate} />
-                </div>
-            </Section>
-
             <Section title='Employment information'>
                 <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6'>
-                    <Field label='Employee type' value={employee.employmentInfo.employeeType} />
-                    <Field label='Salary' value={employee.employmentInfo.salary} />
-                    <Field label='Work shift' value={employee.employmentInfo.workShift} />
-                    <Field label='Assigned class' value={employee.employmentInfo.assignedClass} />
-                    <Field label='Assigned subjects' value={employee.employmentInfo.assignedSubjects} />
-                </div>
-            </Section>
-
-            <Section title='Account'>
-                <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6'>
-                    <Field label='Username' value={employee.account.username} />
-                    <Field label='Password' value={employee.account.password} />
-                </div>
-            </Section>
-
-            <Section title='Documents'>
-                <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6'>
-                    <Field label='ID proof' value={employee.documents.idProof} />
-                    <Field label='Qualification certificate' value={employee.documents.qualificationCertificate} />
-                    <Field label='Experience certificate' value={employee.documents.experienceCertificate} />
+                    <Field label='Name' value={employee.name} />
+                    <Field label='Employee ID' value={employee.employeeId || employee.id} />
+                    <Field label='Department' value={employee.department} />
+                    <Field label='Designation' value={employee.designation || employee.role} />
+                    <Field label='Status' value={employee.status} />
+                    <Field label='Joining date' value={employee.joiningDate} />
+                    <Field label='Employment type' value={employee.employmentType} />
+                    <Field label='Category' value={employee.category} />
+                    <Field label='Email' value={employee.email} />
+                    <Field label='Contact' value={employee.contact} />
+                    <Field label='Reporting manager' value={employee.reportingManager} />
+                    <Field label='Qualification' value={employee.qualification} />
                 </div>
             </Section>
         </section>

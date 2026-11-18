@@ -1,8 +1,11 @@
-import React, { useMemo } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import mo_user from '../../../../assets/images/no-profile.png'
+import { FeedbackState } from '../../../../Common/ui'
 import { ROUTE_BASE, getStudentById } from './studentDatabaseData'
+import { isLiveApiEnabled } from '../../../../services/api/tokenStore'
+import { getStudent } from '../../../../services/api/studentApiService'
 
 const Section = ({ title, children }) => (
     <div className='bg-white rounded-2xl shadow-md p-4'>
@@ -21,7 +24,41 @@ const Field = ({ label, value }) => (
 const ViewStudent = () => {
     const { id } = useParams()
     const navigate = useNavigate()
-    const student = useMemo(() => getStudentById(id), [id])
+    const live = isLiveApiEnabled()
+    const [student, setStudent] = useState(() => (live ? null : getStudentById(id)))
+    const [loading, setLoading] = useState(Boolean(live))
+    const [error, setError] = useState('')
+
+    const loadLive = useCallback(async () => {
+        setLoading(true)
+        setError('')
+        const res = await getStudent(id)
+        setLoading(false)
+        if (!res.success) {
+            setStudent(null)
+            setError(typeof res.error === 'string' ? res.error : 'Student was not found on the server.')
+            return
+        }
+        setStudent(res.data)
+    }, [id])
+
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            setStudent(getStudentById(id))
+            setLoading(false)
+            return
+        }
+        loadLive()
+    }, [id, loadLive])
+
+    if (loading) {
+        return (
+            <section className='space-y-6'>
+                <button type='button' onClick={() => navigate(ROUTE_BASE)} className='inline-flex items-center gap-2 text-sm text-[#515DEF] border border-[#515DEF] rounded-md px-4 py-2'><ArrowLeft size={18} /> Back to list</button>
+                <FeedbackState kind='loading' title='Loading student' description={`Fetching ${id}…`} />
+            </section>
+        )
+    }
 
     if (!student) {
         return (
@@ -30,12 +67,13 @@ const ViewStudent = () => {
                     <ArrowLeft size={18} />
                     Back to list
                 </button>
-                <div className='bg-white rounded-2xl shadow-md p-8 text-center text-[#667085]'>Student not found.</div>
+                <div className='bg-white rounded-2xl shadow-md p-8 text-center text-[#667085]'>{error || 'Student not found.'}</div>
             </section>
         )
     }
 
-    const displayName = [student.firstName, student.middleName, student.lastName].filter(Boolean).join(' ')
+    const displayName = student.name
+        || [student.firstName, student.middleName, student.lastName].filter(Boolean).join(' ')
 
     return (
         <section className='space-y-6'>
@@ -43,6 +81,7 @@ const ViewStudent = () => {
                 <ArrowLeft size={18} />
                 Back to list
             </button>
+            {live ? <p className='text-xs font-medium text-[#027A48]'>Live student · GET /api/v1/students/{'{id}'}</p> : null}
 
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='flex flex-col sm:flex-row sm:items-center gap-4'>
@@ -50,96 +89,34 @@ const ViewStudent = () => {
                     <div className='flex-1'>
                         <h1 className='text-2xl font-semibold text-black'>{displayName}</h1>
                         <p className='text-sm text-[#667085] mt-1'>
-                            <span className='font-medium text-[#1E1E1E]'>Admission No: {student.admissionNumber}</span>
+                            <span className='font-medium text-[#1E1E1E]'>Admission No: {student.admissionNumber || '—'}</span>
                         </p>
                     </div>
                 </div>
             </div>
 
-            <Section title='Admission details'>
+            <Section title='Placement details'>
                 <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6'>
-                    <Field label='Admission date' value={student.admissionDate} />
-                    <Field label='Class' value={student.class} />
+                    <Field label='Class' value={student.className || student.class} />
+                    <Field label='Section' value={student.section} />
                     <Field label='Class section' value={student.classSection} />
-                    <Field label='Registration fees' value={student.registrationFees} />
-                    <Field label='Batch year' value={student.batchYear} />
-                    <Field label='Batch end year' value={student.batchEndYear} />
-                    <Field label='Fees timeline' value={student.feesTimeline} />
+                    <Field label='Roll number' value={student.rollNumber} />
+                    <Field label='Placement status' value={student.placementStatus} />
                     <Field label='Status' value={student.status} />
-                    <Field label='Student ID' value={student.studentId} />
+                    <Field label='Student ID' value={student.id || student.studentId} />
                 </div>
             </Section>
 
             <Section title='Student information'>
                 <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6'>
-                    <Field label='First name' value={student.firstName} />
-                    <Field label='Middle name' value={student.middleName} />
-                    <Field label='Last name' value={student.lastName} />
+                    <Field label='Name' value={displayName} />
                     <Field label='Gender' value={student.gender} />
-                    <Field label='Religion' value={student.religion} />
-                    <Field label='Caste' value={student.caste} />
+                    <Field label='Email' value={student.email} />
+                    <Field label='Mobile' value={student.mobileNumber} />
                     <Field label='Date of birth' value={student.dateOfBirth} />
-                    <Field label='Blood group' value={student.bloodGroup} />
-                    <Field label='Height' value={student.height} />
-                    <Field label='Weight' value={student.weight} />
-                    <div className='lg:col-span-3'><Field label='Medical history' value={student.medicalHistory} /></div>
-                    <div className='lg:col-span-3'><Field label='Previous school' value={student.previousSchool} /></div>
-                </div>
-            </Section>
-
-            <Section title='Student address'>
-                <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6'>
-                    <div className='lg:col-span-3'><Field label='Street / full address' value={student.address.address} /></div>
-                    <Field label='Country' value={student.address.country} />
-                    <Field label='State' value={student.address.state} />
-                    <Field label='City' value={student.address.city} />
-                    <Field label='Zip code' value={student.address.zipCode} />
-                </div>
-            </Section>
-
-            <Section title='Student contact'>
-                <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6'>
-                    <Field label='Mobile number' value={student.contact.mobileNumber} />
-                    <Field label='Alternative number' value={student.contact.alternativeNumber} />
-                    <Field label='Email' value={student.contact.email} />
-                </div>
-            </Section>
-
-            <Section title='Transport'>
-                <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6'>
-                    <Field label='Mode of transport' value={student.transport.modeOfTransport} />
-                    <Field label='Route list' value={student.transport.routeList} />
-                    <Field label='Bus stop' value={student.transport.busStop} />
-                </div>
-            </Section>
-
-            <Section title='Parent / guardian'>
-                <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6'>
-                    <Field label='Father name' value={student.parent.fatherName} />
-                    <Field label='Mother name' value={student.parent.motherName} />
-                    <Field label='Father occupation' value={student.parent.fatherOccupation} />
-                    <Field label='Mother occupation' value={student.parent.motherOccupation} />
-                    <Field label='Father yearly income' value={student.parent.fatherYearlyIncome} />
-                    <Field label='Mother yearly income' value={student.parent.motherYearlyIncome} />
-                    <Field label='Siblings' value={student.parent.siblings} />
-                </div>
-            </Section>
-
-            <Section title='Parent address'>
-                <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6'>
-                    <div className='lg:col-span-3'><Field label='Street / full address' value={student.parent.address.address} /></div>
-                    <Field label='Country' value={student.parent.address.country} />
-                    <Field label='State' value={student.parent.address.state} />
-                    <Field label='City' value={student.parent.address.city} />
-                    <Field label='Zip code' value={student.parent.address.zipCode} />
-                </div>
-            </Section>
-
-            <Section title='Parent contact'>
-                <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6'>
-                    <Field label='Mobile number' value={student.parent.contact.mobileNumber} />
-                    <Field label='Alternative number' value={student.parent.contact.alternativeNumber} />
-                    <Field label='Email' value={student.parent.contact.email} />
+                    <Field label='Country' value={student.country} />
+                    <Field label='State' value={student.state} />
+                    <Field label='City' value={student.city} />
                 </div>
             </Section>
         </section>
