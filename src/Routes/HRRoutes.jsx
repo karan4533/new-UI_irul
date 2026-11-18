@@ -25,6 +25,8 @@ import Notifications from '../Pages/HR/Notifications/Notifications'
 import Announcements from '../Pages/HR/Announcements/Announcements'
 import AddAnnouncement from '../Pages/HR/Announcements/AddAnnouncement'
 import ViewAnnouncement from '../Pages/HR/Announcements/ViewAnnouncement'
+import ReceivedLeaveRequests from '../Pages/HR/LeaveRequest/ReceivedLeaveRequests'
+import ViewReceivedLeaveRequest from '../Pages/HR/LeaveRequest/ViewReceivedLeaveRequest'
 import { EMPLOYEES } from '../Pages/HR/EmployeeManagement/employeeData'
 
 const defaultEmployeeId = EMPLOYEES[0]?.id ?? 'EMP-2026-001'
@@ -53,6 +55,14 @@ const HRRoutes = () => {
             <Route path="/hr/attendance" element={<Attendance />} />
             <Route path="/hr/leave-management/policies" element={<LeaveManagement />} />
             <Route path="/hr/leave-management" element={<LeaveManagement />} />
+            {/* Formal leave — declare before EnterpriseOperationsRoutes so stubs cannot shadow. */}
+            <Route path="/hr/leave-request/my-requests" element={<AttendanceAndLeaveWorkspace defaultTab="my-leave" roleOverride="hr" />} />
+            <Route path="/hr/leave-request/my-requests/add" element={<AttendanceAndLeaveWorkspace defaultTab="my-leave" roleOverride="hr" />} />
+            <Route path="/hr/leave-request/my-requests/view/:id" element={<AttendanceAndLeaveWorkspace defaultTab="my-leave" roleOverride="hr" />} />
+            <Route path="/hr/leave-request/received" element={<ReceivedLeaveRequests />} />
+            <Route path="/hr/leave-request/received/view/:id" element={<ViewReceivedLeaveRequest />} />
+            <Route path="/hr/leave-request/received-leaves" element={<ReceivedLeaveRequests />} />
+            <Route path="/hr/leave-request" element={<AttendanceAndLeaveWorkspace defaultTab="my-leave" roleOverride="hr" />} />
             <Route path="/hr/training-records" element={<Training />} />
             <Route path="/hr/training-feedback" element={<Training />} />
             <Route path="/hr/training" element={<Training />} />

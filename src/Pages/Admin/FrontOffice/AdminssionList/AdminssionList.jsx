@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Download, Eye, GraduationCap, Pencil, Plus, Save, Trash2 } from 'lucide-react'
 import { NavLink, useLocation, useSearchParams } from 'react-router-dom'
 import { toast } from 'react-toastify'
@@ -8,6 +8,7 @@ import {
     ConfirmAction,
     DataTable,
     DataToolbar,
+    FeedbackState,
     IntegrationNotice,
     PageHeader,
     Pagination,
@@ -25,15 +26,21 @@ import {
     getStudentDisplayName,
 } from './admissionListData'
 import { getAddAdmissionPath, isAdminFrontOfficePath } from '../AdmissionEnquiry/admissionEnquiryData'
+import { isLiveApiEnabled } from '../../../../services/api/tokenStore'
+import { listAdmissions } from '../../../../services/api/admissionsApiService'
 
 const AdminssionList = () => {
+    const live = isLiveApiEnabled()
     const { pathname } = useLocation()
     const isAdminView = isAdminFrontOfficePath(pathname)
     const addAdmissionPath = getAddAdmissionPath(pathname)
     const draftKey = getAdmissionDraftKey(pathname, 'new')
     const [urlParams, setUrlParams] = useSearchParams()
     const initialTableState = parseTableState(urlParams)
-    const [records, setRecords] = useState(() => getAllAdmissions())
+    const [records, setRecords] = useState(() => (live ? [] : getAllAdmissions()))
+    const [listLoading, setListLoading] = useState(Boolean(live))
+    const [listError, setListError] = useState('')
+    const [listSource, setListSource] = useState(live ? 'backend' : 'local')
     const [search, setSearch] = useState(initialTableState.query)
     const [status, setStatus] = useState(initialTableState.filters.status || '')
     const [fromDate, setFromDate] = useState(initialTableState.filters.fromDate || '')
@@ -42,6 +49,33 @@ const AdminssionList = () => {
     const [pageSize, setPageSize] = useState(initialTableState.pageSize)
     const [pendingAction, setPendingAction] = useState(null)
     const [hasDraft] = useState(() => Boolean(loadAdmissionDraft(draftKey)))
+    const [refreshNonce, setRefreshNonce] = useState(0)
+
+    const loadLive = useCallback(async () => {
+        setListLoading(true)
+        setListError('')
+        const res = await listAdmissions()
+        setListLoading(false)
+        if (!res.success) {
+            setListSource('error')
+            setListError(typeof res.error === 'string' ? res.error : 'Failed to load admissions.')
+            setRecords([])
+            return
+        }
+        setRecords(Array.isArray(res.data) ? res.data : [])
+        setListSource('backend')
+    }, [])
+
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            setRecords(getAllAdmissions())
+            setListSource('local')
+            setListLoading(false)
+            setListError('')
+            return
+        }
+        loadLive()
+    }, [loadLive, refreshNonce])
 
     const filteredRecords = useMemo(
         () => filterAdmissionRecords(records, { search, status, fromDate, toDate }),
@@ -66,11 +100,25 @@ const AdminssionList = () => {
         setPage(1)
     }
 
-    const refresh = () => setRecords(getAllAdmissions())
+    const refresh = () => {
+        if (isLiveApiEnabled()) {
+            setRefreshNonce((n) => n + 1)
+            return
+        }
+        setRecords(getAllAdmissions())
+    }
 
     const confirmPendingAction = () => {
         if (!pendingAction) return
         const { type, record } = pendingAction
+
+        if (isLiveApiEnabled()) {
+            toast.error(type === 'delete'
+                ? 'Hard delete is not supported on the admissions API from this screen.'
+                : 'Enrol from the admissions API convert/enroll endpoints (not wired as a silent local enrol).')
+            setPendingAction(null)
+            return
+        }
 
         if (type === 'delete') {
             deleteAdmission(record.id)
@@ -131,11 +179,20 @@ const AdminssionList = () => {
             />
 
             <IntegrationNotice
-                state='demo'
-                title='Browser-stored admission records'
-                description='Records, enrolment and parent mapping are local demo workflows. Production submission, document verification, payment and identity checks require backend APIs.'
+                state={listSource === 'backend' ? 'connected' : listSource === 'error' ? 'failed' : 'demo'}
+                title={listSource === 'backend' ? 'Live admissions directory' : listSource === 'error' ? 'Admissions API unavailable' : 'Browser-stored admission records'}
+                description={listSource === 'backend'
+                    ? 'GET /api/v1/admissions. Admin view is read-focused; hard delete and local enrol are disabled in live mode.'
+                    : listSource === 'error'
+                        ? listError
+                        : 'Records, enrolment and parent mapping are local demo workflows. Production submission, document verification, payment and identity checks require backend APIs.'}
             />
 
+            {listLoading ? (
+                <FeedbackState kind='loading' title='Loading admissions' description='Fetching from the admissions API…' />
+            ) : null}
+
+            {!listLoading && listSource !== 'error' ? (
             <div className='overflow-hidden rounded-[var(--erp-radius-surface)] border border-[var(--erp-line)] bg-white'>
                 <DataToolbar
                     query={search}
@@ -214,6 +271,7 @@ const AdminssionList = () => {
                 />
                 <Pagination {...pagination} onPageChange={setPage} onPageSizeChange={(value) => { setPageSize(value); setPage(1) }} />
             </div>
+            ) : null}
 
             <ConfirmAction
                 open={Boolean(pendingAction)}

@@ -26,18 +26,25 @@ import {
 } from 'lucide-react'
 import {
     getCatalogBooks,
-    saveCatalogBooks,
     getIssuedBooks,
-    saveIssuedBooks,
     REGISTERED_MEMBERS,
     BORROWING_RULES,
     issueBookToMember,
     returnBookIssue
 } from './libraryData'
+import { FeedbackState } from '../../Common/ui'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
+import {
+    loadLibraryWorkspace,
+    replaceLibraryBooks,
+    replaceLibraryIssues,
+    replaceLibraryMembers,
+} from '../../services/api/libraryApiService'
 
 const LibraryManagementWorkspace = ({ defaultTab = 'catalog' }) => {
     const [searchParams, setSearchParams] = useSearchParams()
     const navigate = useNavigate()
+    const live = isLiveApiEnabled()
 
     // Determine active tab from URL query param "?tab=" or fallback to defaultTab prop
     const tabFromUrl = searchParams.get('tab')
@@ -55,11 +62,44 @@ const LibraryManagementWorkspace = ({ defaultTab = 'catalog' }) => {
     }
 
     // State for Catalog & Circulation
-    const [catalogBooks, setCatalogBooks] = useState(getCatalogBooks())
-    const [issuedBooks, setIssuedBooks] = useState(getIssuedBooks())
+    const [catalogBooks, setCatalogBooks] = useState(() => (live ? [] : getCatalogBooks()))
+    const [issuedBooks, setIssuedBooks] = useState(() => (live ? [] : getIssuedBooks()))
+    const [members, setMembers] = useState(() => (live ? [] : REGISTERED_MEMBERS))
+    const [loading, setLoading] = useState(Boolean(live))
+    const [loadError, setLoadError] = useState('')
+    const [saving, setSaving] = useState(false)
 
     // Feedback notifications
     const [notification, setNotification] = useState(null)
+
+    const loadSeqRef = React.useRef(0)
+    const refreshLive = async () => {
+        const seq = ++loadSeqRef.current
+        setLoading(true)
+        setLoadError('')
+        const res = await loadLibraryWorkspace()
+        if (seq !== loadSeqRef.current) return false
+        setLoading(false)
+        if (!res.success) {
+            setLoadError(typeof res.error === 'string' ? res.error : 'Library API unavailable.')
+            setCatalogBooks([])
+            setIssuedBooks([])
+            setMembers([])
+            return false
+        }
+        setLoadError('')
+        setCatalogBooks(res.data.books || [])
+        setIssuedBooks(res.data.issues || [])
+        setMembers(res.data.members || [])
+        return true
+    }
+
+    useEffect(() => {
+        if (!isLiveApiEnabled()) return undefined
+        // Wait a tick so AuthContext can restore JWT before the first ops fetch.
+        const t = window.setTimeout(() => { refreshLive() }, 0)
+        return () => window.clearTimeout(t)
+    }, [])
 
     // Clear notification after 4s
     useEffect(() => {
@@ -108,22 +148,22 @@ const LibraryManagementWorkspace = ({ defaultTab = 'catalog' }) => {
     /* =========================================================
        TAB 2: CIRCULATION & ISSUE/RETURN STATE
        ========================================================= */
-    const [selectedMemberId, setSelectedMemberId] = useState(REGISTERED_MEMBERS[0]?.id || '')
-    const [selectedBookId, setSelectedBookId] = useState(catalogBooks[0]?.id || '')
-    const [issueDueDate, setIssueDueDate] = useState(() => {
-        const firstMember = REGISTERED_MEMBERS[0]
-        const isStud = firstMember?.memberType === 'Student' || firstMember?.role === 'Student'
-        const days = isStud ? BORROWING_RULES.Student.loanPeriodDays : BORROWING_RULES.Staff.loanPeriodDays
-        return new Date(Date.now() + days * 86400000)
-    })
+    const [selectedMemberId, setSelectedMemberId] = useState('')
+    const [selectedBookId, setSelectedBookId] = useState('')
+    const [issueDueDate, setIssueDueDate] = useState(() => new Date(Date.now() + 14 * 86400000))
+
+    useEffect(() => {
+        if (!selectedMemberId && members[0]?.id) setSelectedMemberId(members[0].id)
+        if (!selectedBookId && catalogBooks[0]?.id) setSelectedBookId(catalogBooks[0].id)
+    }, [members, catalogBooks, selectedMemberId, selectedBookId])
 
     const [circulationSearch, setCirculationSearch] = useState('')
     const [circulationStatusFilter, setCirculationStatusFilter] = useState('All')
 
     // Selected member calculation & borrowing limit enforcement
     const selectedMember = useMemo(() => {
-        return REGISTERED_MEMBERS.find((m) => m.id === selectedMemberId) || REGISTERED_MEMBERS[0]
-    }, [selectedMemberId])
+        return members.find((m) => m.id === selectedMemberId) || members[0]
+    }, [selectedMemberId, members])
 
     const isStudentBorrower = selectedMember?.memberType === 'Student' || selectedMember?.role === 'Student'
     const allowedLimit = isStudentBorrower ? BORROWING_RULES.Student.maxBooks : BORROWING_RULES.Staff.maxBooks
@@ -147,15 +187,20 @@ const LibraryManagementWorkspace = ({ defaultTab = 'catalog' }) => {
     // Handle member selection change & adjust due date
     const handleMemberSelect = (memberId) => {
         setSelectedMemberId(memberId)
-        const mem = REGISTERED_MEMBERS.find((m) => m.id === memberId)
+        const mem = members.find((m) => m.id === memberId)
         const isStud = mem?.memberType === 'Student' || mem?.role === 'Student'
         const loanDays = isStud ? BORROWING_RULES.Student.loanPeriodDays : BORROWING_RULES.Staff.loanPeriodDays
         setIssueDueDate(new Date(Date.now() + loanDays * 86400000))
     }
 
     // Trigger Issue Book
-    const handleIssueBookSubmit = (e) => {
+    const handleIssueBookSubmit = async (e) => {
         e.preventDefault()
+
+        if (!selectedMember || !selectedBook) {
+            setNotification({ type: 'error', message: 'Select a valid member and book before issuing.' })
+            return
+        }
 
         if (isMemberLimitReached) {
             setNotification({
@@ -170,6 +215,55 @@ const LibraryManagementWorkspace = ({ defaultTab = 'catalog' }) => {
                 type: 'error',
                 message: `Out of Stock: Zero copies available for "${selectedBook.title}".`
             })
+            return
+        }
+
+        if (live) {
+            const due = issueDueDate.toLocaleDateString('en-GB')
+            const newIssue = {
+                id: `LIS-${Date.now()}`,
+                bookId: selectedBook.id,
+                bookTitle: selectedBook.title,
+                author: selectedBook.author,
+                memberId: selectedMember.id,
+                memberName: selectedMember.name,
+                memberType: selectedMember.memberType || selectedMember.role,
+                admissionNumber: selectedMember.admissionNumber,
+                issuedDate: new Date().toLocaleDateString('en-GB'),
+                dueDate: due,
+                returnDate: null,
+                status: 'Issued',
+                daysOverdue: 0,
+                lateFee: 0,
+                returnComment: 'Standard circulation loan',
+            }
+            const nextBooks = catalogBooks.map((b) => (
+                b.id === selectedBook.id
+                    ? { ...b, availableCopies: Math.max(0, (b.availableCopies || 0) - 1), status: (b.availableCopies || 0) - 1 > 0 ? 'Available' : 'Issued' }
+                    : b
+            ))
+            const nextIssues = [newIssue, ...issuedBooks]
+            const nextMembers = members.map((m) => (
+                m.id === selectedMember.id
+                    ? { ...m, currentlyBorrowedCount: (m.currentlyBorrowedCount || 0) + 1 }
+                    : m
+            ))
+            setSaving(true)
+            const [booksRes, issuesRes, membersRes] = await Promise.all([
+                replaceLibraryBooks(nextBooks),
+                replaceLibraryIssues(nextIssues),
+                replaceLibraryMembers(nextMembers),
+            ])
+            setSaving(false)
+            if (!booksRes.success || !issuesRes.success || !membersRes.success) {
+                setNotification({
+                    type: 'error',
+                    message: booksRes.error || issuesRes.error || membersRes.error || 'Server rejected issue.',
+                })
+                return
+            }
+            await refreshLive()
+            setNotification({ type: 'success', message: `Book "${selectedBook.title}" issued (server confirmed).` })
             return
         }
 
@@ -195,7 +289,52 @@ const LibraryManagementWorkspace = ({ defaultTab = 'catalog' }) => {
     }
 
     // Trigger Return Book
-    const handleReturnBook = (issueId) => {
+    const handleReturnBook = async (issueId) => {
+        if (live) {
+            const target = issuedBooks.find((item) => item.id === issueId)
+            if (!target) {
+                setNotification({ type: 'error', message: 'Issue record not found.' })
+                return
+            }
+            const returnDateStr = new Date().toLocaleDateString('en-GB')
+            const nextIssues = issuedBooks.map((item) => (
+                item.id === issueId
+                    ? { ...item, status: 'Returned', returnDate: returnDateStr, returnComment: 'Returned in good condition' }
+                    : item
+            ))
+            const nextBooks = catalogBooks.map((b) => (
+                b.id === target.bookId
+                    ? {
+                        ...b,
+                        availableCopies: Math.min(b.totalCopies || b.availableCopies + 1, (b.availableCopies || 0) + 1),
+                        status: 'Available',
+                    }
+                    : b
+            ))
+            const nextMembers = members.map((m) => (
+                m.id === target.memberId
+                    ? { ...m, currentlyBorrowedCount: Math.max(0, (m.currentlyBorrowedCount || 0) - 1) }
+                    : m
+            ))
+            setSaving(true)
+            const [booksRes, issuesRes, membersRes] = await Promise.all([
+                replaceLibraryBooks(nextBooks),
+                replaceLibraryIssues(nextIssues),
+                replaceLibraryMembers(nextMembers),
+            ])
+            setSaving(false)
+            if (!booksRes.success || !issuesRes.success || !membersRes.success) {
+                setNotification({
+                    type: 'error',
+                    message: booksRes.error || issuesRes.error || membersRes.error || 'Server rejected return.',
+                })
+                return
+            }
+            await refreshLive()
+            setNotification({ type: 'success', message: `Book "${target.bookTitle}" returned (server confirmed).` })
+            return
+        }
+
         const res = returnBookIssue({
             issueId,
             returnComment: 'Returned in good condition'
@@ -245,6 +384,14 @@ const LibraryManagementWorkspace = ({ defaultTab = 'catalog' }) => {
 
     return (
         <div className="space-y-6 pb-12">
+            {live ? (
+                <p className="text-xs font-medium text-[#027A48]">
+                    Live library · GET/PUT /api/v1/ops/library-books|issues|members (campus ops).{saving ? ' Saving…' : ''}
+                </p>
+            ) : null}
+            {loadError ? <FeedbackState kind="error" title="Library API unavailable" description={loadError} /> : null}
+            {loading ? <FeedbackState kind="loading" title="Loading library" description="Fetching catalog, issues and members…" /> : null}
+
             {/* Header with Title and Unified Tabs */}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -256,7 +403,7 @@ const LibraryManagementWorkspace = ({ defaultTab = 'catalog' }) => {
                             <div className="flex items-center gap-2 flex-wrap">
                                 <h1 className="text-xl font-bold text-slate-800">Library Management Workspace</h1>
                                 <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                    Unified Desk
+                                    {live ? 'Live Ops' : 'Unified Desk'}
                                 </span>
                             </div>
                             <p className="text-xs text-slate-500 mt-0.5">
@@ -597,7 +744,9 @@ const LibraryManagementWorkspace = ({ defaultTab = 'catalog' }) => {
                                         onChange={(e) => handleMemberSelect(e.target.value)}
                                         className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs bg-white focus:outline-hidden focus:border-[#515DEF]"
                                     >
-                                        {REGISTERED_MEMBERS.map((m) => (
+                                        {members.length === 0 ? (
+                                            <option value="">No members — add via Members API first</option>
+                                        ) : members.map((m) => (
                                             <option key={m.id} value={m.id}>
                                                 {m.name} ({m.memberType || m.role}) — {m.admissionNumber}
                                             </option>

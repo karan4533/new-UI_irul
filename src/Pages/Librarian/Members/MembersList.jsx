@@ -1,243 +1,172 @@
-import React, { useState } from 'react'
-import { NavLink } from 'react-router-dom';
-import DatePicker from "react-datepicker";
-import "react-datepicker/dist/react-datepicker.css";
-import { Calendar, ChevronLeft, ChevronRight, Plus, Download } from "lucide-react";
-import ExportModal from '../../../Common/CommonComponents/ExportModal';
-import EditRequestModal from '../../../Common/CommonComponents/EditRequestModal';
-import DeleteRequestModal from '../../../Common/CommonComponents/DeleteRequestModal';
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { FeedbackState } from '../../../Common/ui'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import {
+    listLibraryMembers,
+    replaceLibraryMembers,
+} from '../../../services/api/libraryApiService'
+
+const emptyForm = {
+    id: '',
+    name: '',
+    memberType: 'Student',
+    classSection: '',
+    admissionNumber: '',
+    email: '',
+    maxBorrowLimit: '1',
+}
 
 const MembersList = () => {
+    const live = isLiveApiEnabled()
+    const [rows, setRows] = useState([])
+    const [loading, setLoading] = useState(Boolean(live))
+    const [error, setError] = useState('')
+    const [search, setSearch] = useState('')
+    const [form, setForm] = useState(emptyForm)
+    const [saving, setSaving] = useState(false)
+    const [notice, setNotice] = useState('')
 
-    const [fromDate, setFromDate] = useState(new Date());
-    const [toDate, setToDate] = useState(new Date());
-    const [activeTab, setActiveTab] = useState(1);
-    const [exportModal, setExportModal] = useState(false);
-    const [editRequestModal, setEditRequestModal] = useState(false);
-    const [deleteRequestModal, setDeleteRequestModal] = useState(false);
+    const load = useCallback(async () => {
+        if (!isLiveApiEnabled()) {
+            setLoading(false)
+            setError('Live API required for library members.')
+            return
+        }
+        setLoading(true)
+        setError('')
+        const res = await listLibraryMembers()
+        setLoading(false)
+        if (!res.success) {
+            setError(typeof res.error === 'string' ? res.error : 'Failed to load members.')
+            setRows([])
+            return
+        }
+        setRows(Array.isArray(res.data) ? res.data : [])
+    }, [])
+
+    useEffect(() => {
+        load()
+    }, [load])
+
+    const filtered = useMemo(() => {
+        const q = search.trim().toLowerCase()
+        if (!q) return rows
+        return rows.filter((m) => `${m.id} ${m.name} ${m.admissionNumber} ${m.email}`.toLowerCase().includes(q))
+    }, [rows, search])
+
+    const onChange = (key) => (e) => setForm((prev) => ({ ...prev, [key]: e.target.value }))
+
+    const handleAdd = async (e) => {
+        e.preventDefault()
+        setNotice('')
+        if (!live) return
+        if (!form.name.trim()) {
+            setError('Member name is required.')
+            return
+        }
+        const id = form.id.trim() || `LMB-${Date.now()}`
+        if (rows.some((m) => m.id === id)) {
+            setError(`Member id ${id} already exists.`)
+            return
+        }
+        const next = [
+            ...rows,
+            {
+                id,
+                name: form.name.trim(),
+                memberType: form.memberType,
+                role: form.memberType,
+                classSection: form.classSection.trim(),
+                admissionNumber: form.admissionNumber.trim() || id,
+                email: form.email.trim(),
+                currentlyBorrowedCount: 0,
+                maxBorrowLimit: Number(form.maxBorrowLimit) || (form.memberType === 'Student' ? 1 : 5),
+            },
+        ]
+        setSaving(true)
+        const res = await replaceLibraryMembers(next)
+        setSaving(false)
+        if (!res.success) {
+            setError(typeof res.error === 'string' ? res.error : 'Server rejected member create.')
+            return
+        }
+        setForm(emptyForm)
+        setNotice(`Member "${form.name.trim()}" saved on the server.`)
+        await load()
+    }
+
+    if (!live) {
+        return (
+            <section>
+                <FeedbackState kind='error' title='Live API required' description='Members use GET/PUT /api/v1/ops/library-members.' />
+            </section>
+        )
+    }
 
     return (
-        <section>
-            <div className='bg-white rounded-2xl shadow-md p-4'>
-                <div className='flex justify-between md:items-center sm:items-stretch md:flex-row sm:flex-col flex-col gap-y-4'>
-                    <button className='bg-[#515DEF] text-white uppercase text-sm px-6 py-2 border border-[#515DEF] rounded-lg hover:opacity-90 transition-all duration-200 cursor-pointer'>Clear Filters</button>
-                    <select name="" id="" className='text-sm font-normal text-[#808080] border border-[#D9D9D9] rounded-md px-2 py-2 w-full md:max-w-xs sm:max-w-full'>
-                        <option value="">From Beginning</option>
-                    </select>
-                </div>
-                <div className='grid grid-cols-1 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 lg:mt-8 mt-2'>
-                    <div className='flex flex-col gap-y-2'>
-                        <label htmlFor="search" className='text-base font-medium text-[#808080]'>Search</label>
-                        <input type="text" className='text-sm font-normal text-[#808080] border border-[#D9D9D9] rounded-md px-2 py-2 w-full' />
+        <section className='space-y-4'>
+            <p className='text-xs font-medium text-[#027A48]'>
+                Live library members · GET/PUT /api/v1/ops/library-members
+            </p>
+            {error ? <FeedbackState kind='error' title='Members API' description={error} /> : null}
+            {loading ? <FeedbackState kind='loading' title='Loading members' description='Fetching library members…' /> : null}
+            {notice ? <p className='text-sm text-[#027A48] font-medium'>{notice}</p> : null}
+
+            <form onSubmit={handleAdd} className='bg-white rounded-2xl shadow-md p-4 grid grid-cols-1 md:grid-cols-3 gap-3'>
+                <input value={form.id} onChange={onChange('id')} placeholder='Member ID (optional)' className='text-sm border border-[#D9D9D9] rounded-md px-2 py-2' />
+                <input value={form.name} onChange={onChange('name')} placeholder='Name *' required className='text-sm border border-[#D9D9D9] rounded-md px-2 py-2' />
+                <select value={form.memberType} onChange={onChange('memberType')} className='text-sm border border-[#D9D9D9] rounded-md px-2 py-2'>
+                    <option value='Student'>Student</option>
+                    <option value='Staff'>Staff</option>
+                    <option value='Teacher'>Teacher</option>
+                </select>
+                <input value={form.admissionNumber} onChange={onChange('admissionNumber')} placeholder='Admission / Emp no' className='text-sm border border-[#D9D9D9] rounded-md px-2 py-2' />
+                <input value={form.classSection} onChange={onChange('classSection')} placeholder='Class / Dept' className='text-sm border border-[#D9D9D9] rounded-md px-2 py-2' />
+                <input value={form.email} onChange={onChange('email')} placeholder='Email' className='text-sm border border-[#D9D9D9] rounded-md px-2 py-2' />
+                <button type='submit' disabled={saving} className='bg-[#515DEF] text-white text-sm px-4 py-2 rounded-md md:col-span-3 disabled:opacity-60'>
+                    {saving ? 'Saving…' : 'Add member'}
+                </button>
+            </form>
+
+            {!loading ? (
+                <div className='bg-white rounded-2xl shadow-md p-4'>
+                    <div className='flex justify-between items-center mb-3 gap-3 flex-wrap'>
+                        <h2 className='text-xl font-medium text-black'>Members · {filtered.length}</h2>
+                        <input
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            placeholder='Search…'
+                            className='text-sm border border-[#D9D9D9] rounded-md px-2 py-2'
+                        />
                     </div>
-                    <div className='flex flex-col gap-y-2'>
-                        <label htmlFor="status" className='text-base font-medium text-[#808080]'>Status</label>
-                        <select name="" id="" className='text-sm font-normal text-[#808080] border border-[#D9D9D9] rounded-md px-2 py-2 w-full'>
-                            <option value="">All</option>
-                        </select>
-                    </div>
-                    <div className='flex flex-col gap-y-2'>
-                        <label className='text-base font-medium text-[#808080]'>From</label>
-
-                        <div className='relative w-full'>
-                            <DatePicker
-                                selected={fromDate}
-                                onChange={(date) => setFromDate(date)}
-                                isClearable={true}
-                                showMonthYearDropdown={true}
-                                scrollableMonthYearDropdown={true}
-                                className='w-full text-sm text-[#808080] border border-[#D9D9D9] rounded-md px-3 py-2 pr-10 focus:outline-none'
-                            />
-
-                            <Calendar
-                                size={16}
-                                className='absolute right-3 top-1/2 -translate-y-1/2 text-[#808080] pointer-events-none'
-                            />
-                        </div>
-                    </div>
-
-                    <div className='flex flex-col gap-y-2'>
-                        <label className='text-base font-medium text-[#808080]'>To</label>
-
-                        <div className='relative'>
-                            <DatePicker
-                                selected={toDate}
-                                onChange={(date) => setToDate(date)}
-                                isClearable={true}
-                                showMonthYearDropdown={true}
-                                scrollableMonthYearDropdown={true}
-                                className='w-full text-sm text-[#808080] border border-[#D9D9D9] rounded-md px-3 py-2 pr-10 focus:outline-none'
-                            />
-
-                            <Calendar
-                                size={16}
-                                className='absolute right-3 top-1/2 -translate-y-1/2 text-[#808080] pointer-events-none'
-                            />
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-
-            <div className='bg-white rounded-2xl shadow-md p-4 mt-8'>
-                <div className='flex justify-between items-center sm:flex-row flex-col gap-y-2 mb-4'>
-                    <h2 className='text-xl font-medium text-black'>Issued Book List</h2>
-                    <div className='flex gap-x-2'>
-                        <button onClick={() => setExportModal(true)} className='bg-[#515DEF] text-white text-sm px-4 py-2 rounded-md hover:opacity-90 transition-all duration-200 cursor-pointer flex items-center gap-x-2'>
-                            <Download size={16} />
-                            Export
-                        </button>
+                    <div className='overflow-x-auto'>
+                        <table className='w-full text-sm text-left'>
+                            <thead className='text-xs bg-[#EDEEF5]'>
+                                <tr>
+                                    <th className='px-2 py-3'>ID</th>
+                                    <th className='px-2 py-3'>Name</th>
+                                    <th className='px-2 py-3'>Type</th>
+                                    <th className='px-2 py-3'>Admission</th>
+                                    <th className='px-2 py-3'>Active loans</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filtered.length === 0 ? (
+                                    <tr><td colSpan={5} className='px-2 py-8 text-center text-[#667085]'>No members yet.</td></tr>
+                                ) : filtered.map((m) => (
+                                    <tr key={m.id} className='border-b border-[#f2f4f7]'>
+                                        <td className='px-2 py-3'>{m.id}</td>
+                                        <td className='px-2 py-3 font-medium'>{m.name}</td>
+                                        <td className='px-2 py-3'>{m.memberType || m.role}</td>
+                                        <td className='px-2 py-3'>{m.admissionNumber || '—'}</td>
+                                        <td className='px-2 py-3'>{m.currentlyBorrowedCount || 0}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
-                <div className='flex gap-x-2 items-center my-2'>
-                    <select name="" id="" className='px-2 py-1.5 bg-white text-[#515DEF] border border-[#515DEF] rounded-md'>
-                        <option value="10">10</option>
-                        <option value="20">20</option>
-                        <option value="30">30</option>
-                        <option value="40">40</option>
-                        <option value="50">50</option>
-                    </select>
-                    <span className='text-sm font-normal text-[#515DEF]'>Entries Per Page</span>
-                </div>
-
-                <div className="flex gap-4 overflow-x-auto no-scrollbar my-6">
-                    {[
-                        { id: 1, label: "Student" },
-                        { id: 2, label: "Teacher" },
-                        { id: 3, label: "Employee" },
-                    ].map((tab) => (
-                        <button
-                            key={tab.id}
-                            onClick={() => setActiveTab(tab.id)}
-                            className={`whitespace-nowrap px-2 pb-1 text-sm md:text-lg font-medium cursor-pointer transition-all duration-200 ${activeTab === tab.id
-                                ? "text-[#515DEF] border-b-2 border-[#515DEF] font-semibold"
-                                : "text-[#808080]"
-                                }`}
-                        >
-                            {tab.label}
-                        </button>
-                    ))}
-                </div>
-
-                {activeTab === 1 && (
-                    <>
-                        <div className="relative overflow-x-auto">
-                            <table className="w-full text-sm text-left rtl:text-right">
-                                <thead className="text-xs bg-[#EDEEF5] whitespace-nowrap rounded-lg">
-                                    <tr className='rounded-lg'>
-                                        <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase rounded-s-lg">Student Name</th>
-                                        <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase">Admission No</th>
-                                        <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase">Class & Section</th>
-                                        <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase">Mobile Number</th>
-                                        <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase">Email</th>
-                                        <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase rounded-e-lg">Books Borrowed</th>
-                                    </tr>
-                                </thead>
-
-                                <tbody>
-                                    <tr className="border-b text-[#667085] border-[#f2f4f7] hover:bg-[#f2f4f7] rounded-lg">
-                                        <td className="px-2 py-4 rounded-s-lg">Arun Kumar</td>
-                                        <td className="px-2 py-4">ADM2025001</td>
-                                        <td className="px-2 py-4">10 - A</td>
-                                        <td className="px-2 py-4">9876543210</td>
-                                        <td className="px-2 py-4">arun@gmail.com</td>
-                                        <td className="px-2 py-4 rounded-e-lg">2</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </>
-                )}
-                {activeTab === 2 && (
-                    <>
-                        <div className="relative overflow-x-auto">
-                            <table className="w-full text-sm text-left rtl:text-right">
-                                <thead className="text-xs bg-[#EDEEF5] whitespace-nowrap rounded-lg">
-                                    <tr className='rounded-lg'>
-                                        <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase rounded-s-lg">Teacher Name</th>
-                                        <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase">Employee ID</th>
-                                        <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase">Department</th>
-                                        <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase">Mobile Number</th>
-                                        <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase">Email</th>
-                                        <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase rounded-e-lg">Books Borrowed</th>
-                                    </tr>
-                                </thead>
-
-                                <tbody>
-                                    <tr className="border-b text-[#667085] border-[#f2f4f7] hover:bg-[#f2f4f7] rounded-lg">
-                                        <td className="px-2 py-4 rounded-s-lg">Mr. Ravi</td>
-                                        <td className="px-2 py-4">TCH001</td>
-                                        <td className="px-2 py-4">Mathematics</td>
-                                        <td className="px-2 py-4">9876543210</td>
-                                        <td className="px-2 py-4">arun@gmail.com</td>
-                                        <td className="px-2 py-4 rounded-e-lg">1</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </>
-                )}
-                {activeTab === 3 && (
-                    <>
-                        <div className="relative overflow-x-auto">
-                            <table className="w-full text-sm text-left rtl:text-right">
-                                <thead className="text-xs bg-[#EDEEF5] whitespace-nowrap rounded-lg">
-                                    <tr className='rounded-lg'>
-                                        <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase rounded-s-lg">Employee Name</th>
-                                        <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase">Employee ID</th>
-                                        <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase">Designation</th>
-                                        <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase">Mobile Number</th>
-                                        <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase">Email</th>
-                                        <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase rounded-e-lg">Books Borrowed</th>
-                                    </tr>
-                                </thead>
-
-                                <tbody>
-                                    <tr className="border-b text-[#667085] border-[#f2f4f7] hover:bg-[#f2f4f7] rounded-lg">
-                                        <td className="px-2 py-4 rounded-s-lg">Karthik Raj</td>
-                                        <td className="px-2 py-4">EMP002</td>
-                                        <td className="px-2 py-4">Office Staff</td>
-                                        <td className="px-2 py-4">9876543210</td>
-                                        <td className="px-2 py-4">arun@gmail.com</td>
-                                        <td className="px-2 py-4 rounded-e-lg">2</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </>
-                )}
-
-            </div>
-
-            {/* Pagination */}
-            <div className='flex justify-between items-center px-4 mt-4'>
-                <p className='text-sm font-medium text-[#515DEF]'>Showing 1 to 10 of 20 entries</p>
-
-                <div className="flex justify-center gap-x-2 flex-wrap">
-                    <button className="size-8 flex justify-center items-center p-2 bg-white text-[#515DEF] border border-[#E2E8F0] hover:bg-[#515DEF] hover:text-white rounded-full cursor-pointer">
-                        <ChevronLeft size={16} />
-                    </button>
-
-                    <button className="size-8 flex justify-center items-center p-2 bg-[#EDEDF5] text-[#515DEF] hover:bg-[#515DEF] hover:text-white border border-[#E2E8F0] rounded-full cursor-pointer">
-                        1
-                    </button>
-
-                    <button className="size-8 flex justify-center items-center p-2 bg-[#EDEDF5] text-[#515DEF] hover:bg-[#515DEF] hover:text-white border border-[#E2E8F0] rounded-full cursor-pointer">
-                        2
-                    </button>
-
-                    <button className="size-8 flex justify-center items-center p-2 bg-white text-[#515DEF] border border-[#E2E8F0] hover:bg-[#515DEF] hover:text-white rounded-full cursor-pointer">
-                        <ChevronRight size={16} />
-                    </button>
-                </div>
-            </div>
-
-            <ExportModal exportModal={exportModal} setExportModal={setExportModal} />
-
-            <EditRequestModal editRequestModal={editRequestModal} setEditRequestModal={setEditRequestModal} />
-
-            <DeleteRequestModal deleteRequestModal={deleteRequestModal} setDeleteRequestModal={setDeleteRequestModal} />
-
+            ) : null}
         </section>
     )
 }

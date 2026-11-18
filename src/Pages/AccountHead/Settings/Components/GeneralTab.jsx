@@ -38,10 +38,18 @@ const GeneralTab = () => {
         )
     }
 
-    const handleResetDemoData = () => {
-        resetFinanceDemoData()
+    const handleResetDemoData = async () => {
+        const result = await resetFinanceDemoData()
         setResetConfirmOpen(false)
-        toast.success('Finance demo data has been restored to the original seed.')
+        if (result?.success === false) {
+            toast.error(typeof result.error === 'string' ? result.error : 'Could not reset finance data.')
+            return
+        }
+        toast.success(
+            result?.dataSource === 'backend'
+                ? 'Finance campus snapshot reset and seeded on the server.'
+                : 'Finance demo data has been restored to the original seed.',
+        )
     }
 
     return (

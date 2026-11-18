@@ -1,5 +1,7 @@
 import { getStudentsList as getCreatedStudentsList } from '../../../Common/RBAC/createdUsersData.js'
 
+export const ROUTE_BASE = '/teacher/user-management/students-list'
+
 export const GENDERS = ['Male', 'Female']
 
 export const DEFAULT_CLASS_10A_STUDENTS = [

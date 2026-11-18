@@ -4,7 +4,6 @@ import React from 'react'
 import CentralActivitiesWorkspace from '../Common/Activities/CentralActivitiesWorkspace'
 import { Route, Routes as ReactRoutes, Navigate } from 'react-router-dom'
 import Dashboard from '../Pages/Coordinator/Dashboard/Dashboard'
-import MyAttendance from '../Pages/Coordinator/Attendance/MyAttendance'
 import ClassAttendance from '../Pages/Coordinator/Attendance/ClassAttendance'
 import ClassRoutine from '../Pages/Coordinator/ClassRoutine/ClassRoutine'
 import ExtraClass from '../Pages/Coordinator/ExtraClass/ExtraClass'
@@ -57,7 +56,7 @@ import ExamSchedule from '../Pages/Coordinator/StudentEvaluation/ExamSchedule/Ex
 import EnterpriseRecognitionPage from '../Common/Recognition/EnterpriseRecognitionPage'
 import { TaskManagementRoutes } from '../Common/TaskManagement/TaskManagementRoutes'
 import { StudentStarRatingsRoutes } from '../Common/StudentStarRatings/StudentStarRatingsRoutes'
-import UnavailableWorkflowPage from '../Common/ui/UnavailableWorkflowPage'
+import CoordinatorStudentPlacement from '../Pages/Coordinator/StudentAllocation/CoordinatorStudentPlacement'
 
 const CoordinatorRoutes = () => {
     return (
@@ -77,10 +76,10 @@ const CoordinatorRoutes = () => {
             <Route path="/coordinator/class/online-class/add" element={<AddOnlineClass />} />
             <Route path="/coordinator/class/online-class/view/:id" element={<ViewOnlineClass />} />
             <Route path="/coordinator/class/leave-request" element={<Navigate to="/coordinator/leave-request/received" replace />} />
-            <Route path="/coordinator/leave-request/my-requests" element={<AttendanceAndLeaveWorkspace defaultTab="my-leaves" />} />
+            <Route path="/coordinator/leave-request/my-requests" element={<MyLeaveRequests />} />
             <Route path="/coordinator/leave-request/my-requests/add" element={<AddLeaveRequest />} />
             <Route path="/coordinator/leave-request/my-requests/view/:id" element={<ViewMyLeaveRequest />} />
-            <Route path="/coordinator/leave-request/received" element={<AttendanceAndLeaveWorkspace defaultTab="received-leaves" />} />
+            <Route path="/coordinator/leave-request/received" element={<ReceivedLeaveRequests />} />
             <Route path="/coordinator/leave-request/received/view/:id" element={<ViewReceivedLeaveRequest />} />
             <Route path="/coordinator/student-deliverables/home-fun" element={<HomeFun />} />
             <Route path="/coordinator/student-deliverables/home-fun/add" element={<AddHomeFun />} />
@@ -115,8 +114,8 @@ const CoordinatorRoutes = () => {
             <Route path="/coordinator/lesson-plan-approval/group/:teacherName/:subject" element={<LessonPlanGroupDetail />} />
             <Route path="/coordinator/lesson-plan/my-lesson-plan" element={<MyLessonPlan />} />
             <Route path="/coordinator/lesson-plan/my-lesson-plan/group/:teacherName/:subject" element={<LessonPlanGroupDetail />} />
-            <Route path="/coordinator/student-allocation" element={<UnavailableWorkflowPage title="Student allocation" />} />
-            <Route path="/coordinator/student-allocation/allocate/:id" element={<UnavailableWorkflowPage title="Allocate student" />} />
+            <Route path="/coordinator/student-allocation" element={<CoordinatorStudentPlacement />} />
+            <Route path="/coordinator/student-allocation/allocate/:id" element={<CoordinatorStudentPlacement />} />
             {TaskManagementRoutes({ basePath: '/coordinator' })}
             {StudentStarRatingsRoutes({ basePath: '/coordinator' })}
             <Route path="/coordinator/communication" element={<Navigate to="/coordinator/communication/inbox" replace />} />

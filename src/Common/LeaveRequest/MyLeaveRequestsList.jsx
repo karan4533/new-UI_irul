@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowUpRight, Download, Plus } from 'lucide-react'
 import { NavLink, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import DataTable from '../ui/DataTable'
 import DataToolbar from '../ui/DataToolbar'
+import FeedbackState from '../ui/FeedbackState'
 import IntegrationNotice from '../ui/IntegrationNotice'
 import PageHeader from '../ui/PageHeader'
 import Pagination from '../ui/Pagination'
@@ -11,8 +12,11 @@ import StatusBadge from '../ui/StatusBadge'
 import { paginateRows, parseTableState, serializeTableState } from '../ui/dataTableState'
 import { getMyLeaveRequestsForRole, LEAVE_REQUESTS_UPDATED_EVENT, LEAVE_STATUSES, parseLeaveDate } from './leaveRequestData'
 import { getLeaveMyViewPath, getLeaveRoutes, resolveRoleKey } from './leaveRequestConfigs'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
+import { listLeaveRequests } from '../../services/api/leaveApiService'
 
 export default function MyLeaveRequestsList({ roleKey: roleKeyProp }) {
+    const live = isLiveApiEnabled()
     const { role: authRole } = useAuth()
     const roleKey = resolveRoleKey(authRole || roleKeyProp)
     const routes = getLeaveRoutes(roleKey)
@@ -25,8 +29,39 @@ export default function MyLeaveRequestsList({ roleKey: roleKeyProp }) {
     const [page, setPage] = useState(initialTableState.page)
     const [pageSize, setPageSize] = useState(initialTableState.pageSize)
     const [refreshKey, setRefreshKey] = useState(0)
+    const [requests, setRequests] = useState(() => (live ? [] : getMyLeaveRequestsForRole(roleKey)))
+    const [listLoading, setListLoading] = useState(Boolean(live))
+    const [listError, setListError] = useState('')
+    const [listSource, setListSource] = useState(live ? 'backend' : 'local')
+
+    const loadLive = useCallback(async () => {
+        setListLoading(true)
+        setListError('')
+        const res = await listLeaveRequests({ box: 'mine' })
+        setListLoading(false)
+        if (!res.success) {
+            setListSource('error')
+            setListError(typeof res.error === 'string' ? res.error : 'Failed to load leave requests.')
+            setRequests([])
+            return
+        }
+        setRequests(Array.isArray(res.data) ? res.data : [])
+        setListSource('backend')
+    }, [])
 
     useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            setRequests(getMyLeaveRequestsForRole(roleKey))
+            setListSource('local')
+            setListLoading(false)
+            setListError('')
+            return
+        }
+        loadLive()
+    }, [loadLive, refreshKey, roleKey])
+
+    useEffect(() => {
+        if (isLiveApiEnabled()) return undefined
         const refresh = () => setRefreshKey((value) => value + 1)
         window.addEventListener(LEAVE_REQUESTS_UPDATED_EVENT, refresh)
         window.addEventListener('storage', refresh)
@@ -35,11 +70,6 @@ export default function MyLeaveRequestsList({ roleKey: roleKeyProp }) {
             window.removeEventListener('storage', refresh)
         }
     }, [])
-
-    const requests = useMemo(() => {
-        void refreshKey
-        return getMyLeaveRequestsForRole(roleKey)
-    }, [roleKey, refreshKey])
 
     const filteredRequests = useMemo(() => {
         const query = search.trim().toLowerCase()
@@ -96,45 +126,60 @@ export default function MyLeaveRequestsList({ roleKey: roleKeyProp }) {
                 ) : null}
             />
 
-            <IntegrationNotice state='demo' title='Browser-stored leave requests' description='Requests and decisions are local to this browser. Notifications and production leave balances are not connected.' />
+            {listSource === 'backend' ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Live my-leave queue'
+                    description='GET /api/v1/leave-requests?box=mine. Apply/create still uses the leave form; decisions require leave.decide on the approver role.'
+                />
+            ) : listSource === 'error' ? (
+                <FeedbackState kind='error' title='Leave API unavailable' description={listError} />
+            ) : (
+                <IntegrationNotice state='demo' title='Browser-stored leave requests' description='Requests and decisions are local to this browser. Notifications and production leave balances are not connected.' />
+            )}
 
-            <div className='overflow-hidden rounded-[var(--erp-radius-surface)] border border-[var(--erp-line)] bg-white'>
-                <DataToolbar
-                    query={search}
-                    onQueryChange={(value) => { setSearch(value); setPage(1) }}
-                    searchPlaceholder='Search request, type or approver'
-                    resultCount={filteredRequests.length}
-                    onReset={resetFilters}
-                    filters={(
-                        <>
-                            <label className='grid gap-1 text-xs font-medium text-[var(--erp-slate)]'>Status
-                                <select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1) }} className='min-h-10 rounded-lg border border-[var(--erp-line-strong)] bg-white px-3 text-sm'>
-                                    <option value=''>All statuses</option>
-                                    {LEAVE_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
-                                </select>
-                            </label>
-                            <label className='grid gap-1 text-xs font-medium text-[var(--erp-slate)]'>Applied from
-                                <input type='date' value={fromDate} onChange={(event) => { setFromDate(event.target.value); setPage(1) }} className='min-h-10 rounded-lg border border-[var(--erp-line-strong)] px-3 text-sm' />
-                            </label>
-                            <label className='grid gap-1 text-xs font-medium text-[var(--erp-slate)]'>Applied to
-                                <input type='date' value={toDate} onChange={(event) => { setToDate(event.target.value); setPage(1) }} className='min-h-10 rounded-lg border border-[var(--erp-line-strong)] px-3 text-sm' />
-                            </label>
-                        </>
-                    )}
-                    actions={<button type='button' disabled title='Export service is not connected' className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] px-4 text-sm font-semibold text-[var(--erp-muted)] opacity-65'><Download aria-hidden='true' size={16} /> Export unavailable</button>}
-                />
-                <DataTable
-                    caption='My leave requests'
-                    rows={pagination.rows}
-                    columns={columns}
-                    rowKey='id'
-                    emptyTitle='No leave requests found'
-                    emptyDescription='No requests match the current filters. Reset filters or apply for leave.'
-                    renderActions={(request) => <NavLink to={getLeaveMyViewPath(roleKey, request.id)} className='inline-flex min-h-9 items-center gap-1 rounded-lg border border-[var(--erp-line-strong)] px-3 text-xs font-semibold text-[var(--erp-ink)]'>Review <ArrowUpRight aria-hidden='true' size={14} /></NavLink>}
-                />
-                <Pagination {...pagination} onPageChange={setPage} onPageSizeChange={(value) => { setPageSize(value); setPage(1) }} />
-            </div>
+            {listLoading ? (
+                <FeedbackState kind='loading' title='Loading leave requests' description='Fetching your leave queue…' />
+            ) : null}
+
+            {!listLoading && listSource !== 'error' ? (
+                <div className='overflow-hidden rounded-[var(--erp-radius-surface)] border border-[var(--erp-line)] bg-white'>
+                    <DataToolbar
+                        query={search}
+                        onQueryChange={(value) => { setSearch(value); setPage(1) }}
+                        searchPlaceholder='Search request, type or approver'
+                        resultCount={filteredRequests.length}
+                        onReset={resetFilters}
+                        filters={(
+                            <>
+                                <label className='grid gap-1 text-xs font-medium text-[var(--erp-slate)]'>Status
+                                    <select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1) }} className='min-h-10 rounded-lg border border-[var(--erp-line-strong)] bg-white px-3 text-sm'>
+                                        <option value=''>All statuses</option>
+                                        {LEAVE_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+                                    </select>
+                                </label>
+                                <label className='grid gap-1 text-xs font-medium text-[var(--erp-slate)]'>Applied from
+                                    <input type='date' value={fromDate} onChange={(event) => { setFromDate(event.target.value); setPage(1) }} className='min-h-10 rounded-lg border border-[var(--erp-line-strong)] px-3 text-sm' />
+                                </label>
+                                <label className='grid gap-1 text-xs font-medium text-[var(--erp-slate)]'>Applied to
+                                    <input type='date' value={toDate} onChange={(event) => { setToDate(event.target.value); setPage(1) }} className='min-h-10 rounded-lg border border-[var(--erp-line-strong)] px-3 text-sm' />
+                                </label>
+                            </>
+                        )}
+                        actions={<button type='button' disabled title='Export service is not connected' className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] px-4 text-sm font-semibold text-[var(--erp-muted)] opacity-65'><Download aria-hidden='true' size={16} /> Export unavailable</button>}
+                    />
+                    <DataTable
+                        caption='My leave requests'
+                        rows={pagination.rows}
+                        columns={columns}
+                        rowKey='id'
+                        emptyTitle='No leave requests found'
+                        emptyDescription={live ? 'No server leave requests yet. Apply for leave to create one.' : 'No requests match the current filters. Reset filters or apply for leave.'}
+                        renderActions={(request) => <NavLink to={getLeaveMyViewPath(roleKey, request.id)} className='inline-flex min-h-9 items-center gap-1 rounded-lg border border-[var(--erp-line-strong)] px-3 text-xs font-semibold text-[var(--erp-ink)]'>Review <ArrowUpRight aria-hidden='true' size={14} /></NavLink>}
+                    />
+                    <Pagination {...pagination} onPageChange={setPage} onPageSizeChange={(value) => { setPageSize(value); setPage(1) }} />
+                </div>
+            ) : null}
         </section>
     )
 }
-

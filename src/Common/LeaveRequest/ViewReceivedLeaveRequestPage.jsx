@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'react-toastify'
@@ -18,6 +18,8 @@ import {
     updateLeaveRequestStatus,
 } from './leaveRequestData'
 import { APPROVER_DECISION_TITLES, getLeaveRoutes, resolveRoleKey } from './leaveRequestConfigs'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
+import { decideLeaveRequest, getLeaveRequest } from '../../services/api/leaveApiService'
 
 const Field = ({ label, value }) => (
     <div>
@@ -27,20 +29,66 @@ const Field = ({ label, value }) => (
 )
 
 export default function ViewReceivedLeaveRequestPage({ roleKey: roleKeyProp }) {
+    const live = isLiveApiEnabled()
     const { id } = useParams()
     const navigate = useNavigate()
     const { role: authRole } = useAuth()
     const roleKey = resolveRoleKey(authRole || roleKeyProp)
     const routes = getLeaveRoutes(roleKey)
     const [request, setRequest] = useState(() => {
+        if (live) return null
         const item = getLeaveRequestById(id)
         return canApproverAccessRequest(item, roleKey) ? item : null
     })
-    const [approverRemarks, setApproverRemarks] = useState(request?.approverRemarks ?? '')
+    const [loading, setLoading] = useState(Boolean(live))
+    const [loadError, setLoadError] = useState('')
+    const [saving, setSaving] = useState(false)
+    const [approverRemarks, setApproverRemarks] = useState('')
     const [pendingDecision, setPendingDecision] = useState('')
     const decisionTitle = APPROVER_DECISION_TITLES[roleKey] || 'Approver decision'
 
-    const commitDecision = () => {
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            const item = getLeaveRequestById(id)
+            setRequest(canApproverAccessRequest(item, roleKey) ? item : null)
+            setApproverRemarks(item?.approverRemarks ?? '')
+            setLoading(false)
+            setLoadError('')
+            return
+        }
+        let cancelled = false
+        ;(async () => {
+            setLoading(true)
+            setLoadError('')
+            const res = await getLeaveRequest(id)
+            if (cancelled) return
+            setLoading(false)
+            if (!res.success) {
+                setRequest(null)
+                setLoadError(typeof res.error === 'string' ? res.error : 'Leave request was not found on the server.')
+                return
+            }
+            setRequest(res.data)
+            setApproverRemarks(res.data?.approverRemarks ?? '')
+        })()
+        return () => { cancelled = true }
+    }, [id, roleKey])
+
+    const commitDecision = async () => {
+        if (isLiveApiEnabled()) {
+            const apiDecision = pendingDecision === 'Approved' ? 'approve' : pendingDecision === 'Rejected' ? 'deny' : pendingDecision
+            setSaving(true)
+            const res = await decideLeaveRequest(id, { decision: apiDecision, comment: approverRemarks || null })
+            setSaving(false)
+            if (!res.success) {
+                toast.error(typeof res.error === 'string' ? res.error : `Unable to record the ${pendingDecision.toLowerCase()} decision.`)
+                return
+            }
+            setRequest(res.data)
+            setPendingDecision('')
+            toast.success(`Leave request ${pendingDecision.toLowerCase()} on the server.`)
+            return
+        }
         const updated = updateLeaveRequestStatus(id, pendingDecision, approverRemarks, roleKey)
         if (!updated) {
             toast.error(`Unable to record the ${pendingDecision.toLowerCase()} decision.`)
@@ -51,13 +99,21 @@ export default function ViewReceivedLeaveRequestPage({ roleKey: roleKeyProp }) {
         toast.success(`Leave request ${pendingDecision.toLowerCase()}.`)
     }
 
+    if (loading) {
+        return (
+            <section className='space-y-5'>
+                <FeedbackState kind='loading' title='Loading leave request' description='Fetching from the leave API…' />
+            </section>
+        )
+    }
+
     if (!request) {
         return (
             <section className='space-y-5'>
                 <button type='button' onClick={() => navigate(routes.receivedList)} className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] bg-white px-3 text-sm font-semibold text-[var(--erp-ink)]'>
                     <ArrowLeft aria-hidden='true' size={17} /> Back to approvals
                 </button>
-                <FeedbackState kind='permission' title='Leave request unavailable' description='This request does not exist or is outside your approval scope.' />
+                <FeedbackState kind='permission' title='Leave request unavailable' description={loadError || 'This request does not exist or is outside your approval scope.'} />
             </section>
         )
     }
@@ -88,9 +144,11 @@ export default function ViewReceivedLeaveRequestPage({ roleKey: roleKeyProp }) {
             />
 
             <IntegrationNotice
-                state='demo'
-                title='Browser-stored approval'
-                description='Decisions are saved locally for this prototype. Staff notifications and the production leave API are not connected.'
+                state={live ? 'connected' : 'demo'}
+                title={live ? 'Live leave decision' : 'Browser-stored approval'}
+                description={live
+                    ? 'POST /api/v1/leave-requests/{id}/decide records the approval or rejection on the server.'
+                    : 'Decisions are saved locally for this prototype. Staff notifications and the production leave API are not connected.'}
             />
 
             <WorkflowContextBar
@@ -151,10 +209,12 @@ export default function ViewReceivedLeaveRequestPage({ roleKey: roleKeyProp }) {
 
             <ConfirmAction
                 open={Boolean(pendingDecision)}
-                onClose={() => setPendingDecision('')}
+                onClose={() => !saving && setPendingDecision('')}
                 onConfirm={commitDecision}
                 title={`${pendingDecision || 'Record'} leave request?`}
-                description='This changes the request state for everyone using this browser demo.'
+                description={live
+                    ? 'This posts the decision to the leave API for everyone with leave.read access.'
+                    : 'This changes the request state for everyone using this browser demo.'}
                 confirmLabel={pendingDecision === 'Approved' ? 'Approve request' : 'Reject request'}
                 tone={pendingDecision === 'Rejected' ? 'danger' : 'primary'}
             >

@@ -299,3 +299,165 @@ export async function setEmployeeStatus(employeeCode, status, options = {}) {
   }
   return updateEmployee(employeeCode, { ...current, status }, options)
 }
+
+/** Known FastAPI HR document-store collections (`LIST_COLLECTIONS`). */
+export const HR_COLLECTIONS = [
+  'documents',
+  'jobs',
+  'candidates',
+  'interviews',
+  'offers',
+  'onboarding',
+  'observations',
+  'shadow',
+  'training',
+  'attendance',
+  'leave-policies',
+  'leave-requests',
+  'payroll-months',
+  'payroll-revisions',
+  'payslips',
+  'advances',
+  'referrals',
+  'concessions',
+  'disciplinary',
+  'exits',
+  'performance',
+  'notifications',
+  'comms',
+  'meta',
+  'claims',
+  'incentives',
+  'assignments',
+  'announcements',
+]
+
+function asRowList(data) {
+  if (Array.isArray(data)) return data.filter((row) => row && typeof row === 'object')
+  if (data && typeof data === 'object') return [data]
+  return []
+}
+
+function collectionPath(name) {
+  return `/api/v1/hr/${String(name || '').replace(/^\/+|\/+$/g, '')}`
+}
+
+/** GET /api/v1/hr/{collection} — campus-scoped list. */
+export async function listHrCollection(collection, options = {}) {
+  const blocked = requireLive()
+  if (blocked) return { ...blocked, data: [] }
+  const res = await apiClient.get(collectionPath(collection), { skipMock: true, ...options })
+  if (!res.success) return { ...res, data: [] }
+  return { ...res, data: asRowList(res.data) }
+}
+
+/** PUT /api/v1/hr/{collection} — full replace of the campus collection. */
+export async function replaceHrCollection(collection, rows, options = {}) {
+  const blocked = requireLive()
+  if (blocked) return { ...blocked, data: [] }
+  const body = Array.isArray(rows) ? rows : []
+  const res = await apiClient.put(collectionPath(collection), body, { skipMock: true, ...options })
+  if (!res.success) return { ...res, data: [] }
+  return { ...res, data: asRowList(res.data) }
+}
+
+/** POST /api/v1/hr/{collection} — create one row (server may assign id). */
+export async function createHrItem(collection, body, options = {}) {
+  const blocked = requireLive()
+  if (blocked) return blocked
+  const res = await apiClient.post(collectionPath(collection), body || {}, { skipMock: true, ...options })
+  if (!res.success) return res
+  return { ...res, data: res.data && typeof res.data === 'object' ? res.data : null }
+}
+
+/** PATCH /api/v1/hr/{collection}/{public_id} */
+export async function patchHrItem(collection, publicId, body, options = {}) {
+  const blocked = requireLive()
+  if (blocked) return blocked
+  const res = await apiClient.patch(
+    `${collectionPath(collection)}/${encodeURIComponent(publicId)}`,
+    body || {},
+    { skipMock: true, ...options },
+  )
+  if (!res.success) return res
+  return { ...res, data: res.data && typeof res.data === 'object' ? res.data : null }
+}
+
+/**
+ * GET /api/v1/hr/leave — policies + requests + balances.
+ * Shape matches HR LeaveManagement local bundle (plus balances).
+ */
+export async function getHrLeaveBundle(options = {}) {
+  const blocked = requireLive()
+  if (blocked) return { ...blocked, data: { policies: [], requests: [], balances: [] } }
+  const res = await apiClient.get('/api/v1/hr/leave', { skipMock: true, ...options })
+  if (!res.success) {
+    return { ...res, data: { policies: [], requests: [], balances: [] } }
+  }
+  const raw = res.data && typeof res.data === 'object' ? res.data : {}
+  return {
+    ...res,
+    data: {
+      policies: asRowList(raw.policies),
+      requests: asRowList(raw.requests),
+      balances: asRowList(raw.balances),
+    },
+  }
+}
+
+/** PUT /api/v1/hr/leave — replace policies + requests together. */
+export async function saveHrLeaveBundle(bundle, options = {}) {
+  const blocked = requireLive()
+  if (blocked) return blocked
+  const body = {
+    policies: Array.isArray(bundle?.policies) ? bundle.policies : [],
+    requests: Array.isArray(bundle?.requests) ? bundle.requests : [],
+  }
+  const res = await apiClient.put('/api/v1/hr/leave', body, { skipMock: true, ...options })
+  if (!res.success) return res
+  const raw = res.data && typeof res.data === 'object' ? res.data : {}
+  return {
+    ...res,
+    data: {
+      policies: asRowList(raw.policies),
+      requests: asRowList(raw.requests),
+      balances: asRowList(raw.balances),
+    },
+  }
+}
+
+/** GET /api/v1/hr/payroll — months + revisions. */
+export async function getHrPayrollBundle(options = {}) {
+  const blocked = requireLive()
+  if (blocked) return { ...blocked, data: { months: [], revisions: [] } }
+  const res = await apiClient.get('/api/v1/hr/payroll', { skipMock: true, ...options })
+  if (!res.success) return { ...res, data: { months: [], revisions: [] } }
+  const raw = res.data && typeof res.data === 'object' ? res.data : {}
+  return {
+    ...res,
+    data: {
+      months: asRowList(raw.months),
+      revisions: asRowList(raw.revisions),
+    },
+  }
+}
+
+/** PUT /api/v1/hr/payroll — replace months + revisions. Paid months stay locked server-side. */
+export async function saveHrPayrollBundle(bundle, options = {}) {
+  const blocked = requireLive()
+  if (blocked) return blocked
+  const body = {
+    months: Array.isArray(bundle?.months) ? bundle.months : [],
+    revisions: Array.isArray(bundle?.revisions) ? bundle.revisions : [],
+  }
+  const res = await apiClient.put('/api/v1/hr/payroll', body, { skipMock: true, ...options })
+  if (!res.success) return res
+  const raw = res.data && typeof res.data === 'object' ? res.data : {}
+  return {
+    ...res,
+    data: {
+      months: asRowList(raw.months),
+      revisions: asRowList(raw.revisions),
+    },
+  }
+}

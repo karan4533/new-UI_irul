@@ -61,3 +61,78 @@ export async function getStudent(studentId, options = {}) {
   if (!res.success) return res
   return { ...res, data: mapStudentToUi(res.data || {}) }
 }
+
+/** GET /api/v1/students/pending-placement — students.place */
+export async function listPendingPlacement(options = {}) {
+  const blocked = requireLive()
+  if (blocked) return { ...blocked, data: [] }
+  const res = await apiClient.get('/api/v1/students/pending-placement', {
+    skipMock: true,
+    ...options,
+  })
+  if (!res.success) return { ...res, data: [] }
+  const rows = Array.isArray(res.data) ? res.data.map(mapStudentToUi) : []
+  return { ...res, data: rows }
+}
+
+/** GET /api/v1/students/my-grade-band — students.place */
+export async function getMyGradeBand(options = {}) {
+  const blocked = requireLive()
+  if (blocked) return blocked
+  return apiClient.get('/api/v1/students/my-grade-band', { skipMock: true, ...options })
+}
+
+/** GET /api/v1/students/placement-options?className= — students.place */
+export async function getPlacementOptions(className, options = {}) {
+  const blocked = requireLive()
+  if (blocked) return { ...blocked, data: null }
+  const query = {}
+  if (className) query.className = className
+  return apiClient.get('/api/v1/students/placement-options', {
+    skipMock: true,
+    params: query,
+    ...options,
+  })
+}
+
+/** POST /api/v1/students/{id}/place — students.place */
+export async function placeStudent(studentId, sectionId, options = {}) {
+  const blocked = requireLive()
+  if (blocked) return blocked
+  return apiClient.post(
+    `/api/v1/students/${encodeURIComponent(studentId)}/place`,
+    { sectionId },
+    { skipMock: true, ...options },
+  )
+}
+
+/** GET /api/v1/students/placed — students.promote */
+export async function listPlacedForBand(options = {}) {
+  const blocked = requireLive()
+  if (blocked) return { ...blocked, data: [] }
+  const res = await apiClient.get('/api/v1/students/placed', { skipMock: true, ...options })
+  if (!res.success) return { ...res, data: [] }
+  const rows = Array.isArray(res.data) ? res.data.map(mapStudentToUi) : []
+  return { ...res, data: rows }
+}
+
+/** GET /api/v1/students/promote-options/{id} — students.promote */
+export async function getPromoteOptions(studentId, options = {}) {
+  const blocked = requireLive()
+  if (blocked) return blocked
+  return apiClient.get(`/api/v1/students/promote-options/${encodeURIComponent(studentId)}`, {
+    skipMock: true,
+    ...options,
+  })
+}
+
+/** POST /api/v1/students/{id}/promote — students.promote */
+export async function promoteStudent(studentId, body, options = {}) {
+  const blocked = requireLive()
+  if (blocked) return blocked
+  return apiClient.post(
+    `/api/v1/students/${encodeURIComponent(studentId)}/promote`,
+    body || {},
+    { skipMock: true, ...options },
+  )
+}

@@ -77,10 +77,10 @@ const TeacherRoutes = () => {
             <Route path="/teacher/class/online-class/add" element={<AddOnlineClass />} />
             <Route path="/teacher/class/online-class/view/:id" element={<ViewOnlineClass />} />
             <Route path="/teacher/class/leave-request" element={<Navigate to="/teacher/leave-request/received" replace />} />
-            <Route path="/teacher/leave-request/my-requests" element={<AttendanceAndLeaveWorkspace defaultTab="my-leaves" />} />
+            <Route path="/teacher/leave-request/my-requests" element={<MyLeaveRequests />} />
             <Route path="/teacher/leave-request/my-requests/add" element={<AddLeaveRequest />} />
             <Route path="/teacher/leave-request/my-requests/view/:id" element={<ViewMyLeaveRequest />} />
-            <Route path="/teacher/leave-request/received" element={<AttendanceAndLeaveWorkspace defaultTab="received-leaves" />} />
+            <Route path="/teacher/leave-request/received" element={<ReceivedLeaveRequests />} />
             <Route path="/teacher/leave-request/received/view/:id" element={<ViewReceivedLeaveRequest />} />
             <Route path="/teacher/student-deliverables/home-fun" element={<HomeFun />} />
             <Route path="/teacher/student-deliverables/home-fun/add" element={<AddHomeFun />} />

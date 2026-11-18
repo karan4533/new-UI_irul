@@ -116,10 +116,10 @@ const PrincipalRoutes = () => {
             <Route path="/principal/escalation-management" element={<EscalationList />} />
             <Route path="/principal/escalation-management/add-escalation" element={<AddEscalation />} />
             <Route path="/principal/escalation-management/view/:id" element={<ViewEscalation />} />
-            <Route path="/principal/leave-request/my-requests" element={<AttendanceAndLeaveWorkspace defaultTab="my-leaves" />} />
+            <Route path="/principal/leave-request/my-requests" element={<MyLeaveRequests />} />
             <Route path="/principal/leave-request/my-requests/add" element={<AddLeaveRequest />} />
             <Route path="/principal/leave-request/my-requests/view/:id" element={<ViewMyLeaveRequest />} />
-            <Route path="/principal/leave-request/received" element={<AttendanceAndLeaveWorkspace defaultTab="received-leaves" />} />
+            <Route path="/principal/leave-request/received" element={<ReceivedLeaveRequests />} />
             <Route path="/principal/leave-request/received/view/:id" element={<ViewReceivedLeaveRequest />} />
             <Route path="/principal/class/extra-class" element={<ExtraClass canCreate listPath="/principal/class/extra-class" addPath="/principal/class/extra-class/add" />} />
             <Route path="/principal/class/extra-class/add" element={<AddExtraClass listPath="/principal/class/extra-class" />} />

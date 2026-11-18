@@ -41,30 +41,41 @@ const FeePaymentModal = ({
     const [submitting, setSubmitting] = useState(false)
     const payableLabel = formatCurrency(totalAmount)
 
-    const handleSubmit = () => {
+    const handleSubmit = async () => {
         if (submitting) return
         setSubmitting(true)
-        const result = onConfirm({
-            paymentMode: mode,
-            details: { ...details, transactionDate: details.transactionDate || details.paymentDate },
-            paymentDate: details.paymentDate || details.transactionDate,
-            narration: details.narration,
-        })
-        if (!result?.success) {
-            toast.error(result?.errors?.[0] || result?.message || 'Unable to record the collection.')
-            setSubmitting(false)
-            setReviewOpen(false)
-            return
-        }
-        if (result.held) toast.info(`Cheque recorded as ${result.transaction?.chequeDetails?.status}. Fee will update after clearance.`)
-        else {
-            toast.success(`Recorded ${payableLabel}. Receipt ${result.receipt?.receiptNo}`)
-            if (details.sendWhatsAppReceipt) {
-                toast.success(`Instant WhatsApp e-Receipt delivered to ${details.whatsappMobile}`)
+        try {
+            const result = await onConfirm({
+                paymentMode: mode,
+                details: { ...details, transactionDate: details.transactionDate || details.paymentDate },
+                paymentDate: details.paymentDate || details.transactionDate,
+                narration: details.narration,
+            })
+            if (!result?.success) {
+                toast.error(result?.errors?.[0] || result?.message || 'Unable to record the collection.')
+                setReviewOpen(false)
+                return
             }
+            if (result.held) toast.info(`Cheque recorded as ${result.transaction?.chequeDetails?.status}. Fee will update after clearance.`)
+            else {
+                toast.success(
+                    result.dataSource === 'backend'
+                        ? `Server confirmed ${payableLabel}. Receipt ${result.receipt?.receiptNo || ''}`
+                        : `Recorded ${payableLabel}. Receipt ${result.receipt?.receiptNo}`,
+                )
+                if (details.sendWhatsAppReceipt) {
+                    toast.info(
+                        result.dataSource === 'backend'
+                            ? 'Receipt send uses the finance send-receipt API (may queue as stub until messaging keys are configured).'
+                            : `Instant WhatsApp e-Receipt delivered to ${details.whatsappMobile}`,
+                    )
+                }
+            }
+            setReviewOpen(false)
+            onClose()
+        } finally {
+            setSubmitting(false)
         }
-        setReviewOpen(false)
-        onClose()
     }
 
     return (
@@ -84,9 +95,9 @@ const FeePaymentModal = ({
             >
                 <div className='space-y-5'>
                     <IntegrationNotice
-                        state='demo'
-                        title='Records a received payment locally'
-                        description='This form does not initiate a bank, UPI, card or gateway payment. Confirm only after independently verifying the cash, cheque or bank-transfer evidence.'
+                        state='disconnected'
+                        title='Does not initiate a bank transfer'
+                        description='Confirm only after verifying cash, cheque or bank-transfer evidence. In live mode the campus finance API records the collection; gateway rails remain stubbed.'
                     />
                     <dl className='grid grid-cols-2 gap-3 md:grid-cols-4'>
                         <div className='rounded-xl bg-[var(--erp-canvas)] p-3'><dt className='text-xs text-[var(--erp-muted)]'>Selected net</dt><dd className='font-semibold text-[var(--erp-ink)]'>{formatCurrency(totalAmount - lateFee)}</dd></div>

@@ -44,6 +44,15 @@ export {
   setEmployeeStatus,
   mapEmployeeOutToUi,
   mapPortalEmployeeToUi,
+  HR_COLLECTIONS,
+  listHrCollection,
+  replaceHrCollection,
+  createHrItem,
+  patchHrItem,
+  getHrLeaveBundle,
+  saveHrLeaveBundle,
+  getHrPayrollBundle,
+  saveHrPayrollBundle,
 } from './api/hrApiService.js';
 export {
   listAdminUsers,
@@ -61,6 +70,70 @@ export {
   mapStudentToUi,
 } from './api/studentApiService.js';
 export { getAdminDashboard } from './api/adminDashboardApiService.js';
+export {
+  listAdmissionEnquiries,
+  getAdmissionEnquiry,
+  createAdmissionEnquiry,
+  updateAdmissionEnquiry,
+  listAdmissions,
+  getAdmission,
+  mapEnquiryToUi,
+  mapAdmissionToUi,
+} from './api/admissionsApiService.js';
+export {
+  listLeaveRequests,
+  getLeaveRequest,
+  decideLeaveRequest,
+  mapLeaveRequestToUi,
+} from './api/leaveApiService.js';
+export {
+  listAttendance,
+  upsertAttendance,
+  mapAttendanceRowToUi,
+} from './api/attendanceApiService.js';
+export {
+  listLessonPlans,
+  createLessonPlan,
+} from './api/lessonPlanApiService.js';
+export {
+  getFinanceState,
+  saveFinanceStateApi,
+  resetFinanceStateApi,
+  listFinanceCollection,
+  collectPaymentApi,
+  settleChequeApi,
+  sendReceiptApi,
+  decideFinanceApprovalApi,
+  applyHrConcessionsApi,
+  createGatewayIntentApi,
+} from './api/financeApiService.js';
+export {
+  listTcRequests,
+  getTcRequest,
+  decideTcRequest,
+  mapTcRequestToUi,
+} from './api/tcApiService.js';
+export {
+  listLibraryBooks,
+  replaceLibraryBooks,
+  listLibraryIssues,
+  replaceLibraryIssues,
+  listLibraryMembers,
+  replaceLibraryMembers,
+  loadLibraryWorkspace,
+  mapBookToUi,
+  mapIssueToUi,
+  mapMemberToUi,
+} from './api/libraryApiService.js';
+export {
+  listPendingPlacement,
+  getMyGradeBand,
+  getPlacementOptions,
+  placeStudent,
+  listPlacedForBand,
+  getPromoteOptions,
+  promoteStudent,
+} from './api/studentApiService.js';
 
 // Domain Models & Validation
 export {

@@ -1814,6 +1814,7 @@ export const coordinatorSidebarLinks = [
         icon: GraduationCap,
         subLinks: [
             { icon: GraduationCap, title: "Students List", to: "/coordinator/user-management/students-list" },
+            { icon: UserPlus, title: "Student Placement", to: "/coordinator/student-allocation" },
             { icon: FileText, title: "CA / PCA", to: "/coordinator/unit-tests" },
             { icon: CalendarCheck, title: "Exam", to: "/coordinator/student-evaluation/exam" },
             { icon: CircleHelp, title: "Question Bank", to: "/coordinator/student-deliverables/sample-questions" },
@@ -1829,8 +1830,14 @@ export const coordinatorSidebarLinks = [
     {
         id: 2,
         title: "Attendance & Leave Management",
-        to: "/coordinator/attendance-and-leave",
+        to: "#0",
         icon: CalendarCheck,
+        subLinks: [
+            { icon: CalendarCheck, title: "Overview", to: "/coordinator/attendance-and-leave" },
+            { icon: ClipboardCheck, title: "Class Attendance", to: "/coordinator/attendance/class-attendance" },
+            { icon: FileText, title: "My Leave Requests", to: "/coordinator/leave-request/my-requests" },
+            { icon: ClipboardList, title: "Received Leave", to: "/coordinator/leave-request/received" },
+        ],
     },
     {
         id: 19,

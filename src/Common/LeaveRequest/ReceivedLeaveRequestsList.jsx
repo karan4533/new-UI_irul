@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowUpRight, Download } from 'lucide-react'
 import { NavLink, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import DataTable from '../ui/DataTable'
 import DataToolbar from '../ui/DataToolbar'
+import FeedbackState from '../ui/FeedbackState'
 import IntegrationNotice from '../ui/IntegrationNotice'
 import PageHeader from '../ui/PageHeader'
 import Pagination from '../ui/Pagination'
@@ -11,8 +12,11 @@ import StatusBadge from '../ui/StatusBadge'
 import { paginateRows, parseTableState, serializeTableState } from '../ui/dataTableState'
 import { getReceivedLeaveRequestsForRole, LEAVE_REQUESTS_UPDATED_EVENT, LEAVE_STATUSES, parseLeaveDate } from './leaveRequestData'
 import { getLeaveReceivedViewPath, resolveRoleKey } from './leaveRequestConfigs'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
+import { listLeaveRequests } from '../../services/api/leaveApiService'
 
 export default function ReceivedLeaveRequestsList({ roleKey: roleKeyProp, description }) {
+    const live = isLiveApiEnabled()
     const { role: authRole } = useAuth()
     const roleKey = resolveRoleKey(authRole || roleKeyProp)
     const [urlParams, setUrlParams] = useSearchParams()
@@ -23,8 +27,41 @@ export default function ReceivedLeaveRequestsList({ roleKey: roleKeyProp, descri
     const [page, setPage] = useState(initialTableState.page)
     const [pageSize, setPageSize] = useState(initialTableState.pageSize)
     const [refreshKey, setRefreshKey] = useState(0)
+    const [requests, setRequests] = useState(() => (live ? [] : getReceivedLeaveRequestsForRole(roleKey)))
+    const [listLoading, setListLoading] = useState(Boolean(live))
+    const [listError, setListError] = useState('')
+    const [listSource, setListSource] = useState(live ? 'backend' : 'local')
+
+    const loadLive = useCallback(async () => {
+        setListLoading(true)
+        setListError('')
+        // Admin/HR/Super Admin may list all campus leave; others see the received approval queue only.
+        const box = ['admin', 'superadmin', 'hr'].includes(roleKey) ? 'all' : 'received'
+        const res = await listLeaveRequests({ box })
+        setListLoading(false)
+        if (!res.success) {
+            setListSource('error')
+            setListError(typeof res.error === 'string' ? res.error : 'Failed to load leave requests.')
+            setRequests([])
+            return
+        }
+        setRequests(Array.isArray(res.data) ? res.data : [])
+        setListSource('backend')
+    }, [roleKey])
 
     useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            setRequests(getReceivedLeaveRequestsForRole(roleKey))
+            setListSource('local')
+            setListLoading(false)
+            setListError('')
+            return
+        }
+        loadLive()
+    }, [loadLive, refreshKey, roleKey])
+
+    useEffect(() => {
+        if (isLiveApiEnabled()) return undefined
         const refresh = () => setRefreshKey((value) => value + 1)
         window.addEventListener(LEAVE_REQUESTS_UPDATED_EVENT, refresh)
         window.addEventListener('storage', refresh)
@@ -33,11 +70,6 @@ export default function ReceivedLeaveRequestsList({ roleKey: roleKeyProp, descri
             window.removeEventListener('storage', refresh)
         }
     }, [])
-
-    const requests = useMemo(() => {
-        void refreshKey
-        return getReceivedLeaveRequestsForRole(roleKey)
-    }, [roleKey, refreshKey])
 
     const filteredRequests = useMemo(() => {
         const query = search.trim().toLowerCase()
@@ -87,8 +119,21 @@ export default function ReceivedLeaveRequestsList({ roleKey: roleKeyProp, descri
                 context={`${pendingCount} awaiting decision · ${requests.length} total`}
             />
 
-            <IntegrationNotice state='demo' title='Browser-stored approval queue' description='Decisions are stored locally. Balance checks, delegation, staff notifications and an authoritative audit trail require the backend leave service.' />
+            <IntegrationNotice
+                state={listSource === 'backend' ? 'connected' : listSource === 'error' ? 'failed' : 'demo'}
+                title={listSource === 'backend' ? 'Live leave approval queue' : listSource === 'error' ? 'Leave API unavailable' : 'Browser-stored approval queue'}
+                description={listSource === 'backend'
+                    ? 'GET /api/v1/leave-requests (box=all for Admin/HR/Super Admin; otherwise box=received). Decisions post to /decide and require leave.decide.'
+                    : listSource === 'error'
+                        ? listError
+                        : 'Decisions are stored locally. Balance checks, delegation, staff notifications and an authoritative audit trail require the backend leave service.'}
+            />
 
+            {listLoading ? (
+                <FeedbackState kind='loading' title='Loading leave requests' description='Fetching received leave requests…' />
+            ) : null}
+
+            {!listLoading && listSource !== 'error' ? (
             <div className='overflow-hidden rounded-[var(--erp-radius-surface)] border border-[var(--erp-line)] bg-white'>
                 <DataToolbar
                     query={search}
@@ -122,7 +167,7 @@ export default function ReceivedLeaveRequestsList({ roleKey: roleKeyProp, descri
                 />
                 <Pagination {...pagination} onPageChange={setPage} onPageSizeChange={(value) => { setPageSize(value); setPage(1) }} />
             </div>
+            ) : null}
         </section>
     )
 }
-

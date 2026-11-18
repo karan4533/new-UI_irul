@@ -1,27 +1,45 @@
-import React, { useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'react-toastify'
-import { DataTable } from '../../../Common/ui'
+import { DataTable, FeedbackState } from '../../../Common/ui'
 import { getDocuments, getEmployees, nextId, saveDocuments } from '../domain/hrStore'
 import { Badge, HrExport, Modal, PageIntro, PrimaryButton, SearchBox, Select, TableWrap, inputClass } from '../components/HrUi'
 import { matches, useFilters, useHrTick } from '../components/hrUiState'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { listPortalEmployees } from '../../../services/api/hrApiService'
+import { useHrLiveCollection } from '../hooks/useHrLiveCollection'
 
 const empty = { employeeId: '', type: 'ID Proof', name: '', files: [], expiryDate: '', status: 'Pending' }
 
 const EmployeeDocuments = () => {
     const tick = useHrTick()
-    const rows = useMemo(() => {
+    const live = isLiveApiEnabled()
+    const loadLocal = useCallback(() => {
         void tick
         return getDocuments()
     }, [tick])
-    const employees = useMemo(() => {
-        void tick
-        return getEmployees()
-    }, [tick])
+    const {
+        rows, listLoading, listError, listSource, saving, refresh, createOne, replaceAll,
+    } = useHrLiveCollection('documents', {
+        loadLocal,
+        saveLocal: saveDocuments,
+    })
+    const [employees, setEmployees] = useState(() => (live ? [] : getEmployees()))
     const { filters, set } = useFilters({ search: '', status: '' })
     const [form, setForm] = useState(null)
     const [preview, setPreview] = useState('')
     const [exportOpen, setExportOpen] = useState(false)
     const activeForm = form || empty
+
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            setEmployees(getEmployees())
+            return
+        }
+        listPortalEmployees().then((res) => {
+            if (res.success) setEmployees(Array.isArray(res.data) ? res.data : [])
+        })
+    }, [tick, listSource])
+
     const filtered = rows.filter((row) => (!filters.status || row.status === filters.status) && matches(`${row.name} ${row.fileName} ${row.employeeId}`, filters.search))
 
     const closeForm = () => {
@@ -44,20 +62,44 @@ const EmployeeDocuments = () => {
         })
     }
 
-    const save = (event) => {
+    const save = async (event) => {
         event.preventDefault()
         if (!form) return
         const files = form.files || []
         if (!form.employeeId || !form.type || !files.length) return toast.error('Employee, type, and at least one file are required.')
         const employee = employees.find((item) => item.id === form.employeeId)
         if (!employee) return toast.error('Select a valid employee.')
-        const records = files.map((file, index) => ({ id: `${nextId('DOC', rows)}-${index + 1}`, uploadedDate: '24-09-2026', uploadedBy: 'HR', employeeId: employee.id, type: form.type, name: form.name, fileName: file.fileName, fileSize: file.fileSize, expiryDate: form.expiryDate, status: form.status }))
+        const records = files.map((file, index) => ({
+            id: `${nextId('DOC', rows)}-${index + 1}`,
+            uploadedDate: new Date().toLocaleDateString('en-GB'),
+            uploadedBy: 'HR',
+            employeeId: employee.id,
+            type: form.type,
+            name: form.name,
+            fileName: file.fileName,
+            fileSize: file.fileSize,
+            expiryDate: form.expiryDate,
+            status: form.status || 'Pending',
+        }))
+
+        if (isLiveApiEnabled()) {
+            // Backend accepts full replace; append new metadata rows then PUT.
+            const res = await replaceAll([...records, ...rows])
+            if (!res.success) {
+                toast.error(typeof res.error === 'string' ? res.error : 'Server rejected document metadata.')
+                return
+            }
+            toast.success('Document metadata saved on server. File binary is not uploaded.')
+            closeForm()
+            return
+        }
+
         saveDocuments([...records, ...getDocuments()])
         toast.success('Document metadata saved. File binary is not stored.')
         closeForm()
     }
 
-    const columns = [
+    const columns = useMemo(() => [
         {
             key: 'employeeId',
             label: 'Employee',
@@ -74,38 +116,53 @@ const EmployeeDocuments = () => {
         { key: 'uploadedDate', label: 'Uploaded' },
         { key: 'expiryDate', label: 'Expiry', render: (row) => row.expiryDate || '—' },
         { key: 'status', label: 'Status', render: (row) => <Badge value={row.status} /> },
-    ]
+    ], [employees])
 
     return (
         <section>
-            <PageIntro text='Document metadata is saved in this browser. File contents stay in the current session only.'>
+            <PageIntro text={live ? 'Document metadata is stored on the campus HR API. File binaries are not uploaded.' : 'Document metadata is saved in this browser. File contents stay in the current session only.'}>
                 <div className='grid grid-cols-1 md:grid-cols-3 gap-4'>
                     <SearchBox value={filters.search} onChange={set('search')} placeholder='Document or employee' />
                     <Select label='Status' value={filters.status} onChange={set('status')} options={['Verified', 'Pending', 'Expired']} />
                 </div>
             </PageIntro>
-            <TableWrap title='Employee Documents' action={<><PrimaryButton onClick={() => setForm({ ...empty, employeeId: employees[0]?.id || '' })}>Add Document</PrimaryButton><PrimaryButton onClick={() => setExportOpen(true)}>Export</PrimaryButton></>}>
-                <DataTable
-                    caption='Employee document metadata register'
-                    rows={filtered}
-                    columns={columns}
-                    rowKey='id'
-                    emptyTitle='No employee documents found'
-                    emptyDescription='Adjust the search or status filter, or add document metadata for an employee.'
+            {live ? (
+                <FeedbackState
+                    tone={listSource === 'error' ? 'danger' : 'info'}
+                    title={listSource === 'error' ? 'Documents API unavailable' : 'Live employee documents'}
+                    description={listSource === 'error' ? listError : 'Metadata from GET/PUT /api/v1/hr/documents. Binary upload is not supported by this endpoint.'}
                 />
-            </TableWrap>
-            {form && <Modal title='Document metadata' onClose={closeForm}>
-                <form onSubmit={save} className='grid gap-3'>
-                    <Select label='Employee' value={activeForm.employeeId} onChange={(e) => setForm({ ...activeForm, employeeId: e.target.value })} options={employees.map((item) => item.id)} allLabel='Select' />
-                    <input className={inputClass} placeholder='Document type' value={activeForm.type} onChange={(e) => setForm({ ...activeForm, type: e.target.value })} />
-                    <input className={inputClass} placeholder='Document name' value={activeForm.name} onChange={(e) => setForm({ ...activeForm, name: e.target.value })} />
-                    <input type='file' multiple onChange={onFile} />
-                    <ul className='text-sm text-[#667085]'>{(activeForm.files || []).map((file) => <li key={file.fileName} className='flex justify-between gap-2'><span>{file.fileName} · {file.fileSize}</span><button type='button' className='text-[#515DEF]' onClick={() => setForm({ ...activeForm, files: activeForm.files.filter((item) => item.fileName !== file.fileName) })}>Remove</button></li>)}</ul>
-                    <input className={inputClass} type='date' value={activeForm.expiryDate} onChange={(e) => setForm({ ...activeForm, expiryDate: e.target.value })} />
-                    {preview && <img src={preview} alt='Preview' className='max-h-40 object-contain' />}
-                    <PrimaryButton type='submit'>Save metadata</PrimaryButton>
-                </form>
-            </Modal>}
+            ) : null}
+            {listLoading ? <p className='text-sm text-slate-500 py-4'>Loading documents…</p> : null}
+            {listError && !listLoading ? (
+                <button type='button' className='mb-3 text-sm font-semibold text-[#515DEF]' onClick={refresh}>Retry</button>
+            ) : null}
+            {!listLoading ? (
+                <TableWrap title='Employee Documents' action={<><PrimaryButton disabled={saving} onClick={() => setForm({ ...empty, employeeId: employees[0]?.id || '' })}>Add Document</PrimaryButton><PrimaryButton onClick={() => setExportOpen(true)}>Export</PrimaryButton></>}>
+                    <DataTable
+                        caption='Employee document metadata register'
+                        rows={filtered}
+                        columns={columns}
+                        rowKey='id'
+                        emptyTitle='No employee documents found'
+                        emptyDescription='Adjust the search or status filter, or add document metadata for an employee.'
+                    />
+                </TableWrap>
+            ) : null}
+            {form && (
+                <Modal title='Document metadata' onClose={closeForm}>
+                    <form onSubmit={save} className='grid gap-3'>
+                        <Select label='Employee' value={activeForm.employeeId} onChange={(e) => setForm({ ...activeForm, employeeId: e.target.value })} options={employees.map((item) => item.id)} allLabel='Select' />
+                        <input className={inputClass} placeholder='Document type' value={activeForm.type} onChange={(e) => setForm({ ...activeForm, type: e.target.value })} />
+                        <input className={inputClass} placeholder='Document name' value={activeForm.name} onChange={(e) => setForm({ ...activeForm, name: e.target.value })} />
+                        <input type='file' multiple onChange={onFile} />
+                        <ul className='text-sm text-[#667085]'>{(activeForm.files || []).map((file) => <li key={file.fileName} className='flex justify-between gap-2'><span>{file.fileName} · {file.fileSize}</span><button type='button' className='text-[#515DEF]' onClick={() => setForm({ ...activeForm, files: activeForm.files.filter((item) => item.fileName !== file.fileName) })}>Remove</button></li>)}</ul>
+                        <input className={inputClass} type='date' value={activeForm.expiryDate} onChange={(e) => setForm({ ...activeForm, expiryDate: e.target.value })} />
+                        {preview && <img src={preview} alt='Preview' className='max-h-40 object-contain' />}
+                        <PrimaryButton type='submit' disabled={saving}>{saving ? 'Saving…' : 'Save metadata'}</PrimaryButton>
+                    </form>
+                </Modal>
+            )}
             <HrExport open={exportOpen} setOpen={setExportOpen} filename='hr-documents' rows={filtered} />
         </section>
     )

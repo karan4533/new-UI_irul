@@ -97,17 +97,22 @@ export const EnterpriseOperationsRoutes = ({ basePath, role = null }) => (
         <Route path={`${basePath}/escalation-management/view/:id`} element={<ViewEscalationPage roleKey={role} />} />
         <Route path={`${basePath}/escalations`} element={<EscalationListPage roleKey={role} />} />
 
-        {/* 10. Universal Leave & Attendance (My Leaves & Received Leaves) */}
+        {/* 10. Universal Leave & Attendance (My Leaves & Received Leaves)
+            Admin and HR own dedicated ReceivedLeaveRequests routes — skip those stubs here. */}
         <Route path={`${basePath}/leave-request`} element={<AttendanceAndLeaveWorkspace defaultTab='my-leave' roleOverride={role} />} />
         <Route path={`${basePath}/leave-request/my-leaves`} element={<AttendanceAndLeaveWorkspace defaultTab='my-leave' roleOverride={role} />} />
-        <Route path={`${basePath}/leave-request/my-requests`} element={<AttendanceAndLeaveWorkspace defaultTab='my-leave' roleOverride={role} />} />
-        <Route path={`${basePath}/leave-request/my-requests/add`} element={<AttendanceAndLeaveWorkspace defaultTab='my-leave' roleOverride={role} />} />
-        <Route path={`${basePath}/leave-request/my-requests/view`} element={<AttendanceAndLeaveWorkspace defaultTab='my-leave' roleOverride={role} />} />
-        <Route path={`${basePath}/leave-request/my-requests/view/:id`} element={<AttendanceAndLeaveWorkspace defaultTab='my-leave' roleOverride={role} />} />
-        <Route path={`${basePath}/leave-request/received-leaves`} element={<AttendanceAndLeaveWorkspace defaultTab='leave-management' roleOverride={role} />} />
-        <Route path={`${basePath}/leave-request/received`} element={<AttendanceAndLeaveWorkspace defaultTab='leave-management' roleOverride={role} />} />
-        <Route path={`${basePath}/leave-request/received/view`} element={<AttendanceAndLeaveWorkspace defaultTab='leave-management' roleOverride={role} />} />
-        <Route path={`${basePath}/leave-request/received/view/:id`} element={<AttendanceAndLeaveWorkspace defaultTab='leave-management' roleOverride={role} />} />
+        {role !== 'admin' && role !== 'hr' && role !== 'principal' && role !== 'teacher' && role !== 'coordinator' ? (
+            <>
+                <Route path={`${basePath}/leave-request/my-requests`} element={<AttendanceAndLeaveWorkspace defaultTab='my-leave' roleOverride={role} />} />
+                <Route path={`${basePath}/leave-request/my-requests/add`} element={<AttendanceAndLeaveWorkspace defaultTab='my-leave' roleOverride={role} />} />
+                <Route path={`${basePath}/leave-request/my-requests/view`} element={<AttendanceAndLeaveWorkspace defaultTab='my-leave' roleOverride={role} />} />
+                <Route path={`${basePath}/leave-request/my-requests/view/:id`} element={<AttendanceAndLeaveWorkspace defaultTab='my-leave' roleOverride={role} />} />
+                <Route path={`${basePath}/leave-request/received-leaves`} element={<AttendanceAndLeaveWorkspace defaultTab='leave-management' roleOverride={role} />} />
+                <Route path={`${basePath}/leave-request/received`} element={<AttendanceAndLeaveWorkspace defaultTab='leave-management' roleOverride={role} />} />
+                <Route path={`${basePath}/leave-request/received/view`} element={<AttendanceAndLeaveWorkspace defaultTab='leave-management' roleOverride={role} />} />
+                <Route path={`${basePath}/leave-request/received/view/:id`} element={<AttendanceAndLeaveWorkspace defaultTab='leave-management' roleOverride={role} />} />
+            </>
+        ) : null}
         <Route path={`${basePath}/request-leave`} element={<AttendanceAndLeaveWorkspace defaultTab='my-leave' roleOverride={role} />} />
         <Route path={`${basePath}/apply-leave`} element={<AttendanceAndLeaveWorkspace defaultTab='my-leave' roleOverride={role} />} />
         <Route path={`${basePath}/my-attendance`} element={<AttendanceAndLeaveWorkspace defaultTab='my-attendance' roleOverride={role} />} />

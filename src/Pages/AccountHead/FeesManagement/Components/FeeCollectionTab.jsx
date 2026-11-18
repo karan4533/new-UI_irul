@@ -95,7 +95,7 @@ const FeeCollectionTab = () => {
         setPartials((prev) => ({ ...prev, [row.id]: row.balanceAmount }))
     }
 
-    const confirmPayment = (payload) => {
+    const confirmPayment = async (payload) => {
         if (entryBlocked('Finance', 'Account Head')) return { success: false }
         return collectFeePayment({
             studentId: activeStudent.id,
@@ -105,8 +105,8 @@ const FeeCollectionTab = () => {
         })
     }
 
-    const handleCollectResult = (payload) => {
-        const result = confirmPayment(payload)
+    const handleCollectResult = async (payload) => {
+        const result = await confirmPayment(payload)
         if (result?.success) {
             setSelectedIds([])
             setPartials({})

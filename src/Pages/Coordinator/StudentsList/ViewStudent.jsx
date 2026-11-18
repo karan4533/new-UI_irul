@@ -1,92 +1,137 @@
-import React from 'react'
-import { useNavigate, useParams, NavLink } from 'react-router-dom'
-import { ArrowLeft, ChevronRight } from 'lucide-react'
+import React, { useCallback, useEffect, useState } from 'react'
+import { NavLink, useNavigate, useParams } from 'react-router-dom'
+import { ArrowLeft, Eye } from 'lucide-react'
+import mo_user from '../../../assets/images/no-profile.png'
+import { FeedbackState } from '../../../Common/ui'
 import { getStudentById } from './studentsListData'
-import StudentAttendanceDetails from './Components/StudentAttendanceDetails'
-import StudentResultDetails from './Components/StudentResultDetails'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { getStudent } from '../../../services/api/studentApiService'
+
+const ROUTE_BASE = '/coordinator/user-management/students-list'
+
+const Section = ({ title, children }) => (
+    <div className='bg-white rounded-2xl shadow-md p-4'>
+        <h2 className='text-xl font-semibold text-black mb-6'>{title}</h2>
+        {children}
+    </div>
+)
 
 const Field = ({ label, value }) => (
     <div className='flex flex-col gap-y-1'>
         <span className='text-base font-medium text-[#808080]'>{label}</span>
-        <span className='text-sm text-[#1E1E1E] whitespace-pre-wrap wrap-break-word'>
-            {value || '—'}
-        </span>
+        <span className='text-sm text-[#1E1E1E] whitespace-pre-wrap wrap-break-word'>{value || '—'}</span>
     </div>
 )
 
 const ViewStudent = () => {
     const { id } = useParams()
     const navigate = useNavigate()
-    const student = getStudentById(id)
+    const live = isLiveApiEnabled()
+    const [student, setStudent] = useState(() => (live ? null : getStudentById(id)))
+    const [loading, setLoading] = useState(Boolean(live))
+    const [error, setError] = useState('')
+
+    const loadLive = useCallback(async () => {
+        setLoading(true)
+        setError('')
+        const res = await getStudent(id)
+        setLoading(false)
+        if (!res.success) {
+            setStudent(null)
+            setError(typeof res.error === 'string' ? res.error : 'Student was not found (or outside your grade band).')
+            return
+        }
+        setStudent(res.data)
+    }, [id])
+
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            setStudent(getStudentById(id))
+            setLoading(false)
+            return
+        }
+        loadLive()
+    }, [id, loadLive])
+
+    if (loading) {
+        return (
+            <section className='space-y-6'>
+                <button type='button' onClick={() => navigate(ROUTE_BASE)} className='inline-flex items-center gap-2 text-sm text-[#515DEF] border border-[#515DEF] rounded-md px-4 py-2'>
+                    <ArrowLeft size={18} /> Back to list
+                </button>
+                <FeedbackState kind='loading' title='Loading student' description={`Fetching ${id}…`} />
+            </section>
+        )
+    }
+
+    if (!student) {
+        return (
+            <section className='space-y-6'>
+                <button type='button' onClick={() => navigate(ROUTE_BASE)} className='inline-flex items-center gap-2 text-sm text-[#515DEF] border border-[#515DEF] rounded-md px-4 py-2 hover:bg-[#515DEF] hover:text-white transition-colors cursor-pointer'>
+                    <ArrowLeft size={18} />
+                    Back to list
+                </button>
+                <div className='bg-white rounded-2xl shadow-md p-8 text-center text-[#667085]'>{error || 'Student not found.'}</div>
+            </section>
+        )
+    }
+
+    const displayName = student.name
+        || [student.firstName, student.middleName, student.lastName].filter(Boolean).join(' ')
 
     return (
         <section className='space-y-6'>
             <div className='flex flex-wrap items-center justify-between gap-3'>
-                <button
-                    type='button'
-                    onClick={() => navigate('/coordinator/user-management/students-list')}
-                    className='inline-flex items-center gap-2 text-sm text-[#515DEF] border border-[#515DEF] rounded-md px-4 py-2 hover:bg-[#515DEF] hover:text-white transition-colors cursor-pointer'
-                >
+                <button type='button' onClick={() => navigate(ROUTE_BASE)} className='inline-flex items-center gap-2 text-sm text-[#515DEF] border border-[#515DEF] rounded-md px-4 py-2 hover:bg-[#515DEF] hover:text-white transition-colors cursor-pointer'>
                     <ArrowLeft size={18} />
                     Back to list
                 </button>
                 <NavLink
-                    to={`/coordinator/user-management/students-list/view/${id}/full`}
+                    to={`${ROUTE_BASE}/view/${id}/full`}
                     className='inline-flex items-center gap-2 text-sm bg-blue-600 text-white rounded-md px-4 py-2 hover:bg-blue-700 transition-colors font-semibold cursor-pointer shadow-xs'
                 >
                     <Eye size={16} />
                     View Full Profile & Parent Details
                 </NavLink>
             </div>
+            {live ? <p className='text-xs font-medium text-[#027A48]'>Live student · GET /api/v1/students/{'{id}'} (grade-band scoped)</p> : null}
 
-            {!student ? (
-                <div className='bg-white rounded-2xl shadow-md p-8 text-center text-[#667085]'>
-                    Student record not found or could not be loaded.
+            <div className='bg-white rounded-2xl shadow-md p-4'>
+                <div className='flex flex-col sm:flex-row sm:items-center gap-4'>
+                    <img src={student.profileImage || mo_user} alt='' className='w-20 h-20 rounded-full object-cover ring-2 ring-indigo-100' />
+                    <div className='flex-1'>
+                        <h1 className='text-2xl font-semibold text-black'>{displayName}</h1>
+                        <p className='text-sm text-[#667085] mt-1'>
+                            <span className='font-medium text-[#1E1E1E]'>Admission No: {student.admissionNumber || '—'}</span>
+                        </p>
+                    </div>
                 </div>
-            ) : (
-                <>
-                    <div className='bg-white rounded-2xl shadow-md p-4'>
-                        <div className='flex flex-wrap items-start gap-4 mb-6'>
-                            <img src={student.profile} alt={student.name} className='w-16 h-16 rounded-full object-cover' />
-                            <div>
-                                <h1 className='text-2xl font-semibold text-black'>{student.name}</h1>
-                                <p className='text-sm text-[#667085] mt-1'>
-                                    {student.admissionNumber} · Class {student.classSection}
-                                </p>
-                            </div>
-                        </div>
+            </div>
 
-                        <h2 className='text-xl font-semibold text-black mb-6'>Personal Information</h2>
-                        <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6'>
-                            <Field label='Full Name' value={student.name} />
-                            <Field label='Email address' value={student.email} />
-                            <Field label='Mobile Number' value={student.mobileNumber} />
-                            <Field label='Class & Section' value={student.classSection} />
-                            <Field label='Roll Number' value={student.rollNumber} />
-                            <Field label='Admission Number' value={student.admissionNumber} />
-                            <Field label='Date Of Birth' value={student.dateOfBirth} />
-                        </div>
+            <Section title='Placement details'>
+                <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6'>
+                    <Field label='Class' value={student.className || student.class} />
+                    <Field label='Section' value={student.section} />
+                    <Field label='Class section' value={student.classSection} />
+                    <Field label='Roll number' value={student.rollNumber} />
+                    <Field label='Placement status' value={student.placementStatus} />
+                    <Field label='Status' value={student.status} />
+                    <Field label='Student ID' value={student.id || student.studentId} />
+                </div>
+            </Section>
 
-                        <NavLink
-                            to={`/coordinator/user-management/students-list/view/${id}/full`}
-                            className='inline-flex items-center gap-2 mt-6 text-sm font-medium text-[#515DEF] hover:opacity-80 transition-opacity'
-                        >
-                            View more
-                            <ChevronRight size={16} />
-                        </NavLink>
-                    </div>
-
-                    <div>
-                        <h2 className='text-xl font-semibold text-black mb-4'>Attendance Information</h2>
-                        <StudentAttendanceDetails />
-                    </div>
-
-                    <div>
-                        <h2 className='text-xl font-semibold text-black mb-4'>Results</h2>
-                        <StudentResultDetails />
-                    </div>
-                </>
-            )}
+            <Section title='Student information'>
+                <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6'>
+                    <Field label='Name' value={displayName} />
+                    <Field label='Gender' value={student.gender} />
+                    <Field label='Email' value={student.email} />
+                    <Field label='Mobile' value={student.mobileNumber} />
+                    <Field label='Date of birth' value={student.dateOfBirth} />
+                    <Field label='Country' value={student.country} />
+                    <Field label='State' value={student.state} />
+                    <Field label='City' value={student.city} />
+                </div>
+            </Section>
         </section>
     )
 }

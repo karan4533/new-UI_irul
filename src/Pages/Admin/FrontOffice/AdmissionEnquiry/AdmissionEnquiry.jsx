@@ -1,10 +1,11 @@
-import React, { useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { Calendar, EllipsisIcon, ChevronLeft, ChevronRight, Plus, Download } from 'lucide-react'
 import Dropdown from '../../../../Common/CommonComponents/Dropdown'
+import { FeedbackState } from '../../../../Common/ui'
 import ExportModal from './Components/ExportModal'
 import {
     STATUS_OPTIONS,
@@ -18,8 +19,11 @@ import {
     statusBadgeColor,
     updateAdmissionEnquiryStatus,
 } from './admissionEnquiryData'
+import { isLiveApiEnabled } from '../../../../services/api/tokenStore'
+import { listAdmissionEnquiries } from '../../../../services/api/admissionsApiService'
 
 const AdmissionEnquiry = () => {
+    const live = isLiveApiEnabled()
     const navigate = useNavigate()
     const { pathname } = useLocation()
     const routeBase = getEnquiryRouteBase(pathname)
@@ -30,9 +34,41 @@ const AdmissionEnquiry = () => {
     const [search, setSearch] = useState('')
     const [status, setStatus] = useState('')
     const [entriesPerPage, setEntriesPerPage] = useState(10)
-    const [records, setRecords] = useState(() => getAllAdmissionEnquiries())
+    const [records, setRecords] = useState(() => (live ? [] : getAllAdmissionEnquiries()))
+    const [listLoading, setListLoading] = useState(Boolean(live))
+    const [listError, setListError] = useState('')
+    const [refreshNonce, setRefreshNonce] = useState(0)
 
-    const refresh = () => setRecords(getAllAdmissionEnquiries())
+    const loadLive = useCallback(async () => {
+        setListLoading(true)
+        setListError('')
+        const res = await listAdmissionEnquiries()
+        setListLoading(false)
+        if (!res.success) {
+            setListError(typeof res.error === 'string' ? res.error : 'Failed to load enquiries.')
+            setRecords([])
+            return
+        }
+        setRecords(Array.isArray(res.data) ? res.data : [])
+    }, [])
+
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            setRecords(getAllAdmissionEnquiries())
+            setListLoading(false)
+            setListError('')
+            return
+        }
+        loadLive()
+    }, [loadLive, refreshNonce])
+
+    const refresh = () => {
+        if (isLiveApiEnabled()) {
+            setRefreshNonce((n) => n + 1)
+            return
+        }
+        setRecords(getAllAdmissionEnquiries())
+    }
 
     const filteredRecords = useMemo(
         () => filterAdmissionEnquiries(records, { search, status }),
@@ -49,12 +85,23 @@ const AdmissionEnquiry = () => {
     }
 
     const handleDelete = (id) => {
+        if (isLiveApiEnabled()) {
+            toast.error('Hard delete is not supported on the enquiries API from this screen.')
+            return
+        }
         deleteAdmissionEnquiry(id)
         refresh()
         toast.success('Enquiry deleted.')
     }
 
     const handleConvertToAdmission = (record) => {
+        if (isLiveApiEnabled()) {
+            toast.info('Use the admissions convert/enroll API flow for live conversion. Opening the admission form with enquiry context.')
+            navigate(getAddAdmissionPath(pathname), {
+                state: { fromEnquiryId: record.id, enquiry: record },
+            })
+            return
+        }
         updateAdmissionEnquiryStatus(record.id, 'Success')
         refresh()
         toast.success('Enquiry converted. Continue on the admission form.')
@@ -64,7 +111,23 @@ const AdmissionEnquiry = () => {
     }
 
     return (
-        <section>
+        <section className='space-y-4'>
+            {live ? (
+                <div className='rounded-2xl border border-emerald-200 bg-emerald-50/60 px-4 py-3'>
+                    <p className='text-xs font-semibold uppercase tracking-wide text-emerald-800'>
+                        Live admission enquiries · GET /api/v1/admissions/enquiries
+                    </p>
+                    {listLoading ? (
+                        <div className='mt-2'><FeedbackState kind='loading' title='Loading enquiries' description='Fetching from the admissions API…' /></div>
+                    ) : listError ? (
+                        <div className='mt-2'><FeedbackState kind='error' title='Enquiries API unavailable' description={listError} /></div>
+                    ) : (
+                        <p className='mt-1 text-xs text-slate-600'>{records.length} enquiry record(s) from the server.</p>
+                    )}
+                </div>
+            ) : null}
+            {!listLoading && !listError ? (
+            <>
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='flex justify-between md:items-center sm:items-stretch md:flex-row sm:flex-col flex-col gap-y-4'>
                     <button
@@ -277,6 +340,8 @@ const AdmissionEnquiry = () => {
                     </>
                 )}
             </div>
+            </>
+            ) : null}
 
             <ExportModal exportModal={exportModal} setExportModal={setExportModal} />
         </section>

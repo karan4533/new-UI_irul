@@ -12,6 +12,8 @@ import {
 } from '../../../Common/ui'
 import { paginateRows } from '../../../Common/ui/dataTableState'
 import { useAuth } from '../../../context/AuthContext'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { useFinance } from '../financeDomain/FinanceContext'
 import {
     APPROVAL_DEPARTMENTS,
     APPROVAL_RULES,
@@ -51,9 +53,33 @@ const readRows = () => {
     }
 }
 
+const normalizeLiveApproval = (row) => {
+    const status = row?.status || 'Pending'
+    return {
+        ...row,
+        id: row.id,
+        raisedBy: row.raisedBy || 'Staff',
+        department: row.department || 'Not recorded',
+        type: row.type || 'Expense Claim',
+        amount: row.amount ?? '—',
+        raisedOn: row.raisedOn || row.submittedOn || row.decidedAt || '—',
+        status,
+        decision: row.decision || (row.decidedBy
+            ? {
+                actor: row.decidedBy,
+                actorRole: 'Account Head',
+                remarks: row.remarks || '',
+                decidedAt: row.decidedAt || '',
+            }
+            : null),
+    }
+}
+
 const Approvals = () => {
     const { name, email } = useAuth()
-    const [rows, setRows] = useState(readRows)
+    const live = isLiveApiEnabled()
+    const { approvals: liveApprovals, decideApproval, liveLoading, liveError } = useFinance()
+    const [localRows, setLocalRows] = useState(readRows)
     const [activeTab, setActiveTab] = useState('pending')
     const [department, setDepartment] = useState(APPROVAL_DEPARTMENTS[0])
     const [search, setSearch] = useState('')
@@ -62,6 +88,12 @@ const Approvals = () => {
     const [decision, setDecision] = useState(null)
     const [remarks, setRemarks] = useState('')
     const [feedback, setFeedback] = useState('')
+    const [busy, setBusy] = useState(false)
+
+    const rows = useMemo(
+        () => (live ? (liveApprovals || []).map(normalizeLiveApproval) : localRows),
+        [live, liveApprovals, localRows],
+    )
 
     const selectedStatus = activeTab === 'pending' ? 'Pending' : activeTab === 'approved' ? 'Approved' : activeTab === 'rejected' ? 'Rejected' : ''
     const filteredRows = useMemo(() => rows.filter((row) => {
@@ -76,9 +108,9 @@ const Approvals = () => {
     }), [department, rows, search, selectedStatus])
     const pagination = paginateRows(filteredRows, { page, pageSize })
 
-    const persist = (next) => {
+    const persistLocal = (next) => {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
-        setRows(next)
+        setLocalRows(next)
     }
 
     const closeDecision = () => {
@@ -86,16 +118,39 @@ const Approvals = () => {
         setRemarks('')
     }
 
-    const confirmDecision = () => {
-        if (!decision) return
-        const next = applyFinanceApprovalDecision(rows, decision.row.id, decision.status, {
-            actor: name || email || 'Account Head',
-            actorRole: 'Account Head',
-            remarks,
-        })
-        persist(next)
-        setFeedback(`${decision.row.id} was ${decision.status.toLowerCase()}. The decision is recorded locally and has not been posted or paid.`)
-        closeDecision()
+    const confirmDecision = async () => {
+        if (!decision || busy) return
+        setBusy(true)
+        try {
+            if (live) {
+                const result = await decideApproval({
+                    approvalId: decision.row.id,
+                    decision: decision.status === 'Approved' ? 'approved' : 'rejected',
+                    remarks,
+                })
+                if (!result?.success) {
+                    setFeedback(result?.message || `Could not ${decision.status.toLowerCase()} ${decision.row.id}.`)
+                    return
+                }
+                setFeedback(
+                    `${decision.row.id} was ${decision.status.toLowerCase()} on the campus finance API`
+                    + (decision.status === 'Approved' ? ' (approved claims may post an OUT expenditure).' : '.'),
+                )
+                closeDecision()
+                return
+            }
+
+            const next = applyFinanceApprovalDecision(localRows, decision.row.id, decision.status, {
+                actor: name || email || 'Account Head',
+                actorRole: 'Account Head',
+                remarks,
+            })
+            persistLocal(next)
+            setFeedback(`${decision.row.id} was ${decision.status.toLowerCase()}. The decision is recorded locally and has not been posted or paid.`)
+            closeDecision()
+        } finally {
+            setBusy(false)
+        }
     }
 
     const openDecision = (row, status) => {
@@ -126,7 +181,11 @@ const Approvals = () => {
         <section className='space-y-5'>
             <PageHeader
                 title='Finance approvals'
-                description='Review claims and expenses before posting or settlement. Approval alone never records a ledger posting or payment.'
+                description={
+                    live
+                        ? 'Review claims and expenses on the campus finance snapshot. Approving may post an OUT expenditure when amount is present.'
+                        : 'Review claims and expenses before posting or settlement. Approval alone never records a ledger posting or payment.'
+                }
                 context={`${rows.filter((row) => row.status === 'Pending').length} requests await an Account Head decision`}
                 actions={(
                     <button type='button' disabled title='Export requires the connected finance reporting API.' className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] bg-white px-4 text-sm font-semibold text-[var(--erp-muted)] opacity-60'>
@@ -136,9 +195,16 @@ const Approvals = () => {
             />
 
             <IntegrationNotice
-                state='demo'
-                title='Browser-stored approval decisions'
-                description='Decisions are local demonstration records. Production requires permission checks, append-only audit events, posting controls and payout integrations.'
+                state={live ? (liveError ? 'failed' : 'connected') : 'demo'}
+                title={live ? (liveError ? 'Finance API unavailable' : 'Live approval queue') : 'Browser-stored approval decisions'}
+                description={
+                    live
+                        ? (liveError
+                            || (liveLoading
+                                ? 'Loading campus approvals…'
+                                : 'Decisions call POST /api/v1/finance/actions/decide-approval against the campus snapshot.'))
+                        : 'Decisions are local demonstration records. Production requires permission checks, append-only audit events, posting controls and payout integrations.'
+                }
             />
 
             <FinancialActionFlow current='Approve' completed={['Calculate', 'Review']} title='Expense and claim lifecycle' />
@@ -178,8 +244,8 @@ const Approvals = () => {
                             rows={pagination.rows}
                             columns={columns}
                             rowKey='id'
-                            emptyTitle={`No ${selectedStatus.toLowerCase()} finance requests`}
-                            emptyDescription='Change the search or department filter to see other records.'
+                            emptyTitle={live && !liveLoading ? `No ${selectedStatus.toLowerCase()} campus approvals` : `No ${selectedStatus.toLowerCase()} finance requests`}
+                            emptyDescription={live ? 'Seed approvals into /finance/state or change filters.' : 'Change the search or department filter to see other records.'}
                             renderActions={selectedStatus === 'Pending' ? (row) => (
                                 <>
                                     <button type='button' onClick={() => openDecision(row, 'Rejected')} className='inline-flex min-h-9 items-center gap-1.5 rounded-md border border-[var(--erp-red)] px-3 text-sm font-semibold text-[var(--erp-red)]'><X aria-hidden='true' size={15} /> Reject</button>
@@ -197,10 +263,16 @@ const Approvals = () => {
                 onClose={closeDecision}
                 onConfirm={confirmDecision}
                 title={decision?.status === 'Approved' ? `Approve ${decision.row.id}?` : `Reject ${decision?.row.id || 'request'}?`}
-                description={decision?.status === 'Approved' ? 'This records approval only; posting and payment remain separate actions.' : 'The request returns to its owner with your rationale.'}
+                description={
+                    decision?.status === 'Approved'
+                        ? (live
+                            ? 'Approval is written to the campus finance API and may post an OUT expenditure when amount is present.'
+                            : 'This records approval only; posting and payment remain separate actions.')
+                        : 'The request returns to its owner with your rationale.'
+                }
                 confirmLabel={decision?.status === 'Approved' ? 'Approve request' : 'Confirm rejection'}
                 tone={decision?.status === 'Rejected' ? 'danger' : 'primary'}
-                confirmDisabled={decision?.status === 'Rejected' && !remarks.trim()}
+                confirmDisabled={busy || (decision?.status === 'Rejected' && !remarks.trim())}
             >
                 {decision ? (
                     <div className='space-y-3'>

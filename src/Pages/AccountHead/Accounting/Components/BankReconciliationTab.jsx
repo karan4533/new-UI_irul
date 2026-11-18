@@ -59,9 +59,9 @@ const BankReconciliationTab = ({
         { key: 'status', label: 'Status', render: (row) => <StatusBadge status={row.status} /> },
     ]
 
-    const confirmChequeDecision = () => {
+    const confirmChequeDecision = async () => {
         if (!chequeDecision) return
-        settleCheque(
+        await settleCheque(
             chequeDecision.cheque.id,
             chequeDecision.status,
             chequeDecision.status === CHEQUE_STATUSES.CLEARED ? 'Marked cleared in reconciliation review' : 'Returned by bank',

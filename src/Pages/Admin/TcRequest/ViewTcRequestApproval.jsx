@@ -1,12 +1,16 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, CheckCircle2 } from 'lucide-react'
+import { toast } from 'react-toastify'
+import { FeedbackState } from '../../../Common/ui'
 import {
     approveTcRequest,
     getTcRequestById,
     rejectTcRequest,
     statusBadgeColor,
 } from '../../../Common/TcRequest/tcRequestData'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { decideTcRequest, getTcRequest } from '../../../services/api/tcApiService'
 
 const Section = ({ title, children }) => (
     <div className='bg-white rounded-2xl shadow-md p-4'>
@@ -23,17 +27,72 @@ const Field = ({ label, value }) => (
 )
 
 const ViewTcRequestApproval = () => {
+    const live = isLiveApiEnabled()
     const { id } = useParams()
     const navigate = useNavigate()
-    const [request, setRequest] = useState(() => getTcRequestById(id))
-    const [superAdminRemarks, setSuperAdminRemarks] = useState(request?.superAdminRemarks ?? '')
+    const [request, setRequest] = useState(() => (live ? null : getTcRequestById(id)))
+    const [loading, setLoading] = useState(Boolean(live))
+    const [error, setError] = useState('')
+    const [saving, setSaving] = useState(false)
+    const [superAdminRemarks, setSuperAdminRemarks] = useState('')
 
-    const handleApprove = () => {
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            const item = getTcRequestById(id)
+            setRequest(item)
+            setSuperAdminRemarks(item?.superAdminRemarks ?? '')
+            setLoading(false)
+            setError('')
+            return
+        }
+        let cancelled = false
+        ;(async () => {
+            setLoading(true)
+            setError('')
+            const res = await getTcRequest(id)
+            if (cancelled) return
+            setLoading(false)
+            if (!res.success) {
+                setRequest(null)
+                setError(typeof res.error === 'string' ? res.error : 'TC request was not found on the server.')
+                return
+            }
+            setRequest(res.data)
+            setSuperAdminRemarks(res.data?.superAdminRemarks ?? '')
+        })()
+        return () => { cancelled = true }
+    }, [id])
+
+    const handleApprove = async () => {
+        if (isLiveApiEnabled()) {
+            setSaving(true)
+            const res = await decideTcRequest(id, { decision: 'approve', remarks: superAdminRemarks })
+            setSaving(false)
+            if (!res.success) {
+                toast.error(typeof res.error === 'string' ? res.error : 'Could not approve TC on the server.')
+                return
+            }
+            setRequest(res.data)
+            toast.success('TC request approved on the server.')
+            return
+        }
         const updated = approveTcRequest(id, superAdminRemarks)
         if (updated) setRequest(updated)
     }
 
-    const handleReject = () => {
+    const handleReject = async () => {
+        if (isLiveApiEnabled()) {
+            setSaving(true)
+            const res = await decideTcRequest(id, { decision: 'reject', remarks: superAdminRemarks })
+            setSaving(false)
+            if (!res.success) {
+                toast.error(typeof res.error === 'string' ? res.error : 'Could not reject TC on the server.')
+                return
+            }
+            setRequest(res.data)
+            toast.success('TC request rejected on the server.')
+            return
+        }
         const updated = rejectTcRequest(id, superAdminRemarks, 'admin')
         if (updated) setRequest(updated)
     }
@@ -45,19 +104,29 @@ const ViewTcRequestApproval = () => {
                 Back to list
             </button>
 
-            {!request ? (
-                <div className='bg-white rounded-2xl shadow-md p-8 text-center text-[#667085]'>TC request not found.</div>
+            {live ? (
+                <div className='rounded-2xl border border-emerald-200 bg-emerald-50/60 px-4 py-3'>
+                    <p className='text-xs font-semibold uppercase tracking-wide text-emerald-800'>
+                        Live TC decision · GET/POST /api/v1/tc-requests/&#123;ref&#125;
+                    </p>
+                </div>
+            ) : null}
+
+            {loading ? (
+                <FeedbackState kind='loading' title='Loading TC request' description='Fetching from the TC API…' />
+            ) : !request ? (
+                <div className='bg-white rounded-2xl shadow-md p-8 text-center text-[#667085]'>{error || 'TC request not found.'}</div>
             ) : (
                 <>
                     <div className='bg-white rounded-2xl shadow-md p-4'>
                         <div className='flex flex-wrap items-center gap-3'>
                             <h1 className='text-2xl font-semibold text-black'>{request.requestId}</h1>
-                            <span className={`px-3 py-1.5 rounded-lg text-sm font-semibold whitespace-nowrap ${statusBadgeColor[request.status]}`}>
+                            <span className={`px-3 py-1.5 rounded-lg text-sm font-semibold whitespace-nowrap ${statusBadgeColor[request.status] || 'bg-slate-100 text-slate-700'}`}>
                                 {request.status}
                             </span>
                         </div>
                         <p className='text-sm text-[#667085] mt-2'>
-                            Super Admin review · {request.studentName} · {request.classSection}
+                            Administrator review · {request.studentName} · {request.classSection}
                         </p>
                     </div>
 
@@ -74,6 +143,7 @@ const ViewTcRequestApproval = () => {
                         </div>
                     </Section>
 
+                    {(request.nocClearances || []).length > 0 ? (
                     <Section title='Manager-Level NOC Clearance (Mandatory Departmental Sign-offs)'>
                         <div className='overflow-x-auto'>
                             <table className='w-full text-left text-xs'>
@@ -101,63 +171,54 @@ const ViewTcRequestApproval = () => {
                                                     {noc.status}
                                                 </span>
                                             </td>
-                                            <td className='py-3 px-4 text-slate-600 max-w-xs'>{noc.remarks}</td>
-                                            <td className='py-3 px-4 font-mono text-slate-500'>{noc.date}</td>
+                                            <td className='py-3 px-4 text-slate-600'>{noc.remarks || '—'}</td>
+                                            <td className='py-3 px-4 text-slate-600'>{noc.clearedOn || '—'}</td>
                                         </tr>
                                     ))}
                                 </tbody>
                             </table>
                         </div>
                     </Section>
+                    ) : null}
 
                     {request.status === 'Pending Super Admin Approval' ? (
-                        <Section title='Super Admin Decision'>
-                            <div className='space-y-4'>
-                                <div className='flex flex-col gap-y-2'>
-                                    <label htmlFor='admin-remarks' className='text-base font-medium text-[#808080]'>Super Admin Remarks</label>
-                                    <textarea
-                                        id='admin-remarks'
-                                        rows={3}
-                                        value={superAdminRemarks}
-                                        onChange={(e) => setSuperAdminRemarks(e.target.value)}
-                                        placeholder='Approval or rejection remarks'
-                                        className='text-sm text-[#808080] border border-[#D9D9D9] rounded-md px-2 py-2 w-full'
-                                    />
-                                </div>
-                                <p className='text-sm text-[#667085]'>
-                                    On approval, the Transfer Certificate will be issued and sent to the student/parent portal.
-                                </p>
-                                <div className='flex sm:justify-end justify-center gap-x-4'>
-                                    <button type='button' onClick={handleReject} className='bg-white text-[#FF0000] text-sm px-8 py-2 rounded-md border border-[#FF0000] hover:bg-[#FF0000] hover:text-white transition-all duration-200 cursor-pointer md:w-auto w-full'>
-                                        Reject
-                                    </button>
-                                    <button type='button' onClick={handleApprove} className='bg-[#4CAF50] text-white text-sm px-8 py-2 rounded-md border border-[#4CAF50] hover:opacity-90 transition-all duration-200 cursor-pointer md:w-auto w-full'>
-                                        Approve & Issue TC
-                                    </button>
-                                </div>
+                        <Section title='Administrator decision'>
+                            <label className='grid gap-2 text-sm font-medium text-[#808080]'>
+                                Remarks
+                                <textarea
+                                    rows={4}
+                                    value={superAdminRemarks}
+                                    onChange={(event) => setSuperAdminRemarks(event.target.value)}
+                                    className='w-full border border-[#D9D9D9] rounded-md px-3 py-2 text-sm text-[#1E1E1E]'
+                                    placeholder='Add approval or rejection remarks…'
+                                />
+                            </label>
+                            <div className='mt-4 flex flex-wrap gap-2'>
+                                <button
+                                    type='button'
+                                    disabled={saving}
+                                    onClick={handleReject}
+                                    className='min-h-10 rounded-md border border-red-500 px-4 text-sm font-semibold text-red-600 disabled:opacity-50'
+                                >
+                                    Reject
+                                </button>
+                                <button
+                                    type='button'
+                                    disabled={saving}
+                                    onClick={handleApprove}
+                                    className='min-h-10 rounded-md bg-[#515DEF] px-4 text-sm font-semibold text-white disabled:opacity-50'
+                                >
+                                    Approve
+                                </button>
                             </div>
                         </Section>
-                    ) : null}
-
-                    {request.status === 'Approved' ? (
-                        <Section title='Issued Transfer Certificate'>
-                            <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6'>
-                                <Field label='TC Number' value={request.tcNumber} />
-                                <Field label='TC Issued Date' value={request.tcIssuedDate} />
-                                <Field label='TC Document' value={request.tcDocumentName} />
-                                <Field label='Super Admin Remarks' value={request.superAdminRemarks} />
-                            </div>
-                            <p className='text-sm text-[#4CAF50] font-medium mt-4'>
-                                TC has been sent to the student/parent portal and is available for download.
-                            </p>
-                        </Section>
-                    ) : null}
-
-                    {request.status === 'Rejected' && request.superAdminRemarks ? (
-                        <Section title='Super Admin Remarks'>
+                    ) : (
+                        <Section title='Decision'>
+                            <Field label='Status' value={request.status} />
                             <Field label='Remarks' value={request.superAdminRemarks} />
+                            <Field label='TC Number' value={request.tcNumber} />
                         </Section>
-                    ) : null}
+                    )}
                 </>
             )}
         </section>

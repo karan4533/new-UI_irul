@@ -57,8 +57,82 @@ import {
     pickPersistedSequence,
     saveFinanceState,
 } from './financeStorage'
+import { useAuth } from '../../../context/AuthContext'
+import { getAccessToken, isLiveApiEnabled } from '../../../services/api/tokenStore'
+import {
+    collectPaymentApi,
+    decideFinanceApprovalApi,
+    getFinanceState,
+    resetFinanceStateApi,
+    saveFinanceStateApi,
+    sendReceiptApi,
+    settleChequeApi,
+} from '../../../services/api/financeApiService'
 
 const FinanceContext = createContext(null)
+
+const EMPTY_LIST = []
+
+function snapshotFromContext({
+    students,
+    feeCategories,
+    feeStructures,
+    fineRules,
+    bankAccounts,
+    posTerminals,
+    concessions,
+    installments,
+    annualBudget,
+    transactions,
+    receipts,
+    cheques,
+    paymentLinks,
+    auditLog,
+    glEntries,
+    dayBookEntries,
+    cashBookEntries,
+    bankBookEntries,
+    onlineBookEntries,
+    reconciliationItems,
+    sequence,
+    meta = { seeded: true },
+}) {
+    return {
+        students,
+        feeCategories,
+        feeStructures,
+        fineRules,
+        bankAccounts,
+        posTerminals,
+        concessions,
+        installments,
+        annualBudget,
+        chartOfAccounts: [],
+        journalVouchers: [],
+        bookFeeBreakup: [],
+        transactions,
+        receipts,
+        cheques,
+        paymentLinks,
+        auditLog,
+        glEntries,
+        dayBookEntries,
+        cashBookEntries,
+        bankBookEntries,
+        onlineBookEntries,
+        reconciliationItems,
+        activityFees: [],
+        wallets: [],
+        walletRecharges: [],
+        transportFleet: [],
+        transportMaintenance: [],
+        transportCompliance: [],
+        transportSalaries: [],
+        approvals: [],
+        sequence,
+        meta,
+    }
+}
 
 const clone = (value) => cloneJson(value)
 
@@ -85,34 +159,181 @@ const createSeedFinanceState = () => ({
 })
 
 export const FinanceProvider = ({ children }) => {
-    const [initialSaved] = useState(() => loadFinanceState())
+    const live = isLiveApiEnabled()
+    const { isAuthenticated, isSessionReady } = useAuth()
+    const [initialSaved] = useState(() => (live ? null : loadFinanceState()))
     const saved = initialSaved?.data ?? null
 
     const seq = useRef(pickPersistedSequence(saved))
     const submittingRef = useRef(false)
     const skipPersistRef = useRef(false)
+    const liveReadyRef = useRef(!live)
+    const persistTimerRef = useRef(null)
+    const lastHydratedTokenRef = useRef('')
 
-    const [students] = useState(FINANCE_STUDENTS)
-    const [feeCategories, setFeeCategories] = useState(() => initialPersistedList(saved, 'feeCategories', FEE_CATEGORIES))
-    const [feeStructures, setFeeStructures] = useState(() => initialPersistedList(saved, 'feeStructures', FEE_STRUCTURES))
-    const [fineRules, setFineRules] = useState(() => initialPersistedList(saved, 'fineRules', FINE_RULES))
-    const [bankAccounts, setBankAccounts] = useState(() => initialPersistedList(saved, 'bankAccounts', BANK_ACCOUNTS))
-    const [posTerminals, setPosTerminals] = useState(() => initialPersistedList(saved, 'posTerminals', POS_TERMINALS))
-    const [concessions, setConcessions] = useState(() => initialPersistedList(saved, 'concessions', FEE_CONCESSIONS))
-    const [installments, setInstallments] = useState(() => initialPersistedList(saved, 'installments', FEE_INSTALLMENTS))
-    const [annualBudget, setAnnualBudget] = useState(() => initialPersistedList(saved, 'annualBudget', BUDGET_SEED))
-    const [transactions, setTransactions] = useState(() => initialPersistedList(saved, 'transactions', []))
-    const [receipts, setReceipts] = useState(() => initialPersistedList(saved, 'receipts', SEED_RECEIPTS))
-    const [cheques, setCheques] = useState(() => initialPersistedList(saved, 'cheques', SEED_CHEQUES))
-    const [paymentLinks, setPaymentLinks] = useState(() => initialPersistedList(saved, 'paymentLinks', []))
-    const [auditLog, setAuditLog] = useState(() => initialPersistedList(saved, 'auditLog', []))
-    const [glEntries, setGlEntries] = useState(() => initialPersistedList(saved, 'glEntries', []))
-    const [dayBookEntries, setDayBookEntries] = useState(() => initialPersistedList(saved, 'dayBookEntries', []))
-    const [cashBookEntries, setCashBookEntries] = useState(() => initialPersistedList(saved, 'cashBookEntries', []))
-    const [bankBookEntries, setBankBookEntries] = useState(() => initialPersistedList(saved, 'bankBookEntries', []))
-    const [onlineBookEntries, setOnlineBookEntries] = useState(() => initialPersistedList(saved, 'onlineBookEntries', []))
-    const [reconciliationItems, setReconciliationItems] = useState(() => initialPersistedList(saved, 'reconciliationItems', []))
+    const [students, setStudents] = useState(() => (live ? EMPTY_LIST : FINANCE_STUDENTS))
+    const [feeCategories, setFeeCategories] = useState(() => (
+        live ? EMPTY_LIST : initialPersistedList(saved, 'feeCategories', FEE_CATEGORIES)
+    ))
+    const [feeStructures, setFeeStructures] = useState(() => (
+        live ? EMPTY_LIST : initialPersistedList(saved, 'feeStructures', FEE_STRUCTURES)
+    ))
+    const [fineRules, setFineRules] = useState(() => (
+        live ? EMPTY_LIST : initialPersistedList(saved, 'fineRules', FINE_RULES)
+    ))
+    const [bankAccounts, setBankAccounts] = useState(() => (
+        live ? EMPTY_LIST : initialPersistedList(saved, 'bankAccounts', BANK_ACCOUNTS)
+    ))
+    const [posTerminals, setPosTerminals] = useState(() => (
+        live ? EMPTY_LIST : initialPersistedList(saved, 'posTerminals', POS_TERMINALS)
+    ))
+    const [concessions, setConcessions] = useState(() => (
+        live ? EMPTY_LIST : initialPersistedList(saved, 'concessions', FEE_CONCESSIONS)
+    ))
+    const [installments, setInstallments] = useState(() => (
+        live ? EMPTY_LIST : initialPersistedList(saved, 'installments', FEE_INSTALLMENTS)
+    ))
+    const [annualBudget, setAnnualBudget] = useState(() => (
+        live ? EMPTY_LIST : initialPersistedList(saved, 'annualBudget', BUDGET_SEED)
+    ))
+    const [transactions, setTransactions] = useState(() => (
+        live ? EMPTY_LIST : initialPersistedList(saved, 'transactions', [])
+    ))
+    const [receipts, setReceipts] = useState(() => (
+        live ? EMPTY_LIST : initialPersistedList(saved, 'receipts', SEED_RECEIPTS)
+    ))
+    const [cheques, setCheques] = useState(() => (
+        live ? EMPTY_LIST : initialPersistedList(saved, 'cheques', SEED_CHEQUES)
+    ))
+    const [paymentLinks, setPaymentLinks] = useState(() => (
+        live ? EMPTY_LIST : initialPersistedList(saved, 'paymentLinks', [])
+    ))
+    const [auditLog, setAuditLog] = useState(() => (
+        live ? EMPTY_LIST : initialPersistedList(saved, 'auditLog', [])
+    ))
+    const [glEntries, setGlEntries] = useState(() => (
+        live ? EMPTY_LIST : initialPersistedList(saved, 'glEntries', [])
+    ))
+    const [dayBookEntries, setDayBookEntries] = useState(() => (
+        live ? EMPTY_LIST : initialPersistedList(saved, 'dayBookEntries', [])
+    ))
+    const [cashBookEntries, setCashBookEntries] = useState(() => (
+        live ? EMPTY_LIST : initialPersistedList(saved, 'cashBookEntries', [])
+    ))
+    const [bankBookEntries, setBankBookEntries] = useState(() => (
+        live ? EMPTY_LIST : initialPersistedList(saved, 'bankBookEntries', [])
+    ))
+    const [onlineBookEntries, setOnlineBookEntries] = useState(() => (
+        live ? EMPTY_LIST : initialPersistedList(saved, 'onlineBookEntries', [])
+    ))
+    const [reconciliationItems, setReconciliationItems] = useState(() => (
+        live ? EMPTY_LIST : initialPersistedList(saved, 'reconciliationItems', [])
+    ))
     const [lastSavedAt, setLastSavedAt] = useState(() => initialSaved?.savedAt ?? null)
+    const [liveLoading, setLiveLoading] = useState(Boolean(live))
+    const [liveError, setLiveError] = useState('')
+    const [liveSource, setLiveSource] = useState(live ? 'backend' : 'local')
+    const [approvals, setApprovals] = useState(() => EMPTY_LIST)
+    const [wallets, setWallets] = useState(() => EMPTY_LIST)
+    const [walletRecharges, setWalletRecharges] = useState(() => EMPTY_LIST)
+    const [transportFleet, setTransportFleet] = useState(() => EMPTY_LIST)
+
+    const applyRemoteState = useCallback((payload) => {
+        const data = payload?.data && typeof payload.data === 'object' ? payload.data : {}
+        skipPersistRef.current = true
+        seq.current = pickPersistedSequence(data)
+        setStudents(Array.isArray(data.students) ? data.students : [])
+        setFeeCategories(Array.isArray(data.feeCategories) ? data.feeCategories : [])
+        setFeeStructures(Array.isArray(data.feeStructures) ? data.feeStructures : [])
+        setFineRules(Array.isArray(data.fineRules) ? data.fineRules : [])
+        setBankAccounts(Array.isArray(data.bankAccounts) ? data.bankAccounts : [])
+        setPosTerminals(Array.isArray(data.posTerminals) ? data.posTerminals : [])
+        setConcessions(Array.isArray(data.concessions) ? data.concessions : [])
+        setInstallments(Array.isArray(data.installments) ? data.installments : [])
+        setAnnualBudget(Array.isArray(data.annualBudget) ? data.annualBudget : [])
+        setTransactions(Array.isArray(data.transactions) ? data.transactions : [])
+        setReceipts(Array.isArray(data.receipts) ? data.receipts : [])
+        setCheques(Array.isArray(data.cheques) ? data.cheques : [])
+        setPaymentLinks(Array.isArray(data.paymentLinks) ? data.paymentLinks : [])
+        setAuditLog(Array.isArray(data.auditLog) ? data.auditLog : [])
+        setGlEntries(Array.isArray(data.glEntries) ? data.glEntries : [])
+        setDayBookEntries(Array.isArray(data.dayBookEntries) ? data.dayBookEntries : [])
+        setCashBookEntries(Array.isArray(data.cashBookEntries) ? data.cashBookEntries : [])
+        setBankBookEntries(Array.isArray(data.bankBookEntries) ? data.bankBookEntries : [])
+        setOnlineBookEntries(Array.isArray(data.onlineBookEntries) ? data.onlineBookEntries : [])
+        setReconciliationItems(Array.isArray(data.reconciliationItems) ? data.reconciliationItems : [])
+        setApprovals(Array.isArray(data.approvals) ? data.approvals : [])
+        setWallets(Array.isArray(data.wallets) ? data.wallets : [])
+        setWalletRecharges(Array.isArray(data.walletRecharges) ? data.walletRecharges : [])
+        setTransportFleet(Array.isArray(data.transportFleet) ? data.transportFleet : [])
+        setLastSavedAt(payload?.savedAt || null)
+        liveReadyRef.current = true
+    }, [])
+
+    const rehydrateFromApi = useCallback(async () => {
+        const res = await getFinanceState()
+        if (!res.success) {
+            setLiveError(typeof res.error === 'string' ? res.error : 'Failed to load finance state from the API.')
+            setLiveSource('error')
+            setLiveLoading(false)
+            return res
+        }
+        applyRemoteState(res.data)
+        setLiveError('')
+        setLiveSource('backend')
+        setLiveLoading(false)
+        return res
+    }, [applyRemoteState])
+
+    useEffect(() => {
+        if (!isLiveApiEnabled()) return undefined
+        // Wait for Auth bootstrap so we never hit /finance/state without a JWT (401 would clear the session).
+        if (!isSessionReady) {
+            setLiveLoading(Boolean(isAuthenticated))
+            return undefined
+        }
+        if (!isAuthenticated) {
+            lastHydratedTokenRef.current = ''
+            liveReadyRef.current = false
+            setLiveError('')
+            setLiveSource('backend')
+            setLiveLoading(false)
+            return undefined
+        }
+        const token = getAccessToken()
+        if (!token) {
+            // Authenticated UI without JWT — wait; do not call the API.
+            setLiveError('Sign in required.')
+            setLiveSource('error')
+            setLiveLoading(false)
+            liveReadyRef.current = false
+            return undefined
+        }
+        if (token === lastHydratedTokenRef.current && liveReadyRef.current) return undefined
+
+        let cancelled = false
+        ;(async () => {
+            setLiveLoading(true)
+            const res = await getFinanceState()
+            if (cancelled) return
+            if (!res.success) {
+                setLiveError(typeof res.error === 'string' ? res.error : 'Failed to load finance state from the API.')
+                setLiveSource('error')
+                setLiveLoading(false)
+                liveReadyRef.current = false
+                return
+            }
+            applyRemoteState(res.data)
+            lastHydratedTokenRef.current = token
+            setLiveError('')
+            setLiveSource('backend')
+            setLiveLoading(false)
+        })()
+        return () => {
+            cancelled = true
+            if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
+        }
+    }, [applyRemoteState, isAuthenticated, isSessionReady])
 
     const appendAudit = useCallback((entry) => {
         setAuditLog((prev) => [{
@@ -175,7 +396,7 @@ export const FinanceProvider = ({ children }) => {
         }
     }, [])
 
-    const collectFeePayment = useCallback((payload) => {
+    const collectFeePayment = useCallback(async (payload) => {
         if (submittingRef.current) {
             return { success: false, errors: ['A payment is already being processed.'] }
         }
@@ -210,6 +431,41 @@ export const FinanceProvider = ({ children }) => {
             details,
         })
         if (errors.length) return { success: false, errors }
+
+        if (isLiveApiEnabled()) {
+            submittingRef.current = true
+            try {
+                const res = await collectPaymentApi({
+                    studentId,
+                    paymentMode,
+                    allocations: selected.map((item) => ({
+                        installmentId: item.installmentId,
+                        amount: Number(item.amount),
+                    })),
+                    details,
+                    collectedBy,
+                    paymentDate: paymentDate || details.transactionDate || details.paymentDate,
+                    narration: narration || details.narration,
+                })
+                if (!res.success) {
+                    return {
+                        success: false,
+                        errors: [typeof res.error === 'string' ? res.error : 'Server rejected the fee collection.'],
+                    }
+                }
+                await rehydrateFromApi()
+                return {
+                    success: true,
+                    receipt: res.data?.receipt || null,
+                    transaction: res.data?.transaction || null,
+                    paymentReference: res.data?.paymentReference || res.data?.receipt?.transactionReference,
+                    held: Boolean(res.data?.held),
+                    dataSource: 'backend',
+                }
+            } finally {
+                submittingRef.current = false
+            }
+        }
 
         submittingRef.current = true
 
@@ -352,11 +608,20 @@ export const FinanceProvider = ({ children }) => {
         } finally {
             submittingRef.current = false
         }
-    }, [appendAudit, bankAccounts, getInstallmentsForStudent, getStudentById, postAccounting])
+    }, [appendAudit, bankAccounts, getInstallmentsForStudent, getStudentById, postAccounting, rehydrateFromApi])
 
-    const settleCheque = useCallback((chequeId, nextStatus, reason = '') => {
+    const settleCheque = useCallback(async (chequeId, nextStatus, reason = '') => {
         const cheque = cheques.find((item) => item.id === chequeId)
         if (!cheque) return { success: false, message: 'Cheque not found.' }
+
+        if (isLiveApiEnabled()) {
+            const res = await settleChequeApi({ chequeId, status: nextStatus, reason })
+            if (!res.success) {
+                return { success: false, message: typeof res.error === 'string' ? res.error : 'Server rejected cheque settlement.' }
+            }
+            await rehydrateFromApi()
+            return { success: true, dataSource: 'backend' }
+        }
 
         setCheques((prev) => prev.map((item) => (
             item.id === chequeId ? { ...item, status: nextStatus } : item
@@ -403,7 +668,7 @@ export const FinanceProvider = ({ children }) => {
         })
 
         return { success: true }
-    }, [appendAudit, cheques, getStudentById, postAccounting, transactions])
+    }, [appendAudit, cheques, getStudentById, postAccounting, rehydrateFromApi, transactions])
 
     const waiveFine = useCallback(({ installmentId, reason, changedBy = ACTOR_FINANCE_HEAD }) => {
         if (!reason?.trim()) return { success: false, message: 'Reason is required to waive a fine.' }
@@ -487,9 +752,74 @@ export const FinanceProvider = ({ children }) => {
         return { success: true, receiptNo: receipt.receiptNo }
     }, [appendAudit, receipts])
 
-    const sendReceipt = useCallback(({ receiptId, channel }) => {
+    const decideApproval = useCallback(async ({ approvalId, decision, remarks = '' }) => {
+        const status = String(decision || '').toLowerCase() === 'approved' ? 'approved' : 'rejected'
+        if (status === 'rejected' && !String(remarks || '').trim()) {
+            return { success: false, message: 'A rejection rationale is required.' }
+        }
+        if (isLiveApiEnabled()) {
+            const res = await decideFinanceApprovalApi({
+                approvalId,
+                decision: status,
+                remarks: String(remarks || '').trim(),
+            })
+            if (!res.success) {
+                return {
+                    success: false,
+                    message: typeof res.error === 'string' ? res.error : 'Server rejected the approval decision.',
+                }
+            }
+            await rehydrateFromApi()
+            return { success: true, dataSource: 'backend', approval: res.data?.approval || null }
+        }
+
+        const nextStatus = status === 'approved' ? 'Approved' : 'Rejected'
+        let found = false
+        setApprovals((prev) => prev.map((row) => {
+            if (row.id !== approvalId) return row
+            found = true
+            return {
+                ...row,
+                status: nextStatus,
+                decidedAt: new Date().toISOString(),
+                decidedBy: ACTOR_FINANCE_HEAD,
+                remarks: String(remarks || '').trim(),
+                decision: {
+                    actor: ACTOR_FINANCE_HEAD,
+                    actorRole: 'Account Head',
+                    remarks: String(remarks || '').trim(),
+                    decidedAt: new Date().toISOString(),
+                },
+            }
+        }))
+        if (!found) return { success: false, message: 'Approval not found.' }
+        appendAudit({
+            action: nextStatus === 'Approved' ? 'APPROVAL_APPROVED' : 'APPROVAL_REJECTED',
+            entity: 'Approval',
+            entityId: approvalId,
+            newValue: nextStatus,
+            reason: String(remarks || '').trim(),
+        })
+        return { success: true, dataSource: 'local' }
+    }, [appendAudit, rehydrateFromApi])
+
+    const sendReceipt = useCallback(async ({ receiptId, channel }) => {
         const receipt = receipts.find((item) => item.id === receiptId)
         if (!receipt) return { success: false, message: 'Receipt not found.' }
+        if (isLiveApiEnabled()) {
+            const res = await sendReceiptApi({ receiptId, channel })
+            if (!res.success) {
+                return { success: false, message: typeof res.error === 'string' ? res.error : 'Server rejected receipt send.' }
+            }
+            await rehydrateFromApi()
+            return {
+                success: true,
+                receiptNo: receipt.receiptNo,
+                dataSource: 'backend',
+                delivered: Boolean(res.data?.delivered),
+                stub: res.data?.queued_stub || res.data?.status,
+            }
+        }
         setReceipts((prev) => prev.map((item) => (
             item.id === receiptId
                 ? {
@@ -509,7 +839,7 @@ export const FinanceProvider = ({ children }) => {
             reason: `Mock ${channel} delivery`,
         })
         return { success: true, receiptNo: receipt.receiptNo }
-    }, [appendAudit, receipts])
+    }, [appendAudit, receipts, rehydrateFromApi])
 
     const addFeeStructure = useCallback((structure) => {
         const id = structure.id || `FS-${Date.now()}`
@@ -679,11 +1009,62 @@ export const FinanceProvider = ({ children }) => {
         return transaction
     }, [bankAccounts, postAccounting])
 
-    const resetFinanceDemoData = useCallback(() => {
+    const resetFinanceDemoData = useCallback(async () => {
+        if (isLiveApiEnabled()) {
+            setLiveLoading(true)
+            const reset = await resetFinanceStateApi()
+            if (!reset.success) {
+                setLiveLoading(false)
+                setLiveError(typeof reset.error === 'string' ? reset.error : 'Finance reset failed on the server.')
+                return { success: false, error: reset.error }
+            }
+            const seed = createSeedFinanceState()
+            // Keep campus students already present on the empty snapshot when available.
+            const remoteStudents = Array.isArray(reset.data?.data?.students) ? reset.data.data.students : []
+            const studentsForSeed = remoteStudents.length ? remoteStudents : FINANCE_STUDENTS
+            const payload = snapshotFromContext({
+                students: studentsForSeed,
+                feeCategories: seed.feeCategories,
+                feeStructures: seed.feeStructures,
+                fineRules: seed.fineRules,
+                bankAccounts: seed.bankAccounts,
+                posTerminals: seed.posTerminals,
+                concessions: seed.concessions,
+                installments: seed.installments,
+                annualBudget: BUDGET_SEED,
+                transactions: seed.transactions,
+                receipts: seed.receipts,
+                cheques: seed.cheques,
+                paymentLinks: seed.paymentLinks,
+                auditLog: seed.auditLog,
+                glEntries: seed.glEntries,
+                dayBookEntries: seed.dayBookEntries,
+                cashBookEntries: seed.cashBookEntries,
+                bankBookEntries: seed.bankBookEntries,
+                onlineBookEntries: seed.onlineBookEntries,
+                reconciliationItems: seed.reconciliationItems,
+                sequence: { ...seed.sequence },
+                meta: { seeded: true },
+            })
+            // Seed masters into the empty campus ledger so Fees/Collections can be exercised.
+            const saved = await saveFinanceStateApi(payload)
+            if (!saved.success) {
+                setLiveLoading(false)
+                setLiveError(typeof saved.error === 'string' ? saved.error : 'Could not seed finance state on the server.')
+                return { success: false, error: saved.error }
+            }
+            applyRemoteState(saved.data)
+            setLiveError('')
+            setLiveSource('backend')
+            setLiveLoading(false)
+            return { success: true, dataSource: 'backend' }
+        }
+
         skipPersistRef.current = true
         clearFinanceState()
         const seed = createSeedFinanceState()
         seq.current = { ...seed.sequence }
+        setStudents(FINANCE_STUDENTS)
         setFeeCategories(seed.feeCategories)
         setFeeStructures(seed.feeStructures)
         setFineRules(seed.fineRules)
@@ -703,7 +1084,8 @@ export const FinanceProvider = ({ children }) => {
         setOnlineBookEntries(seed.onlineBookEntries)
         setReconciliationItems(seed.reconciliationItems)
         setLastSavedAt(null)
-    }, [])
+        return { success: true, dataSource: 'local' }
+    }, [applyRemoteState])
 
     const moneyInTransactions = useMemo(
         () => transactions.filter((item) => item.direction === TRANSACTION_DIRECTIONS.IN),
@@ -753,6 +1135,55 @@ export const FinanceProvider = ({ children }) => {
             return
         }
 
+        if (isLiveApiEnabled()) {
+            if (!liveReadyRef.current || liveLoading || !getAccessToken()) return undefined
+            if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
+            persistTimerRef.current = setTimeout(async () => {
+                if (!getAccessToken()) return
+                const snapshot = snapshotFromContext({
+                    students,
+                    feeCategories,
+                    feeStructures,
+                    fineRules,
+                    bankAccounts,
+                    posTerminals,
+                    concessions,
+                    installments,
+                    annualBudget,
+                    transactions,
+                    receipts,
+                    cheques,
+                    paymentLinks,
+                    auditLog,
+                    glEntries,
+                    dayBookEntries,
+                    cashBookEntries,
+                    bankBookEntries,
+                    onlineBookEntries,
+                    reconciliationItems,
+                    sequence: { ...seq.current },
+                    meta: { seeded: true },
+                })
+                // Preserve live-only collections already on the snapshot so PUT does not wipe them.
+                snapshot.approvals = approvals
+                snapshot.wallets = wallets
+                snapshot.walletRecharges = walletRecharges
+                snapshot.transportFleet = transportFleet
+                const res = await saveFinanceStateApi(snapshot)
+                if (res.success) {
+                    setLastSavedAt(res.data?.savedAt || new Date().toISOString())
+                    setLiveError('')
+                    setLiveSource('backend')
+                } else {
+                    setLiveError(typeof res.error === 'string' ? res.error : 'Failed to persist finance state.')
+                    setLiveSource('error')
+                }
+            }, 500)
+            return () => {
+                if (persistTimerRef.current) clearTimeout(persistTimerRef.current)
+            }
+        }
+
         const payload = saveFinanceState({
             feeCategories,
             feeStructures,
@@ -776,8 +1207,10 @@ export const FinanceProvider = ({ children }) => {
             sequence: { ...seq.current },
         })
         if (payload?.savedAt) setLastSavedAt(payload.savedAt)
+        return undefined
     }, [
         annualBudget,
+        approvals,
         auditLog,
         bankAccounts,
         bankBookEntries,
@@ -790,12 +1223,17 @@ export const FinanceProvider = ({ children }) => {
         fineRules,
         glEntries,
         installments,
+        liveLoading,
         onlineBookEntries,
         paymentLinks,
         posTerminals,
         receipts,
         reconciliationItems,
+        students,
         transactions,
+        transportFleet,
+        walletRecharges,
+        wallets,
     ])
 
     const issueActivityFeeReceipt = useCallback((payload) => {
@@ -895,6 +1333,7 @@ export const FinanceProvider = ({ children }) => {
         issueActivityFeeReceipt,
         settleCheque,
         waiveFine,
+        decideApproval,
         generatePaymentLink,
         reprintReceipt,
         sendReceipt,
@@ -912,11 +1351,23 @@ export const FinanceProvider = ({ children }) => {
         postExternalInflow,
         setReconciliationItems,
         resetFinanceDemoData,
+        rehydrateFromApi,
         lastSavedAt,
+        liveLoading,
+        liveError,
+        liveSource,
+        approvals,
+        wallets,
+        walletRecharges,
+        transportFleet,
         financePersistence: {
             enabled: true,
             storageKey: FINANCE_STORAGE_KEY,
             lastSavedAt,
+            live: isLiveApiEnabled(),
+            liveSource,
+            liveError,
+            liveLoading,
         },
         cloneSeed: () => clone(FEE_INSTALLMENTS),
     }), [
@@ -934,6 +1385,7 @@ export const FinanceProvider = ({ children }) => {
         concessions,
         dashboardMetrics,
         dayBookEntries,
+        decideApproval,
         editNarration,
         feeCategories,
         feeStructures,
@@ -963,7 +1415,15 @@ export const FinanceProvider = ({ children }) => {
         transactions,
         waiveFine,
         resetFinanceDemoData,
+        rehydrateFromApi,
         lastSavedAt,
+        liveLoading,
+        liveError,
+        liveSource,
+        approvals,
+        wallets,
+        walletRecharges,
+        transportFleet,
     ])
 
     return (

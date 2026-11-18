@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import { EMPLOYEE_CATEGORIES, DEPARTMENTS, EMPLOYEE_STATUSES } from '../domain/hrStatus'
@@ -11,10 +11,14 @@ import { advanceNext, canMutate, employeeName, getAdvances, getEmployees, getPay
 import { Badge, Modal, PageIntro, PrimaryButton } from '../components/HrUi'
 import { useHrTick } from '../components/hrUiState'
 import FinancialActionFlow from '../../../Common/Finance/FinancialActionFlow'
-import { ConfirmAction, DataTable, IntegrationNotice } from '../../../Common/ui'
+import { ConfirmAction, DataTable, FeedbackState, IntegrationNotice } from '../../../Common/ui'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { getHrPayrollBundle, listPortalEmployees, saveHrPayrollBundle } from '../../../services/api/hrApiService'
+import { buildSalaryRow, summarizePayroll } from '../domain/payrollCalculations'
 
 const SalaryStatement = () => {
     const tick = useHrTick()
+    const live = isLiveApiEnabled()
     const [month, setMonth] = useState('June')
     const [year, setYear] = useState(2026)
     const [category, setCategory] = useState('')
@@ -23,16 +27,137 @@ const SalaryStatement = () => {
     const [search, setSearch] = useState('')
     const [tab, setTab] = useState('statement')
     const [paymentCandidate, setPaymentCandidate] = useState(null)
+    const [liveEmployees, setLiveEmployees] = useState([])
+    const [liveBundle, setLiveBundle] = useState({ months: [], revisions: [] })
+    const [listLoading, setListLoading] = useState(Boolean(live))
+    const [listError, setListError] = useState('')
+    const [saving, setSaving] = useState(false)
+    const [refreshNonce, setRefreshNonce] = useState(0)
+
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            setListLoading(false)
+            setListError('')
+            return
+        }
+        let cancelled = false
+        ;(async () => {
+            setListLoading(true)
+            setListError('')
+            const [payRes, empRes] = await Promise.all([getHrPayrollBundle(), listPortalEmployees()])
+            if (cancelled) return
+            setListLoading(false)
+            if (!payRes.success || !empRes.success) {
+                setListError(
+                    typeof (payRes.error || empRes.error) === 'string'
+                        ? (payRes.error || empRes.error)
+                        : 'Failed to load payroll from the API.',
+                )
+                setLiveEmployees([])
+                setLiveBundle({ months: [], revisions: [] })
+                return
+            }
+            setLiveBundle(payRes.data || { months: [], revisions: [] })
+            setLiveEmployees(Array.isArray(empRes.data) ? empRes.data : [])
+        })()
+        return () => { cancelled = true }
+    }, [refreshNonce])
+
     const rows = useMemo(() => {
         void tick
-        return salaryRows(month, year, { category, department, status, search })
-    }, [tick, month, year, category, department, status, search])
+        if (!isLiveApiEnabled()) {
+            return salaryRows(month, year, { category, department, status, search })
+        }
+        return liveEmployees
+            .filter((employee) => !category || employee.category === category)
+            .filter((employee) => !department || employee.department === department)
+            .filter((employee) => !status || employee.status === status)
+            .filter((employee) => !search || `${employee.name} ${employee.id}`.toLowerCase().includes(search.toLowerCase()))
+            .map((employee) => {
+                const attendance = (liveBundle.months || []).find(
+                    (item) => item?.employeeId === employee.id && item.month === month && Number(item.year) === Number(year),
+                ) || {
+                    employeeId: employee.id,
+                    month,
+                    year: Number(year),
+                    workingDays: 26,
+                    lates: 0,
+                    permission: 0,
+                    casualLeave: 0,
+                    otherLeave: 0,
+                    absent: 0,
+                    notPunched: 0,
+                    paymentStatus: 'Unpaid',
+                    bankRef: '',
+                    paymentDate: '',
+                    paymentMode: 'Bank Transfer',
+                }
+                return buildSalaryRow({
+                    employee,
+                    attendance,
+                    advances: [],
+                    disciplinaryActions: [],
+                    month,
+                    year,
+                })
+            })
+    }, [tick, month, year, category, department, status, search, liveEmployees, liveBundle])
+
     const summary = useMemo(() => {
         void tick
-        return payrollSummary(month, year)
-    }, [tick, month, year])
+        if (!isLiveApiEnabled()) return payrollSummary(month, year)
+        return summarizePayroll(rows)
+    }, [tick, month, year, rows])
 
-    const recordDemoPayment = (row) => {
+    const recordDemoPayment = async (row) => {
+        if (isLiveApiEnabled()) {
+            setSaving(true)
+            const months = (liveBundle.months || []).some((item) => item.employeeId === row.employeeId && item.month === month && Number(item.year) === Number(year))
+                ? (liveBundle.months || []).map((item) => (
+                    item.employeeId === row.employeeId && item.month === month && Number(item.year) === Number(year)
+                        ? {
+                            ...item,
+                            paymentStatus: 'Paid',
+                            bankRef: `API-LEDGER-${row.employeeId}`,
+                            paymentDate: new Date().toISOString().slice(0, 10),
+                            paymentMode: 'API ledger (no bank)',
+                            netSalary: row.netSalary,
+                        }
+                        : item
+                ))
+                : [
+                    ...(liveBundle.months || []),
+                    {
+                        id: `PAY-${row.employeeId}-${month}-${year}`,
+                        employeeId: row.employeeId,
+                        month,
+                        year,
+                        workingDays: row.workingDays,
+                        lates: row.lates,
+                        permission: row.permission,
+                        casualLeave: row.casualLeave,
+                        otherLeave: row.otherLeave,
+                        absent: row.absent,
+                        notPunched: row.notPunched,
+                        paymentStatus: 'Paid',
+                        bankRef: `API-LEDGER-${row.employeeId}`,
+                        paymentDate: new Date().toISOString().slice(0, 10),
+                        paymentMode: 'API ledger (no bank)',
+                        netSalary: row.netSalary,
+                    },
+                ]
+            const res = await saveHrPayrollBundle({ months, revisions: liveBundle.revisions || [] })
+            setSaving(false)
+            if (!res.success) {
+                toast.error(typeof res.error === 'string' ? res.error : 'Server rejected the payroll payment mark.')
+                return
+            }
+            setLiveBundle(res.data)
+            setPaymentCandidate(null)
+            toast.success('Payment marked Paid on the HR payroll API. No bank transfer was initiated.')
+            setRefreshNonce((n) => n + 1)
+            return
+        }
         const bundle = getPayrollBundle()
         const months = bundle.months.some((item) => item.employeeId === row.employeeId && item.month === month && Number(item.year) === Number(year))
             ? bundle.months.map((item) => item.employeeId === row.employeeId && item.month === month && Number(item.year) === Number(year) ? { ...item, paymentStatus: 'Paid', bankRef: `LOCAL-DEMO-${row.employeeId}`, paymentDate: new Date().toISOString().slice(0, 10), paymentMode: 'Demo record' } : item)
@@ -86,18 +211,34 @@ const SalaryStatement = () => {
             <IntegrationNotice
                 state='disconnected'
                 title='Payment integration disconnected'
-                description='No bank or payment API is connected. Recording a demo payment updates only this browser-stored payroll ledger and never initiates a transfer.'
+                description={
+                    live
+                        ? 'No bank or payment API is connected. Marking Paid updates the campus HR payroll ledger via PUT /api/v1/hr/payroll and never initiates a transfer. Paid months are locked by the server.'
+                        : 'No bank or payment API is connected. Recording a demo payment updates only this browser-stored payroll ledger and never initiates a transfer.'
+                }
             />
+            {live ? (
+                <FeedbackState
+                    tone={listError ? 'danger' : 'info'}
+                    title={listError ? 'Payroll API unavailable' : 'Live payroll ledger'}
+                    description={listError || 'Salary statement rows are calculated from portal employees + GET /hr/payroll months. Mark Paid awaits server confirmation.'}
+                />
+            ) : null}
+            {listLoading ? <p className='text-sm text-slate-500 py-4'>Loading payroll…</p> : null}
+            {listError && !listLoading ? (
+                <button type='button' className='mb-3 text-sm font-semibold text-[#515DEF]' onClick={() => setRefreshNonce((n) => n + 1)}>Retry</button>
+            ) : null}
             <FinancialActionFlow current='Review' completed={['Calculate']} title='Payroll lifecycle' />
             <div className='flex gap-2'>
                 <button type='button' className={`px-3 py-2 rounded-md text-sm cursor-pointer ${tab === 'statement' ? 'bg-[#515DEF] text-white' : 'bg-white border'}`} onClick={() => setTab('statement')}>Statement</button>
                 <button type='button' className={`px-3 py-2 rounded-md text-sm cursor-pointer ${tab === 'summary' ? 'bg-[#515DEF] text-white' : 'bg-white border'}`} onClick={() => setTab('summary')}>Payroll Summary</button>
             </div>
-            {tab === 'summary' ? (
+            {!listLoading && tab === 'summary' ? (
                 <div className='overflow-hidden rounded-[var(--erp-radius-surface)] border border-[var(--erp-line)] bg-white'>
                     <DataTable caption={`${month} ${year} payroll summary`} rows={[...summary.lines, summary.totals]} columns={summaryColumns} rowKey='category' />
                 </div>
-            ) : (
+            ) : null}
+            {!listLoading && tab === 'statement' ? (
                 <div className='overflow-hidden rounded-[var(--erp-radius-surface)] border border-[var(--erp-line)] bg-white'>
                     <DataTable
                         caption={`${month} ${year} salary statement`}
@@ -106,22 +247,23 @@ const SalaryStatement = () => {
                         rowKey='employeeId'
                         emptyTitle='No payroll records match these filters'
                         emptyDescription='Change category, department, status or search to review other employees.'
-                        renderActions={(row) => row.paymentStatus !== 'Paid' ? <button type='button' className='min-h-9 rounded-md border border-[var(--erp-indigo)] px-3 text-sm font-semibold text-[var(--erp-indigo)]' onClick={() => setPaymentCandidate(row)}>Record demo payment</button> : undefined}
+                        renderActions={(row) => row.paymentStatus !== 'Paid' ? <button type='button' disabled={saving} className='min-h-9 rounded-md border border-[var(--erp-indigo)] px-3 text-sm font-semibold text-[var(--erp-indigo)]' onClick={() => setPaymentCandidate(row)}>{live ? 'Mark Paid' : 'Record demo payment'}</button> : undefined}
                     />
                     <p className='border-t border-[var(--erp-line)] px-4 py-3 text-xs text-[var(--erp-slate)]'>Basic is {PAYROLL_CONFIG.basicSalaryPercentage}% of payable gross. Permission already reduces pay through the late/permission day rule. Extra deduction is the special deduction. Approved disciplinary actions use the daily rate (gross ÷ working days): Warning 0 days, Memo 1 day, Suspended 2 days. The same amount is deducted in net salary.</p>
                 </div>
-            )}
+            ) : null}
             <ConfirmAction
                 open={Boolean(paymentCandidate)}
                 onClose={() => setPaymentCandidate(null)}
                 onConfirm={() => paymentCandidate && recordDemoPayment(paymentCandidate)}
-                title='Record demo payment?'
-                description='This changes the browser-stored payroll status only. It does not contact a bank or transfer funds.'
-                confirmLabel='Record demo payment'
+                title={live ? 'Mark payroll Paid on server?' : 'Record demo payment?'}
+                description={live ? 'This updates the HR payroll API ledger only. It does not contact a bank or transfer funds. Paid months are locked.' : 'This changes the browser-stored payroll status only. It does not contact a bank or transfer funds.'}
+                confirmLabel={live ? 'Mark Paid' : 'Record demo payment'}
+                confirmDisabled={saving}
             >
                 {paymentCandidate && (
                     <p>
-                        Record {formatInr(paymentCandidate.netSalary)} for <strong>{paymentCandidate.employeeName}</strong> as paid in the local demo ledger?
+                        Record {formatInr(paymentCandidate.netSalary)} for <strong>{paymentCandidate.employeeName}</strong> as paid{live ? ' on the campus payroll ledger' : ' in the local demo ledger'}?
                     </p>
                 )}
             </ConfirmAction>

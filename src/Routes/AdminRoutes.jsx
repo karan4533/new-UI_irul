@@ -214,15 +214,16 @@ const AdminRoutes = () => {
             {/* Task Management */}
             {TaskManagementRoutes({ basePath: '/admin' })}
 
-            {/* Enterprise Functional Operations (Stores, Gate Pass, File Room, Ticketing, Monitoring, Lost & Found) */}
-            {EnterpriseOperationsRoutes({ basePath: '/admin', role: 'admin' })}
-
-            {/* Leave Request */}
+            {/* Leave Request — declare BEFORE EnterpriseOperationsRoutes so live ReceivedLeave
+                is not shadowed by the enterprise AttendanceAndLeaveWorkspace leave stubs. */}
             <Route path='/admin/leave-request/my-requests' element={<AttendanceAndLeaveWorkspace defaultTab="my-leaves" />} />
             <Route path='/admin/leave-request/my-requests/add' element={<AddLeaveRequest />} />
             <Route path='/admin/leave-request/my-requests/view/:id' element={<ViewMyLeaveRequest />} />
-            <Route path='/admin/leave-request/received' element={<AttendanceAndLeaveWorkspace defaultTab="received-leaves" />} />
+            <Route path='/admin/leave-request/received' element={<ReceivedLeaveRequests />} />
             <Route path='/admin/leave-request/received/view/:id' element={<ViewReceivedLeaveRequest />} />
+
+            {/* Enterprise Functional Operations (Stores, Gate Pass, File Room, Ticketing, Monitoring, Lost & Found) */}
+            {EnterpriseOperationsRoutes({ basePath: '/admin', role: 'admin' })}
 
             {/* Academic Calendar */}
             <Route path='/admin/academic-calendar' element={<AcademicCalendar />} />
