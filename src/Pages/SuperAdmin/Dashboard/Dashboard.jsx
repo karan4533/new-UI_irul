@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import ReactECharts from 'echarts-for-react'
 import {
@@ -41,7 +41,9 @@ import {
     RECENT_APPROVALS,
     findingSeverityBadgeColor,
 } from './dashboardData'
-import { RatingBadge } from '../../../Common/ui'
+import { FeedbackState, RatingBadge } from '../../../Common/ui'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { getAdminDashboard } from '../../../services/api/adminDashboardApiService'
 
 const OPERATIONAL_DEPARTMENTS = [
     {
@@ -167,6 +169,32 @@ const Panel = ({ title, action, children, className = '' }) => (
 
 const Dashboard = () => {
     const navigate = useNavigate()
+    const live = isLiveApiEnabled()
+    const [liveKpis, setLiveKpis] = useState(null)
+    const [kpiLoading, setKpiLoading] = useState(Boolean(live))
+    const [kpiError, setKpiError] = useState('')
+
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            setKpiLoading(false)
+            return
+        }
+        let cancelled = false
+        ;(async () => {
+            setKpiLoading(true)
+            setKpiError('')
+            const res = await getAdminDashboard()
+            if (cancelled) return
+            setKpiLoading(false)
+            if (!res.success) {
+                setKpiError(typeof res.error === 'string' ? res.error : 'Dashboard API unavailable.')
+                setLiveKpis(null)
+                return
+            }
+            setLiveKpis(res.data)
+        })()
+        return () => { cancelled = true }
+    }, [])
 
     const onFinancialTrendClick = (params) => {
         if (params?.name) {
@@ -327,6 +355,37 @@ const Dashboard = () => {
                     </Link>
                 </div>
             </div>
+
+            {live ? (
+                <div className='rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4'>
+                    <p className='text-xs font-semibold uppercase tracking-wide text-emerald-800 mb-3'>
+                        Live campus KPIs · GET /api/v1/admin/dashboard{liveKpis?.asOf ? ` · as of ${liveKpis.asOf}` : ''}
+                    </p>
+                    {kpiLoading ? (
+                        <FeedbackState kind='loading' title='Loading dashboard KPIs' description='Fetching from the admin dashboard API…' />
+                    ) : kpiError ? (
+                        <FeedbackState kind='error' title='Dashboard API unavailable' description={kpiError} />
+                    ) : liveKpis ? (
+                        <div className='grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3'>
+                            {[
+                                ['Students', liveKpis.students],
+                                ['Employees', liveKpis.employees],
+                                ['Leave requests', liveKpis.leaveRequests],
+                                ['Open escalations', liveKpis.openEscalations],
+                                ['Pending TC', liveKpis.pendingTc],
+                                ['Unread notifications', liveKpis.unreadNotifications],
+                                ['Announcements (month)', liveKpis.announcementsThisMonth],
+                            ].map(([label, value]) => (
+                                <article key={label} className='rounded-xl border border-emerald-100 bg-white p-3'>
+                                    <p className='text-[10px] font-medium uppercase tracking-wide text-slate-500'>{label}</p>
+                                    <p className='mt-1 text-xl font-bold text-slate-900'>{value}</p>
+                                </article>
+                            ))}
+                        </div>
+                    ) : null}
+                    <p className='mt-3 text-[11px] text-slate-500'>Charts below remain demo visuals until those modules are integrated for this role.</p>
+                </div>
+            ) : null}
 
             {/* Direct Role/User Management Quick Links Bar */}
             <div>

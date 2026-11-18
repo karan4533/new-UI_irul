@@ -13,6 +13,12 @@ import {
 import { ROLES } from '../constants/roles'
 import { deviceLabel, logActivity } from '../Common/demoDomain/activityLog'
 import { findUserByIdentifier, ENTERPRISE_USER_DIRECTORY } from '../Pages/Authentication/enterpriseUserDirectory'
+import {
+    loginWithBackend,
+    logoutFromBackend,
+    fetchCurrentUser,
+} from '../services/api/authService'
+import { clearAccessToken, getAccessToken, isLiveApiEnabled } from '../services/api/tokenStore'
 
 export const ROLE_HOME_PATHS = Object.freeze({
     [ROLES.SUPER_ADMIN]: '/super-admin/dashboard',
@@ -150,13 +156,68 @@ export const AuthProvider = ({ children }) => {
     const [isSessionReady, setIsSessionReady] = useState(false)
 
     useEffect(() => {
-        if (stored.isAuthenticated && stored.email && CREATABLE_LOGIN_ROLES.has(stored.role)) {
-            const existing = getCreatedUserByEmail(stored.email)
-            if (existing && existing.status === 'Active') {
-                setActiveCreatedUserSession(existing)
+        let cancelled = false
+
+        const bootstrapSession = async () => {
+            if (stored.isAuthenticated && stored.email && CREATABLE_LOGIN_ROLES.has(stored.role)) {
+                const existing = getCreatedUserByEmail(stored.email)
+                if (existing && existing.status === 'Active') {
+                    setActiveCreatedUserSession(existing)
+                }
             }
+
+            // Live API: re-validate JWT session against GET /api/v1/auth/me
+            if (isLiveApiEnabled() && getAccessToken()) {
+                const me = await fetchCurrentUser()
+                if (cancelled) return
+                if (!me.success) {
+                    clearAccessToken()
+                    sessionStorage.removeItem(STORAGE_KEY)
+                    localStorage.removeItem(PERSISTENT_STORAGE_KEY)
+                    setIsAuthenticated(false)
+                    setRole(null)
+                    setEmail(null)
+                    setName(null)
+                    setEmployeeId(null)
+                    setDepartment(null)
+                    setDesignation(null)
+                    setUser(null)
+                } else {
+                    setIsAuthenticated(true)
+                    setRole(me.role)
+                    setEmail(me.user.email)
+                    setName(me.user.name)
+                    setEmployeeId(me.user.employeeId || null)
+                    setDepartment(me.user.department || null)
+                    setDesignation(me.user.designation || null)
+                    setUser(me.user)
+                }
+            }
+
+            if (!cancelled) setIsSessionReady(true)
         }
-        setIsSessionReady(true)
+
+        bootstrapSession()
+
+        const onAuthExpired = () => {
+            sessionStorage.removeItem(STORAGE_KEY)
+            localStorage.removeItem(PERSISTENT_STORAGE_KEY)
+            clearAccessToken()
+            setIsAuthenticated(false)
+            setRole(null)
+            setEmail(null)
+            setName(null)
+            setEmployeeId(null)
+            setDepartment(null)
+            setDesignation(null)
+            setUser(null)
+        }
+        window.addEventListener('qmis:auth-expired', onAuthExpired)
+
+        return () => {
+            cancelled = true
+            window.removeEventListener('qmis:auth-expired', onAuthExpired)
+        }
     }, [stored])
 
     const persistAuth = useCallback((sessionPayload, rememberMe = false) => {
@@ -173,45 +234,7 @@ export const AuthProvider = ({ children }) => {
      * Enterprise Centralized Authentication
      * Automatically identifies user identity, assigned role, permissions, department, and hierarchy.
      */
-    const login = useCallback((identifier, password, rememberMe = false) => {
-        if (!identifier || !String(identifier).trim()) {
-            return {
-                success: false,
-                message: 'Please enter your Email Address or Employee ID.',
-            }
-        }
-
-        if (!password || !String(password).trim()) {
-            return {
-                success: false,
-                message: 'Please enter your password.',
-            }
-        }
-
-        if (String(password).trim().length < 4) {
-            return {
-                success: false,
-                message: 'Password must be at least 4 characters long.',
-            }
-        }
-
-        // Automatic Identity & Role Resolution
-        const resolvedUser = findUserByIdentifier(identifier)
-        if (!resolvedUser) {
-            return {
-                success: false,
-                message: 'Authentication failed. No active account matches this Email or Employee ID.',
-            }
-        }
-
-        if (resolvedUser.status && resolvedUser.status !== 'Active') {
-            return {
-                success: false,
-                message: 'This account is currently suspended or inactive. Please contact the IT Helpdesk.',
-            }
-        }
-
-        const authenticatedRole = resolvedUser.role
+    const applyAuthenticatedSession = useCallback((resolvedUser, authenticatedRole, rememberMe = false) => {
         const normalizedEmail = resolvedUser.email.toLowerCase()
         const resolvedName = resolvedUser.name
         const resolvedEmpId = resolvedUser.employeeId || resolvedUser.id
@@ -227,6 +250,7 @@ export const AuthProvider = ({ children }) => {
             department: resolvedDept,
             designation: resolvedDesig,
             user: resolvedUser,
+            source: resolvedUser.source || 'demo',
         }
 
         setIsAuthenticated(true)
@@ -246,7 +270,7 @@ export const AuthProvider = ({ children }) => {
             role: authenticatedRole,
             action: 'LOGIN',
             module: 'Authentication',
-            details: `${deviceLabel()} · Central Enterprise Authentication`,
+            details: `${deviceLabel()} · ${resolvedUser.source === 'backend' ? 'Backend JWT' : 'Central Enterprise Authentication'}`,
             recordId: crypto.randomUUID?.() || `SES-${Date.now()}`,
         })
 
@@ -266,6 +290,64 @@ export const AuthProvider = ({ children }) => {
                 setActiveCreatedUserSession(createdUser)
             }
         }
+    }, [persistAuth])
+
+    const login = useCallback(async (identifier, password, rememberMe = false) => {
+        if (!identifier || !String(identifier).trim()) {
+            return {
+                success: false,
+                message: 'Please enter your Email Address or Employee ID.',
+            }
+        }
+
+        if (!password || !String(password).trim()) {
+            return {
+                success: false,
+                message: 'Please enter your password.',
+            }
+        }
+
+        // Live FastAPI authentication (no demo bypass)
+        if (isLiveApiEnabled()) {
+            const result = await loginWithBackend(identifier, password, rememberMe)
+            if (!result.success) {
+                return result
+            }
+            applyAuthenticatedSession(result.user, result.role, rememberMe)
+            return {
+                success: true,
+                user: result.user,
+                role: result.role,
+                homePath: result.homePath,
+                mustChangePassword: result.mustChangePassword,
+            }
+        }
+
+        if (String(password).trim().length < 4) {
+            return {
+                success: false,
+                message: 'Password must be at least 4 characters long.',
+            }
+        }
+
+        // Demo / offline identity resolution (VITE_USE_MOCK !== false)
+        const resolvedUser = findUserByIdentifier(identifier)
+        if (!resolvedUser) {
+            return {
+                success: false,
+                message: 'Authentication failed. No active account matches this Email or Employee ID.',
+            }
+        }
+
+        if (resolvedUser.status && resolvedUser.status !== 'Active') {
+            return {
+                success: false,
+                message: 'This account is currently suspended or inactive. Please contact the IT Helpdesk.',
+            }
+        }
+
+        const authenticatedRole = resolvedUser.role
+        applyAuthenticatedSession(resolvedUser, authenticatedRole, rememberMe)
 
         return {
             success: true,
@@ -273,15 +355,20 @@ export const AuthProvider = ({ children }) => {
             role: authenticatedRole,
             homePath: ROLE_HOME_PATHS[authenticatedRole] ?? '/dashboard',
         }
-    }, [persistAuth])
+    }, [applyAuthenticatedSession])
 
-    const logout = useCallback(() => {
+    const logout = useCallback(async () => {
         logActivity({
             actor: email || name || 'Enterprise User',
             role,
             action: 'LOGOUT',
             module: 'Authentication',
         })
+        if (isLiveApiEnabled()) {
+            await logoutFromBackend()
+        } else {
+            clearAccessToken()
+        }
         sessionStorage.removeItem(STORAGE_KEY)
         localStorage.removeItem(PERSISTENT_STORAGE_KEY)
         clearActiveAdminSession()

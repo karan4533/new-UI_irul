@@ -12,6 +12,29 @@ import {
   isApiResponse,
 } from './responseEnvelope.js';
 import { generateUniqueId } from '../models/index.js';
+import { clearAccessToken, getAccessToken } from './tokenStore.js';
+
+function resolveUseMockFlag() {
+  if (typeof import.meta === 'undefined') return true;
+  const flag = import.meta.env?.VITE_USE_MOCK;
+  // Explicit false enables live HTTP; anything else keeps the offline mock (safe default).
+  return flag !== 'false';
+}
+
+function extractHttpErrorMessage(parsedBody, status, statusText) {
+  if (!parsedBody) return `HTTP ${status}: ${statusText}`;
+  if (typeof parsedBody === 'string' && parsedBody.trim()) return parsedBody;
+  if (parsedBody.error) return String(parsedBody.error);
+  if (parsedBody.message) return String(parsedBody.message);
+  if (parsedBody.detail) {
+    if (typeof parsedBody.detail === 'string') return parsedBody.detail;
+    if (parsedBody.detail.message) return String(parsedBody.detail.message);
+    if (Array.isArray(parsedBody.detail)) {
+      return parsedBody.detail.map((d) => d.msg || d.message || JSON.stringify(d)).join('; ');
+    }
+  }
+  return `HTTP ${status}: ${statusText}`;
+}
 
 class ApiClient {
   constructor(config = {}) {
@@ -173,9 +196,15 @@ class ApiClient {
     }
 
     try {
+      const authHeaders = {};
+      const token = getAccessToken();
+      if (token && !headers.Authorization && !headers.authorization) {
+        authHeaders.Authorization = `Bearer ${token}`;
+      }
+
       const fetchOptions = {
         method,
-        headers: { ...this.defaultHeaders, ...headers },
+        headers: { ...this.defaultHeaders, ...authHeaders, ...headers },
         signal: fetchSignal,
       };
 
@@ -200,8 +229,14 @@ class ApiClient {
       }
 
       if (!res.ok) {
-        const errMsg = parsedBody?.error || parsedBody?.message || `HTTP ${res.status}: ${res.statusText}`;
-        return createErrorResponse(errMsg, parsedBody?.data || null);
+        if (res.status === 401) {
+          clearAccessToken();
+          if (typeof window !== 'undefined' && !window.location.pathname.includes('/signin')) {
+            window.dispatchEvent(new CustomEvent('qmis:auth-expired'));
+          }
+        }
+        const errMsg = extractHttpErrorMessage(parsedBody, res.status, res.statusText);
+        return createErrorResponse(errMsg, parsedBody || null);
       }
 
       if (isApiResponse(parsedBody)) {
@@ -294,6 +329,8 @@ class ApiClient {
 
 export const apiClient = new ApiClient({
   baseUrl: (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) || '',
-  useMock: (typeof import.meta !== 'undefined' && import.meta.env?.VITE_USE_MOCK !== 'false') || true,
+  useMock: resolveUseMockFlag(),
+  timeoutMs:
+    (typeof import.meta !== 'undefined' && Number(import.meta.env?.VITE_API_TIMEOUT_MS)) || 15000,
   defaultDelayMs: 0,
 });

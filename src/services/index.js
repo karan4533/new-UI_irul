@@ -12,6 +12,55 @@ export {
   isApiResponse,
   paginateResults,
 } from './api/responseEnvelope.js';
+export {
+  getAccessToken,
+  setAccessToken,
+  clearAccessToken,
+  isLiveApiEnabled,
+} from './api/tokenStore.js';
+export {
+  loginWithBackend,
+  logoutFromBackend,
+  fetchCurrentUser,
+  checkBackendHealth,
+  BACKEND_SEED_DIRECTORY,
+} from './api/authService.js';
+export {
+  BACKEND_ANNOUNCEMENT_CATEGORIES,
+  mapApiAnnouncement,
+  listAnnouncements,
+  getAnnouncement,
+  listAnnouncementCategories,
+  createAnnouncement,
+  acknowledgeAnnouncement,
+  replyToAnnouncement,
+} from './api/announcementApiService.js';
+export {
+  listEmployees,
+  listPortalEmployees,
+  getEmployee,
+  createEmployee,
+  updateEmployee,
+  setEmployeeStatus,
+  mapEmployeeOutToUi,
+  mapPortalEmployeeToUi,
+} from './api/hrApiService.js';
+export {
+  listAdminUsers,
+  getAdminUser,
+  listCreatableRoles,
+  createAdminUserApi,
+  updateAdminUserApi,
+  resetAdminUserPassword,
+  mapAdminUserToUi,
+  uiFormToUserCreate,
+} from './api/adminUsersApiService.js';
+export {
+  listStudents,
+  getStudent,
+  mapStudentToUi,
+} from './api/studentApiService.js';
+export { getAdminDashboard } from './api/adminDashboardApiService.js';
 
 // Domain Models & Validation
 export {

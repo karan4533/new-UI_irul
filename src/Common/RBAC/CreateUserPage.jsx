@@ -5,6 +5,7 @@ import { toast } from 'react-toastify'
 import UserCreationForm from './Components/UserCreationForm'
 import { ConfirmAction, IntegrationNotice, PageHeader, Surface } from '../ui'
 import { CREATABLE_ROLE_LABELS } from './createdUsersData'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
 
 const CreateUserPage = ({
     routeBase,
@@ -28,24 +29,33 @@ const CreateUserPage = ({
         setForm((prev) => ({ ...prev, [key]: value }))
     }
 
-    const handleSubmit = () => {
+    const handleSubmit = async () => {
         setError('')
-        const result = onSubmit(form)
-        if (!result.success) {
-            setError(result.message)
+        try {
+            const result = await Promise.resolve(onSubmit(form))
+            if (!result?.success) {
+                setError(result?.message || 'Could not create the user.')
+                setConfirmOpen(false)
+                return
+            }
+
             setConfirmOpen(false)
-            return
+            if (result.temporaryPassword) {
+                toast.success(`${successMessage} Temporary password: ${result.temporaryPassword}`)
+            } else {
+                toast.success(successMessage)
+            }
+
+            if (onSuccess) {
+                onSuccess(result, navigate)
+                return
+            }
+
+            navigate(routeBase)
+        } catch (err) {
+            setConfirmOpen(false)
+            setError(err?.message || 'Could not create the user.')
         }
-
-        setConfirmOpen(false)
-        toast.success(successMessage)
-
-        if (onSuccess) {
-            onSuccess(result, navigate)
-            return
-        }
-
-        navigate(routeBase)
     }
 
     return (
@@ -62,9 +72,11 @@ const CreateUserPage = ({
             <PageHeader title={pageTitle} description={pageDescription} context='Identity and access provisioning' />
 
             <IntegrationNotice
-                state='demo'
-                title='Local provisioning only'
-                description='This creates a browser-local profile. The production identity service must issue invitations, establish credentials and record the provisioning audit event.'
+                state={isLiveApiEnabled() ? 'connected' : 'demo'}
+                title={isLiveApiEnabled() ? 'Live administrator provisioning' : 'Local provisioning only'}
+                description={isLiveApiEnabled()
+                    ? 'Creates a real login via POST /api/v1/admin/users. Success only after the server confirms. Module permission toggles are not writable via API.'
+                    : 'This creates a browser-local profile. The production identity service must issue invitations, establish credentials and record the provisioning audit event.'}
             />
 
             <Surface title='User profile' description='Required identity fields are validated when you review the account.' contentClassName='p-4 sm:p-5'>

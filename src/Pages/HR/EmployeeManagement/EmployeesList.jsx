@@ -1,12 +1,19 @@
-import React, { useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { NavLink, useSearchParams } from 'react-router-dom'
 import { Download } from 'lucide-react'
 import { toast } from 'react-toastify'
-import { ConfirmAction, DataTable } from '../../../Common/ui'
+import { ConfirmAction, DataTable, FeedbackState } from '../../../Common/ui'
 import { DEPARTMENTS, EMPLOYEE_CATEGORIES, EMPLOYEE_STATUSES } from '../domain/hrStatus'
 import { getEmployees, nextId, saveEmployees } from '../domain/hrStore'
 import { HrExport, Modal, PageIntro, PrimaryButton, SearchBox, Select, TableWrap, Badge, inputClass } from '../components/HrUi'
 import { matches, useFilters, useHrTick } from '../components/hrUiState'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import {
+    listPortalEmployees,
+    createEmployee,
+    updateEmployee,
+    setEmployeeStatus,
+} from '../../../services/api/hrApiService'
 
 const emptyForm = {
     name: '', gender: 'Female', dateOfBirth: '', contact: '', email: '', address: '',
@@ -16,28 +23,84 @@ const emptyForm = {
 }
 
 const EmployeesList = () => {
+    const live = isLiveApiEnabled()
     const tick = useHrTick()
     const [params] = useSearchParams()
-    const rows = useMemo(() => {
-        void tick
-        return getEmployees()
-    }, [tick])
     const { filters, set, clear } = useFilters({ search: '', department: params.get('department') || '', status: '', category: '' })
     const [exportOpen, setExportOpen] = useState(false)
     const [form, setForm] = useState(null)
     const [statusCandidate, setStatusCandidate] = useState(null)
+    const [rows, setRows] = useState(() => (live ? [] : getEmployees()))
+    const [listLoading, setListLoading] = useState(Boolean(live))
+    const [listError, setListError] = useState('')
+    const [listSource, setListSource] = useState(live ? 'backend' : 'local')
+    const [saving, setSaving] = useState(false)
+    const [refreshNonce, setRefreshNonce] = useState(0)
 
-    const filtered = rows.filter((row) => (
-        (!filters.search || matches(`${row.id} ${row.name} ${row.designation}`, filters.search))
+    const loadLocal = useCallback(() => {
+        void tick
+        setRows(getEmployees())
+        setListSource('local')
+        setListError('')
+        setListLoading(false)
+    }, [tick])
+
+    const loadLive = useCallback(async () => {
+        setListLoading(true)
+        setListError('')
+        const res = await listPortalEmployees()
+        setListLoading(false)
+        if (!res.success) {
+            setListSource('error')
+            setListError(typeof res.error === 'string' ? res.error : 'Failed to load employees from the API.')
+            setRows([])
+            return
+        }
+        setRows(Array.isArray(res.data) ? res.data : [])
+        setListSource('backend')
+    }, [])
+
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            loadLocal()
+            return
+        }
+        loadLive()
+    }, [loadLive, loadLocal, refreshNonce])
+
+    const filtered = useMemo(() => rows.filter((row) => (
+        (!filters.search || matches(`${row.id} ${row.name} ${row.designation} ${row.email}`, filters.search))
         && (!filters.department || row.department === filters.department)
         && (!filters.status || row.status === filters.status)
         && (!filters.category || row.category === filters.category)
-    ))
+    )), [rows, filters])
 
-    const save = (event) => {
+    const save = async (event) => {
         event.preventDefault()
         if (!form.name.trim()) return toast.error('Employee name is required.')
+        if (!form.email?.trim()) return toast.error('Email is required.')
         if (!form.designation.trim() || !form.joiningDate) return toast.error('Designation and joining date are required.')
+
+        if (isLiveApiEnabled()) {
+            setSaving(true)
+            const res = form.id
+                ? await updateEmployee(form.id, form)
+                : await createEmployee(form)
+            setSaving(false)
+            if (!res.success) {
+                toast.error(typeof res.error === 'string' ? res.error : 'Server rejected the employee save.')
+                return
+            }
+            if (res.warning) {
+                toast.warn(String(res.warning))
+            } else {
+                toast.success(form.id ? `Employee ${res.data?.id || form.id} updated.` : `Employee ${res.data?.id || ''} created.`)
+            }
+            setForm(null)
+            setRefreshNonce((n) => n + 1)
+            return
+        }
+
         const current = getEmployees()
         if (form.id) {
             saveEmployees(current.map((row) => (row.id === form.id ? { ...row, ...form, grossSalary: Number(form.grossSalary) || 0 } : row)))
@@ -51,7 +114,20 @@ const EmployeesList = () => {
         setForm(null)
     }
 
-    const setStatus = (employee, status) => {
+    const setStatus = async (employee, status) => {
+        if (isLiveApiEnabled()) {
+            setSaving(true)
+            const res = await setEmployeeStatus(employee.id, status)
+            setSaving(false)
+            if (!res.success) {
+                toast.error(typeof res.error === 'string' ? res.error : 'Could not update employee status on the server.')
+                return
+            }
+            toast.success(`${employee.name} marked ${status}.`)
+            setStatusCandidate(null)
+            setRefreshNonce((n) => n + 1)
+            return
+        }
         saveEmployees(getEmployees().map((row) => (row.id === employee.id ? { ...row, status } : row)))
         toast.success(`${employee.name} marked ${status}.`)
         setStatusCandidate(null)
@@ -78,6 +154,18 @@ const EmployeesList = () => {
                     <Select label='Status' value={filters.status} onChange={set('status')} options={EMPLOYEE_STATUSES} />
                 </div>
             </PageIntro>
+
+            {listSource === 'backend' ? (
+                <p className='mb-3 text-xs font-medium text-[#027A48]'>Live HR employees · GET/PUT /api/v1/hr/portal/employees · POST /api/v1/hr/employees</p>
+            ) : null}
+            {listSource === 'error' ? (
+                <FeedbackState kind='error' title='Employees API unavailable' description={listError} />
+            ) : null}
+            {listLoading ? (
+                <FeedbackState kind='loading' title='Loading employees' description='Fetching from the HR API…' />
+            ) : null}
+
+            {!listLoading && listSource !== 'error' ? (
             <TableWrap title='Employees List' action={(
                 <>
                     <PrimaryButton onClick={() => setForm({ ...emptyForm })}>Add Employee</PrimaryButton>
@@ -89,12 +177,12 @@ const EmployeesList = () => {
                     rows={filtered}
                     columns={columns}
                     rowKey='id'
-                    emptyTitle='No employees match these filters'
-                    emptyDescription='Clear one or more filters, or add an employee if you have permission.'
+                    emptyTitle={rows.length === 0 ? 'No employees yet' : 'No employees match these filters'}
+                    emptyDescription={rows.length === 0 ? 'Add an employee if you have HR write permission.' : 'Clear one or more filters, or add an employee if you have permission.'}
                     renderActions={(employee) => (
                         <>
                             <NavLink to={`/hr/employee-management/employee-profile/${employee.id}`} className='inline-flex min-h-9 items-center rounded-md border border-[#D9D9D9] px-3 text-xs font-semibold text-[#344054] hover:bg-[#F2F4F7]'>View</NavLink>
-                            <button type='button' className='min-h-9 rounded-md border border-[#515DEF] px-3 text-xs font-semibold text-[#515DEF] hover:bg-[#F1F2FF]' onClick={() => setForm(employee)}>Edit</button>
+                            <button type='button' className='min-h-9 rounded-md border border-[#515DEF] px-3 text-xs font-semibold text-[#515DEF] hover:bg-[#F1F2FF]' onClick={() => setForm({ ...employee })}>Edit</button>
                             <button
                                 type='button'
                                 className={`min-h-9 rounded-md px-3 text-xs font-semibold ${employee.status === 'Inactive' ? 'border border-[#039855] text-[#027A48] hover:bg-[#ECFDF3]' : 'border border-[#D92D20] text-[#B42318] hover:bg-[#FEF3F2]'}`}
@@ -107,12 +195,24 @@ const EmployeesList = () => {
                 />
                 <p className='text-sm text-[#515DEF] mt-4'>Showing {filtered.length} of {rows.length} employees</p>
             </TableWrap>
+            ) : null}
+
             {form && (
-                <Modal title={form.id ? 'Edit Employee' : 'Add Employee'} onClose={() => setForm(null)} wide>
+                <Modal title={form.id ? 'Edit Employee' : 'Add Employee'} onClose={() => !saving && setForm(null)} wide>
                     <form onSubmit={save} className='grid grid-cols-1 md:grid-cols-2 gap-4'>
+                        {form.id ? (
+                            <label className='text-sm text-[#808080]'>Employee ID
+                                <input className={`${inputClass} mt-1 bg-[#F2F4F7]`} value={form.id} readOnly />
+                            </label>
+                        ) : null}
                         {['name', 'gender', 'dateOfBirth', 'contact', 'email', 'address', 'designation', 'joiningDate', 'reportingManager', 'role', 'qualification', 'experience', 'emergencyContact', 'grossSalary'].map((key) => (
                             <label key={key} className='text-sm text-[#808080] capitalize'>{key}
-                                <input className={`${inputClass} mt-1`} value={form[key] || ''} onChange={(event) => setForm({ ...form, [key]: event.target.value })} />
+                                <input
+                                    className={`${inputClass} mt-1`}
+                                    value={form[key] || ''}
+                                    onChange={(event) => setForm({ ...form, [key]: event.target.value })}
+                                    required={key === 'name' || key === 'email' || key === 'designation' || key === 'joiningDate'}
+                                />
                             </label>
                         ))}
                         <Select label='Department' value={form.department} onChange={(event) => setForm({ ...form, department: event.target.value })} options={DEPARTMENTS} allLabel='Select' />
@@ -123,20 +223,24 @@ const EmployeesList = () => {
                                 <option>Full Time</option><option>Part Time</option>
                             </select>
                         </label>
-                        <div className='md:col-span-2 flex justify-end'><PrimaryButton type='submit'>Save</PrimaryButton></div>
+                        <div className='md:col-span-2 flex justify-end gap-2'>
+                            <PrimaryButton type='submit' disabled={saving}>{saving ? 'Saving…' : 'Save'}</PrimaryButton>
+                        </div>
                     </form>
                 </Modal>
             )}
             <ConfirmAction
                 open={Boolean(statusCandidate)}
-                onClose={() => setStatusCandidate(null)}
+                onClose={() => !saving && setStatusCandidate(null)}
                 onConfirm={() => statusCandidate && setStatus(statusCandidate.employee, statusCandidate.status)}
                 title={`${statusCandidate?.status === 'Active' ? 'Activate' : 'Deactivate'} employee?`}
-                description='This changes the employee status used by the HR demo workflows.'
+                description={live
+                    ? 'This updates status on the server via PUT /api/v1/hr/portal/employees. There is no hard-delete endpoint.'
+                    : 'This changes the employee status used by the HR demo workflows.'}
                 confirmLabel={statusCandidate?.status === 'Active' ? 'Activate employee' : 'Deactivate employee'}
                 tone={statusCandidate?.status === 'Inactive' ? 'danger' : 'primary'}
             >
-                <p><strong>{statusCandidate?.employee.name}</strong> will be marked {statusCandidate?.status?.toLowerCase()}. The change is saved in this browser; a production backend must also record the actor, reason, timestamp, and downstream access effects.</p>
+                <p><strong>{statusCandidate?.employee.name}</strong> will be marked {statusCandidate?.status?.toLowerCase()}{live ? ' on the server' : ' in this browser'}.</p>
             </ConfirmAction>
             <HrExport open={exportOpen} setOpen={setExportOpen} filename='hr-employees' rows={filtered.map(({ id, name, department, category, designation, status, joiningDate }) => ({ id, name, department, category, designation, status, joiningDate }))} />
         </section>

@@ -20,9 +20,29 @@ import {
 import { getAnnouncementRoutes, getAnnouncementViewPath } from './announcementConfigs'
 import { ANNOUNCEMENT_AUDIENCE_GROUPS, resolveAnnouncementAudience } from './announcementComposerState.js'
 import { toast } from 'react-toastify'
+import {
+    BACKEND_ANNOUNCEMENT_CATEGORIES,
+    listAnnouncements,
+    listAnnouncementCategories,
+    createAnnouncement,
+} from '../../services/api/announcementApiService'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
+import FeedbackState from '../ui/FeedbackState'
+
+const emptyForm = () => ({
+    title: '',
+    category: 'Staff Notice',
+    priority: 'Normal',
+    audienceGroup: 'all-school',
+    message: '',
+    attachmentName: '',
+    attachmentFile: null,
+    requireAcknowledgement: true,
+})
 
 export default function AnnouncementListView({ roleKey }) {
     const routes = getAnnouncementRoutes(roleKey)
+    const live = isLiveApiEnabled()
     const canCreate = canCreateAnnouncements(roleKey)
     const [urlParams, setUrlParams] = useSearchParams()
     const initialTableState = parseTableState(urlParams)
@@ -33,22 +53,57 @@ export default function AnnouncementListView({ roleKey }) {
     const [page, setPage] = useState(initialTableState.page)
     const [pageSize, setPageSize] = useState(initialTableState.pageSize)
     const [refreshNonce, setRefreshNonce] = useState(0)
+    const [announcements, setAnnouncements] = useState(() => (live ? [] : getAnnouncementsForRole(roleKey)))
+    const [listSource, setListSource] = useState(live ? 'backend' : 'local')
+    const [listError, setListError] = useState('')
+    const [listLoading, setListLoading] = useState(Boolean(live))
+    const [isSaving, setIsSaving] = useState(false)
+    const [categoryOptions, setCategoryOptions] = useState(() => (
+        live ? [...BACKEND_ANNOUNCEMENT_CATEGORIES] : [...CATEGORY_OPTIONS]
+    ))
 
     // Modal State for In-Page Announcement Creation
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
-    const [formData, setFormData] = useState({
-        title: '',
-        category: 'Staff Notice',
-        priority: 'Normal',
-        audienceGroup: 'all-school',
-        message: '',
-        attachmentName: '',
-        requireAcknowledgement: true,
-    })
+    const [formData, setFormData] = useState(emptyForm)
 
-    const announcements = useMemo(() => {
-        void refreshNonce
-        return getAnnouncementsForRole(roleKey)
+    useEffect(() => {
+        let cancelled = false
+        const load = async () => {
+            if (!isLiveApiEnabled()) {
+                setAnnouncements(getAnnouncementsForRole(roleKey))
+                setListSource('local')
+                setListError('')
+                setListLoading(false)
+                setCategoryOptions([...CATEGORY_OPTIONS])
+                return
+            }
+            setListLoading(true)
+            setListError('')
+            const [listRes, catRes] = await Promise.all([
+                listAnnouncements(),
+                listAnnouncementCategories(),
+            ])
+            if (cancelled) return
+            setListLoading(false)
+            if (catRes.success && Array.isArray(catRes.data)) {
+                setCategoryOptions(catRes.data)
+            } else {
+                setCategoryOptions([...BACKEND_ANNOUNCEMENT_CATEGORIES])
+            }
+            if (!listRes.success) {
+                // Live mode: never silently fall back to localStorage mock data.
+                setListSource('error')
+                setListError(typeof listRes.error === 'string' ? listRes.error : 'Failed to load announcements from the API.')
+                setAnnouncements([])
+                return
+            }
+            setAnnouncements(Array.isArray(listRes.data) ? listRes.data : [])
+            setListSource('backend')
+        }
+        load()
+        return () => {
+            cancelled = true
+        }
     }, [roleKey, refreshNonce])
 
     const filteredAnnouncements = useMemo(() => {
@@ -84,7 +139,7 @@ export default function AnnouncementListView({ roleKey }) {
         setPage(1)
     }
 
-    const handleCreateAnnouncementSubmit = (e) => {
+    const handleCreateAnnouncementSubmit = async (e) => {
         e.preventDefault()
         if (!formData.title.trim()) {
             toast.error('Please enter an announcement title.')
@@ -92,6 +147,28 @@ export default function AnnouncementListView({ roleKey }) {
         }
         if (!formData.message.trim()) {
             toast.error('Please enter the announcement message content.')
+            return
+        }
+
+        if (isLiveApiEnabled()) {
+            setIsSaving(true)
+            const today = new Date().toISOString().slice(0, 10)
+            const res = await createAnnouncement({
+                title: formData.title.trim(),
+                category: formData.category,
+                message: formData.message.trim(),
+                announcementDate: today,
+                file: formData.attachmentFile || null,
+            })
+            setIsSaving(false)
+            if (!res.success) {
+                toast.error(typeof res.error === 'string' ? res.error : 'Server rejected the announcement.')
+                return
+            }
+            toast.success(`Announcement ${res.data?.id || ''} published.`)
+            setIsCreateModalOpen(false)
+            setFormData(emptyForm())
+            setRefreshNonce((n) => n + 1)
             return
         }
 
@@ -104,7 +181,7 @@ export default function AnnouncementListView({ roleKey }) {
                 category: formData.category,
                 priority: formData.priority,
                 message: formData.message,
-                attachmentName: formData.attachmentName,
+                attachmentName: formData.attachmentName || formData.attachmentFile?.name || '',
                 sentBy: routes.sentByDefault || 'School Faculty',
                 announcementDate: new Date(),
                 audience: resolvedAudience,
@@ -114,15 +191,7 @@ export default function AnnouncementListView({ roleKey }) {
 
             toast.success(`Announcement ${newNotice.id} published successfully!`)
             setIsCreateModalOpen(false)
-            setFormData({
-                title: '',
-                category: 'Staff Notice',
-                priority: 'Normal',
-                audienceGroup: 'all-school',
-                message: '',
-                attachmentName: '',
-                requireAcknowledgement: true,
-            })
+            setFormData(emptyForm())
             setRefreshNonce((n) => n + 1)
         } catch (err) {
             toast.error(err.message || 'Failed to publish announcement.')
@@ -207,7 +276,26 @@ export default function AnnouncementListView({ roleKey }) {
                 ) : null}
             />
 
-            <IntegrationNotice state='demo' title='Browser-stored announcements' description='Publication, audience visibility, acknowledgement and replies are local to this browser. Delivery receipts and production notifications are not connected.' />
+            {listSource === 'backend' ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Backend announcements'
+                    description='Live data from GET/POST /api/v1/announcements. Audience is assigned by the server.'
+                />
+            ) : listSource === 'error' ? (
+                <IntegrationNotice state='failed' title='Announcements API unavailable' description={listError} />
+            ) : (
+                <IntegrationNotice state='demo' title='Browser-stored announcements' description='Local browser data (mock mode).' />
+            )}
+            {listLoading ? (
+                <p className='text-xs text-slate-500 px-1'>Loading announcements from API…</p>
+            ) : null}
+            {!listLoading && listSource === 'error' ? (
+                <FeedbackState kind='error' title='Could not load announcements' description={listError || 'Check that you are signed in and the API is running.'} />
+            ) : null}
+            {!listLoading && listSource === 'backend' && announcements.length === 0 ? (
+                <FeedbackState kind='empty' title='No announcements yet' description='Publish the first notice using Create Announcement.' />
+            ) : null}
 
             <div className='overflow-hidden rounded-[var(--erp-radius-surface)] border border-[var(--erp-line)] bg-white shadow-xs'>
                 <DataToolbar
@@ -221,7 +309,7 @@ export default function AnnouncementListView({ roleKey }) {
                             <label className='grid gap-1 text-xs font-medium text-[var(--erp-slate)]'>Category
                                 <select value={categoryFilter} onChange={(event) => { setCategoryFilter(event.target.value); setPage(1) }} className='min-h-10 rounded-lg border border-[var(--erp-line-strong)] bg-white px-3 text-sm'>
                                     <option value=''>All categories</option>
-                                    {CATEGORY_OPTIONS.map((category) => <option key={category} value={category}>{category}</option>)}
+                                    {categoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
                                 </select>
                             </label>
                             <label className='grid gap-1 text-xs font-medium text-[var(--erp-slate)]'>Published from
@@ -293,7 +381,7 @@ export default function AnnouncementListView({ roleKey }) {
                                         onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                                         className='w-full rounded-xl border border-gray-200 p-2.5 text-sm focus:border-indigo-500 focus:outline-hidden bg-white'
                                     >
-                                        {CATEGORY_OPTIONS.map((cat) => (
+                                        {categoryOptions.map((cat) => (
                                             <option key={cat} value={cat}>{cat}</option>
                                         ))}
                                     </select>
@@ -361,9 +449,15 @@ export default function AnnouncementListView({ roleKey }) {
                             <div>
                                 <label className='font-semibold text-gray-700 mb-1 block'>Supporting Document / Attachment (PDF, PNG, JPG)</label>
                                 <FileDropzone
-                                    value={formData.attachmentName}
-                                    onChange={(value) => setFormData({ ...formData, attachmentName: value })}
-                                    valueMode='name'
+                                    value={live ? formData.attachmentFile : formData.attachmentName}
+                                    onChange={(value) => setFormData({
+                                        ...formData,
+                                        attachmentFile: live ? (value || null) : formData.attachmentFile,
+                                        attachmentName: live
+                                            ? (value?.name || '')
+                                            : (typeof value === 'string' ? value : value?.name || ''),
+                                    })}
+                                    valueMode={live ? 'file' : 'name'}
                                     label='Upload circular scan, guidelines, or notice document'
                                     acceptDocuments
                                 />
@@ -379,9 +473,10 @@ export default function AnnouncementListView({ roleKey }) {
                                 </button>
                                 <button
                                     type='submit'
-                                    className='inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold shadow-xs'
+                                    disabled={isSaving}
+                                    className='inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold shadow-xs disabled:opacity-50'
                                 >
-                                    <Send size={14} /> Publish Announcement
+                                    <Send size={14} /> {isSaving ? 'Publishing…' : 'Publish Announcement'}
                                 </button>
                             </div>
                         </form>

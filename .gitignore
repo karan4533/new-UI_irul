@@ -32,3 +32,8 @@ output/
 .playwright-mcp/
 .superpowers/
 eslint_src_report.json
+
+# Local probe / PDF-extraction scratch (not for version control)
+probe_snippets.py
+scratch_probe.py
+extracted_*.txt

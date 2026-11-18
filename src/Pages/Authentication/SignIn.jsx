@@ -31,11 +31,15 @@ import {
     AUTHENTICATION_CATEGORIES,
     ENTERPRISE_DIRECTORY_CATEGORIES,
 } from './enterpriseUserDirectory'
+import { BACKEND_SEED_DIRECTORY } from '../../services/api/authService'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
 
 const SignIn = () => {
     const navigate = useNavigate()
     const location = useLocation()
     const { login } = useAuth()
+    const liveBackend = isLiveApiEnabled()
+    const directoryUsers = liveBackend ? BACKEND_SEED_DIRECTORY : ENTERPRISE_USER_DIRECTORY
 
     // Form states
     const [identifier, setIdentifier] = useState('')
@@ -75,8 +79,8 @@ const SignIn = () => {
 
         setIsLoading(true)
 
-        setTimeout(() => {
-            const result = login(identifier, password, rememberMe)
+        try {
+            const result = await login(identifier, password, rememberMe)
 
             if (!result.success) {
                 setIsLoading(false)
@@ -90,40 +94,49 @@ const SignIn = () => {
                 department: result.user.department,
             })
 
+            const from = location.state?.from
+            const requestedPath = from?.pathname ? `${from.pathname}${from.search || ''}` : ''
+            const defaultHomePath = ROLE_HOME_PATHS[result.role] ?? '/dashboard'
+
+            const targetPath = getSafeReturnPath({
+                requestedPath,
+                role: result.role,
+                homePath: defaultHomePath,
+            })
+
             setTimeout(() => {
-                const from = location.state?.from
-                const requestedPath = from?.pathname ? `${from.pathname}${from.search || ''}` : ''
-                const defaultHomePath = ROLE_HOME_PATHS[result.role] ?? '/dashboard'
-
-                const targetPath = getSafeReturnPath({
-                    requestedPath,
-                    role: result.role,
-                    homePath: defaultHomePath,
-                })
-
                 navigate(targetPath, { replace: true })
             }, 400)
-        }, 400)
+        } catch (err) {
+            setIsLoading(false)
+            setErrorMessage(err?.message || 'Unable to reach the authentication service.')
+        }
     }
 
     const handleQuickFill = (user) => {
+        const fillPassword = liveBackend ? (user.password || '') : 'School@123'
         setIdentifier(user.email)
-        setPassword('School@123')
+        setPassword(fillPassword)
         setErrorMessage('')
-        setQuickFillNotice(`Selected ${user.roleLabel} (${user.email}). Ready to sign in.`)
+        setQuickFillNotice(
+            liveBackend
+                ? `Selected backend seed ${user.roleLabel} (${user.email}). Uses local API credentials.`
+                : `Selected ${user.roleLabel} (${user.email}). Ready to sign in.`
+        )
         setIsDemoDirectoryOpen(false)
     }
 
-    const handleDirectSignIn = (user) => {
+    const handleDirectSignIn = async (user) => {
+        const fillPassword = liveBackend ? (user.password || '') : 'School@123'
         setIdentifier(user.email)
-        setPassword('School@123')
+        setPassword(fillPassword)
         setErrorMessage('')
         setQuickFillNotice('')
         setIsLoading(true)
         setIsDemoDirectoryOpen(false)
 
-        setTimeout(() => {
-            const result = login(user.email, 'School@123', true)
+        try {
+            const result = await login(user.email, fillPassword, true)
             if (!result.success) {
                 setIsLoading(false)
                 setErrorMessage(result.message)
@@ -136,11 +149,14 @@ const SignIn = () => {
                 department: result.user.department,
             })
 
+            const defaultHomePath = ROLE_HOME_PATHS[result.role] ?? '/dashboard'
             setTimeout(() => {
-                const defaultHomePath = ROLE_HOME_PATHS[result.role] ?? '/dashboard'
                 navigate(defaultHomePath, { replace: true })
             }, 400)
-        }, 350)
+        } catch (err) {
+            setIsLoading(false)
+            setErrorMessage(err?.message || 'Unable to reach the authentication service.')
+        }
     }
 
 
@@ -158,7 +174,7 @@ const SignIn = () => {
         (cat) => cat.name === selectedCategoryTab || cat.id === selectedCategoryTab
     )
 
-    const filteredUsers = (ENTERPRISE_USER_DIRECTORY || []).filter((user) => {
+    const filteredUsers = (directoryUsers || []).filter((user) => {
         if (!user) return false
         const query = (demoSearchQuery || '').trim().toLowerCase()
         const matchesQuery =
@@ -388,7 +404,9 @@ const SignIn = () => {
                                 </div>
                                 <div className="min-w-0">
                                     <p className="text-xs font-bold text-slate-900 truncate">
-                                        Demo Credentials Directory (All 29 Institutional Roles)
+                                        {liveBackend
+                                            ? 'Local Backend Seed Accounts (development)'
+                                            : 'Demo Credentials Directory (All 29 Institutional Roles)'}
                                     </p>
                                     <p className="text-[10px] text-slate-600 line-clamp-1">
                                         Browse all role-based demo credentials with valid logins and sample data.
@@ -400,7 +418,7 @@ const SignIn = () => {
                                 onClick={() => setIsDemoDirectoryOpen(true)}
                                 className="px-3 py-1.5 rounded-lg bg-white border border-blue-300 hover:bg-blue-50 text-blue-700 text-xs font-bold shadow-xs whitespace-nowrap cursor-pointer transition-colors shrink-0"
                             >
-                                Explore All 29 Roles →
+                                {liveBackend ? 'Explore Seed Accounts →' : 'Explore All 29 Roles →'}
                             </button>
                         </div>
                     </div>

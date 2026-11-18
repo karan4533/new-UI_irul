@@ -1,6 +1,7 @@
-import React, { useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Save, ShieldCheck } from 'lucide-react'
+import { ArrowLeft, KeyRound, Save, ShieldCheck } from 'lucide-react'
+import { toast } from 'react-toastify'
 import AdminPermissionsPanel from './Components/AdminPermissionsPanel'
 import {
     ADMIN_PERMISSION_MODULES,
@@ -12,8 +13,14 @@ import {
     statusBadgeColor,
     updateAdminUser,
 } from './adminUsersData'
-import { ConfirmAction, IntegrationNotice } from '../../../Common/ui'
+import { ConfirmAction, FeedbackState, IntegrationNotice } from '../../../Common/ui'
 import { summarizePermissionChanges } from '../../../Common/ui/governance'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import {
+    getAdminUser,
+    resetAdminUserPassword,
+    updateAdminUserApi,
+} from '../../../services/api/adminUsersApiService'
 
 const Field = ({ label, value }) => (
     <div className='flex flex-col gap-y-1'>
@@ -25,17 +32,44 @@ const Field = ({ label, value }) => (
 const ViewAdminUser = () => {
     const { id } = useParams()
     const navigate = useNavigate()
-    const [user, setUser] = useState(() => getAdminUserById(id))
+    const live = isLiveApiEnabled()
+    const [user, setUser] = useState(() => (live ? null : getAdminUserById(id)))
+    const [loading, setLoading] = useState(Boolean(live))
+    const [loadError, setLoadError] = useState('')
     const [isEditing, setIsEditing] = useState(false)
-    const [form, setForm] = useState(() => ({
-        status: user?.status ?? 'Active',
-        permissions: { ...(user?.permissions ?? {}) },
-    }))
+    const [form, setForm] = useState({ status: 'Active', permissions: {} })
     const [message, setMessage] = useState('')
     const [error, setError] = useState('')
     const [confirmOpen, setConfirmOpen] = useState(false)
+    const [saving, setSaving] = useState(false)
+
+    const loadLive = useCallback(async () => {
+        setLoading(true)
+        setLoadError('')
+        const res = await getAdminUser(id)
+        setLoading(false)
+        if (!res.success) {
+            setUser(null)
+            setLoadError(typeof res.error === 'string' ? res.error : 'Administrator was not found on the server.')
+            return
+        }
+        setUser(res.data)
+        setForm({ status: res.data.status || 'Active', permissions: { ...(res.data.permissions || {}) } })
+    }, [id])
+
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            const local = getAdminUserById(id)
+            setUser(local)
+            setForm({ status: local?.status ?? 'Active', permissions: { ...(local?.permissions ?? {}) } })
+            setLoading(false)
+            return
+        }
+        loadLive()
+    }, [id, loadLive])
 
     const togglePermission = (key) => {
+        if (live) return
         setForm((prev) => ({
             ...prev,
             permissions: {
@@ -46,6 +80,7 @@ const ViewAdminUser = () => {
     }
 
     const toggleAllPermissions = (enabled) => {
+        if (live) return
         setForm((prev) => ({
             ...prev,
             permissions: Object.fromEntries(
@@ -56,7 +91,25 @@ const ViewAdminUser = () => {
         }))
     }
 
-    const handleSave = () => {
+    const handleSave = async () => {
+        if (isLiveApiEnabled()) {
+            setSaving(true)
+            const res = await updateAdminUserApi(id, { status: form.status })
+            setSaving(false)
+            if (!res.success) {
+                setError(typeof res.error === 'string' ? res.error : 'Server rejected the status update.')
+                setMessage('')
+                return
+            }
+            setUser(res.data)
+            setIsEditing(false)
+            setConfirmOpen(false)
+            setMessage('Administrator status updated on the server.')
+            setError('')
+            toast.success('Administrator status saved.')
+            return
+        }
+
         const result = updateAdminUser(id, {
             status: form.status,
             permissions: form.permissions,
@@ -75,6 +128,31 @@ const ViewAdminUser = () => {
         setError('')
     }
 
+    const handleResetPassword = async () => {
+        if (!isLiveApiEnabled()) return
+        setSaving(true)
+        const res = await resetAdminUserPassword(id)
+        setSaving(false)
+        if (!res.success) {
+            toast.error(typeof res.error === 'string' ? res.error : 'Password reset failed.')
+            return
+        }
+        const temp = res.data?.temporaryPassword
+        toast.success(temp ? `Temporary password: ${temp}` : 'Password reset on the server.')
+        setUser(res.data)
+    }
+
+    if (loading) {
+        return (
+            <section className='space-y-6'>
+                <button type='button' onClick={() => navigate(ROUTE_BASE)} className='inline-flex items-center gap-2 text-sm text-[#515DEF] border border-[#515DEF] rounded-md px-4 py-2 hover:bg-[#515DEF] hover:text-white transition-colors cursor-pointer'>
+                    <ArrowLeft size={18} /> Back to list
+                </button>
+                <FeedbackState kind='loading' title='Loading administrator' description={`Fetching ${id} from the admin users API…`} />
+            </section>
+        )
+    }
+
     if (!user) {
         return (
             <section className='space-y-6'>
@@ -87,7 +165,7 @@ const ViewAdminUser = () => {
                     Back to list
                 </button>
                 <div className='bg-white rounded-2xl shadow-md p-8 text-center text-[#667085]'>
-                    Administrator user not found.
+                    {loadError || 'Administrator user not found.'}
                 </div>
             </section>
         )
@@ -112,6 +190,14 @@ const ViewAdminUser = () => {
                 Back to list
             </button>
 
+            {live ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Live administrator record'
+                    description='Status and password reset use /api/v1/admin/users. Editing the module permission matrix is BLOCKED — no mounted write API.'
+                />
+            ) : null}
+
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='flex flex-wrap items-center gap-3'>
                     <div className='p-2 rounded-xl bg-[#515DEF]/10 text-[#515DEF]'>
@@ -122,11 +208,21 @@ const ViewAdminUser = () => {
                         <p className='text-sm text-[#667085] mt-1'>{user.email}</p>
                     </div>
                     <span className='inline-flex px-3 py-1.5 rounded-lg text-sm font-semibold bg-[#515DEF33] text-[#515DEF]'>
-                        {ADMIN_ROLE_LABEL}
+                        {user.roleLabel || ADMIN_ROLE_LABEL}
                     </span>
-                    <span className={`inline-flex px-3 py-1.5 rounded-lg text-sm font-semibold ${statusBadgeColor[user.status]}`}>
+                    <span className={`inline-flex px-3 py-1.5 rounded-lg text-sm font-semibold ${statusBadgeColor[user.status] || statusBadgeColor.Active}`}>
                         {user.status}
                     </span>
+                    {live ? (
+                        <button
+                            type='button'
+                            disabled={saving}
+                            onClick={handleResetPassword}
+                            className='inline-flex items-center gap-2 rounded-md border border-[#515DEF] px-3 py-1.5 text-sm font-semibold text-[#515DEF] hover:bg-[#F1F2FF] disabled:opacity-60'
+                        >
+                            <KeyRound size={16} /> Reset password
+                        </button>
+                    ) : null}
                 </div>
             </div>
 
@@ -134,21 +230,21 @@ const ViewAdminUser = () => {
                 <h2 className='text-lg font-semibold text-black mb-6'>Account Details</h2>
                 <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6'>
                     <Field label='Admin ID' value={user.id} />
-                    <Field label='Employee ID' value={user.employeeId} />
+                    <Field label='Staff / Employee ID' value={user.staffCode || user.employeeId} />
                     <Field label='Department' value={user.department} />
                     <Field label='Username' value={user.username} />
                     <Field label='Mobile Number' value={user.mobileNumber} />
                     <Field label='Created By' value={user.createdBy} />
                     <Field label='Created On' value={user.createdAt} />
-                    <Field label='Role' value={ADMIN_ROLE_LABEL} />
+                    <Field label='Role' value={user.roleLabel || ADMIN_ROLE_LABEL} />
                     <Field label='Login Email' value={user.email} />
                 </div>
             </div>
 
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='flex flex-wrap items-center justify-between gap-3 mb-4'>
-                    <h2 className='text-lg font-semibold text-black'>Module Permissions</h2>
-                    {!user.isSystem && (
+                    <h2 className='text-lg font-semibold text-black'>{live ? 'Account status' : 'Module Permissions'}</h2>
+                    {(!user.isSystem || live) && (
                         <button
                             type='button'
                             onClick={() => {
@@ -166,7 +262,7 @@ const ViewAdminUser = () => {
                             }}
                             className='text-sm font-semibold text-[#515DEF] hover:underline cursor-pointer'
                         >
-                            {isEditing ? 'Cancel Edit' : 'Edit Permissions'}
+                            {isEditing ? 'Cancel Edit' : (live ? 'Edit status' : 'Edit Permissions')}
                         </button>
                     )}
                 </div>
@@ -174,9 +270,11 @@ const ViewAdminUser = () => {
                 {isEditing ? (
                     <>
                         <IntegrationNotice
-                            state='demo'
-                            title='Local permission preview'
-                            description='This prototype updates the current browser session only. The production RBAC API must enforce the same permissions on every protected endpoint.'
+                            state={live ? 'failed' : 'demo'}
+                            title={live ? 'Permission matrix write blocked' : 'Local permission preview'}
+                            description={live
+                                ? 'Only Active/Inactive status is sent via PATCH /api/v1/admin/users/{id}. Role permission edits require an unmounted RBAC write API.'
+                                : 'This prototype updates the current browser session only. The production RBAC API must enforce the same permissions on every protected endpoint.'}
                             className='mb-5'
                         />
                         <div className='mb-6 max-w-xs'>
@@ -192,29 +290,35 @@ const ViewAdminUser = () => {
                                 ))}
                             </select>
                         </div>
-                        <AdminPermissionsPanel
-                            permissions={form.permissions}
-                            onToggle={togglePermission}
-                            onToggleAll={toggleAllPermissions}
-                        />
-                        <div className='mt-5 grid gap-3 sm:grid-cols-2' aria-live='polite'>
-                            <div className='rounded-xl border border-[#4CAF5033] bg-[#4CAF500D] p-3'>
-                                <p className='text-sm font-semibold text-[#257A29]'>Access to grant</p>
-                                <p className='mt-1 text-sm text-[#667085]'>
-                                    {permissionChanges.granted.length ? permissionChanges.granted.join(', ') : 'No new module access.'}
-                                </p>
-                            </div>
-                            <div className='rounded-xl border border-[#F4433633] bg-[#F443360D] p-3'>
-                                <p className='text-sm font-semibold text-[#B42318]'>Access to remove</p>
-                                <p className='mt-1 text-sm text-[#667085]'>
-                                    {permissionChanges.revoked.length ? permissionChanges.revoked.join(', ') : 'No module access removed.'}
-                                </p>
-                            </div>
-                        </div>
+                        {!live ? (
+                            <>
+                                <AdminPermissionsPanel
+                                    permissions={form.permissions}
+                                    onToggle={togglePermission}
+                                    onToggleAll={toggleAllPermissions}
+                                />
+                                <div className='mt-5 grid gap-3 sm:grid-cols-2' aria-live='polite'>
+                                    <div className='rounded-xl border border-[#4CAF5033] bg-[#4CAF500D] p-3'>
+                                        <p className='text-sm font-semibold text-[#257A29]'>Access to grant</p>
+                                        <p className='mt-1 text-sm text-[#667085]'>
+                                            {permissionChanges.granted.length ? permissionChanges.granted.join(', ') : 'No new module access.'}
+                                        </p>
+                                    </div>
+                                    <div className='rounded-xl border border-[#F4433633] bg-[#F443360D] p-3'>
+                                        <p className='text-sm font-semibold text-[#B42318]'>Access to remove</p>
+                                        <p className='mt-1 text-sm text-[#667085]'>
+                                            {permissionChanges.revoked.length ? permissionChanges.revoked.join(', ') : 'No module access removed.'}
+                                        </p>
+                                    </div>
+                                </div>
+                            </>
+                        ) : null}
                     </>
                 ) : (
                     <div className='flex flex-wrap gap-2'>
-                        {permissionLabels.length === 0 ? (
+                        {live ? (
+                            <span className='text-sm text-[#667085]'>Server role permissions are fixed for `{user.role || 'admin'}`. Use Edit status to activate or deactivate this login.</span>
+                        ) : permissionLabels.length === 0 ? (
                             <span className='text-sm text-[#667085]'>No module permissions assigned.</span>
                         ) : (
                             permissionLabels.map((label) => (
@@ -247,29 +351,30 @@ const ViewAdminUser = () => {
                     <button
                         type='button'
                         onClick={() => setConfirmOpen(true)}
-                        disabled={!permissionChanges.changedCount && !statusChanged}
-                        className='bg-[#515DEF] text-white text-sm text-center px-12 py-2 rounded-md border border-[#515DEF] hover:opacity-90 transition-all duration-200 cursor-pointer inline-flex items-center justify-center gap-2'
+                        disabled={live ? !statusChanged || saving : (!permissionChanges.changedCount && !statusChanged)}
+                        className='bg-[#515DEF] text-white text-sm text-center px-12 py-2 rounded-md border border-[#515DEF] hover:opacity-90 transition-all duration-200 cursor-pointer inline-flex items-center justify-center gap-2 disabled:opacity-60'
                     >
                         <Save size={16} />
-                        Save Permissions
+                        {live ? (saving ? 'Saving…' : 'Save status') : 'Save Permissions'}
                     </button>
                 </div>
             )}
 
             <ConfirmAction
                 open={confirmOpen}
-                onClose={() => setConfirmOpen(false)}
+                onClose={() => !saving && setConfirmOpen(false)}
                 onConfirm={handleSave}
-                title='Apply access changes?'
-                description='These changes alter what this administrator can see and operate.'
-                confirmLabel='Apply changes'
-                tone={permissionChanges.revoked.length || form.status === 'Inactive' ? 'danger' : 'primary'}
+                title={live ? 'Update administrator status?' : 'Apply access changes?'}
+                description={live
+                    ? 'This sends PATCH /api/v1/admin/users/{id} with the selected Active/Inactive status.'
+                    : 'These changes alter what this administrator can see and operate.'}
+                confirmLabel={live ? 'Save status' : 'Apply changes'}
+                tone={form.status === 'Inactive' || permissionChanges.revoked.length ? 'danger' : 'primary'}
             >
                 <div className='space-y-2'>
-                    <p><strong>{permissionChanges.granted.length}</strong> module(s) granted and <strong>{permissionChanges.revoked.length}</strong> revoked.</p>
+                    {!live ? <p><strong>{permissionChanges.granted.length}</strong> module(s) granted and <strong>{permissionChanges.revoked.length}</strong> revoked.</p> : null}
                     {statusChanged && <p>Account status will change from <strong>{user.status}</strong> to <strong>{form.status}</strong>.</p>}
                     {form.status === 'Inactive' && <p>The user will be blocked at the next sign-in check.</p>}
-                    <p>Dashboard access remains enabled. Backend authorization must independently enforce every module permission.</p>
                 </div>
             </ConfirmAction>
         </section>

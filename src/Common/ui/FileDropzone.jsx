@@ -45,6 +45,10 @@ const FileDropzone = ({
             commitValue(file.name)
             return
         }
+        if (valueMode === 'file') {
+            commitValue(file)
+            return
+        }
 
         const reader = new FileReader()
         reader.onload = () => commitValue(String(reader.result || ''))
@@ -56,7 +60,7 @@ const FileDropzone = ({
         setFileName('')
         setFileType('')
         setError('')
-        commitValue('')
+        commitValue(valueMode === 'file' ? null : '')
     }
 
     return (
@@ -79,18 +83,18 @@ const FileDropzone = ({
                     <span className='inline-flex size-10 items-center justify-center rounded-full bg-[var(--erp-indigo-soft)] text-[var(--erp-indigo)]'>
                         <FileUp aria-hidden='true' size={20} />
                     </span>
-                    <span className='mt-2 text-sm font-semibold text-[var(--erp-indigo)]'>{selectedValue ? `Replace ${label.toLowerCase()}` : label}</span>
+                    <span className='mt-2 text-sm font-semibold text-[var(--erp-indigo)]'>{selectedValue || fileName ? `Replace ${label.toLowerCase()}` : label}</span>
                     <span className='mt-1 text-xs text-[var(--erp-muted)]'>Drag and drop or choose a file · {acceptDocuments ? 'PDF, JPG, PNG, SVG' : 'JPG, PNG, SVG'} · max 5 MB</span>
                 </label>
 
-                {selectedValue && (
+                {(selectedValue || fileName) && (
                     <div className='mt-3 flex items-center gap-3 rounded-lg border border-[var(--erp-line)] bg-[var(--erp-canvas)] p-3'>
-                        {fileType.startsWith('image/') && valueMode === 'data-url' ? (
+                        {fileType.startsWith('image/') && valueMode === 'data-url' && typeof selectedValue === 'string' ? (
                             <img src={selectedValue} alt='Selected upload preview' className='size-12 rounded-lg object-cover' />
                         ) : (
                             <span className='inline-flex size-12 items-center justify-center rounded-lg bg-white text-[var(--erp-indigo)]'><FileText aria-hidden='true' size={22} /></span>
                         )}
-                        <span className='min-w-0 flex-1 truncate text-sm font-medium text-[var(--erp-ink)]'>{fileName || 'Selected file'}</span>
+                        <span className='min-w-0 flex-1 truncate text-sm font-medium text-[var(--erp-ink)]'>{fileName || (selectedValue?.name) || 'Selected file'}</span>
                         <button type='button' onClick={removeFile} className='inline-flex min-h-9 items-center gap-1 rounded-lg px-3 text-xs font-semibold text-[#B42318]' aria-label={`Remove ${fileName || 'selected file'}`}>
                             <Trash2 aria-hidden='true' size={15} /> Remove
                         </button>

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { NavLink, Navigate, useParams } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import { toast } from 'react-toastify'
@@ -11,11 +11,16 @@ import {
     getObservations, getOnboarding, getPerformance, getReferrals, getShadow, getTraining, completionOf,
 } from '../domain/hrStore'
 import { getLeaveBundle } from '../domain/hrStore'
-import { DataTable } from '../../../Common/ui'
+import { DataTable, FeedbackState } from '../../../Common/ui'
 import { Badge } from '../components/HrUi'
 import { useHrTick } from '../components/hrUiState'
 import { SOM_KEY, SOM_SEED } from '../../../Common/demoDomain/housekeeping'
 import { ensureSeed } from '../../../Common/demoDomain/storage'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import {
+    getEmployee as getEmployeeApi,
+    listPortalEmployees,
+} from '../../../services/api/hrApiService'
 
 const Info = ({ label, value }) => (
     <div className='rounded-xl border border-[#E8ECF4] bg-[#FAFBFD] px-4 py-3'>
@@ -46,12 +51,86 @@ const MiniTable = ({ headers, rows }) => {
 const EmployeeProfile = () => {
     const { id } = useParams()
     const tick = useHrTick()
-    const employee = useMemo(() => {
-        void tick
-        return getEmployee(id)
-    }, [id, tick])
+    const live = isLiveApiEnabled()
+    const [liveEmployee, setLiveEmployee] = useState(null)
+    const [detailLoading, setDetailLoading] = useState(Boolean(live))
+    const [detailError, setDetailError] = useState('')
+    const [detailSource, setDetailSource] = useState(live ? 'backend' : 'local')
     const [tab, setTab] = useState('overview')
-    if (!employee) return <Navigate to='/hr/employee-management/employees' replace />
+
+    const localEmployee = useMemo(() => {
+        void tick
+        if (live) return null
+        return getEmployee(id)
+    }, [id, tick, live])
+
+    const loadLiveEmployee = useCallback(async () => {
+        if (!id) return
+        setDetailLoading(true)
+        setDetailError('')
+        const portal = await listPortalEmployees()
+        if (portal.success) {
+            const found = (portal.data || []).find((row) => String(row.id) === String(id))
+            if (found) {
+                setLiveEmployee(found)
+                setDetailSource('backend')
+                setDetailLoading(false)
+                return
+            }
+        }
+        const typed = await getEmployeeApi(id)
+        setDetailLoading(false)
+        if (!typed.success) {
+            setLiveEmployee(null)
+            setDetailSource('error')
+            setDetailError(
+                typeof typed.error === 'string'
+                    ? typed.error
+                    : (typeof portal.error === 'string' ? portal.error : 'Employee was not found on the server.')
+            )
+            return
+        }
+        setLiveEmployee(typed.data)
+        setDetailSource('backend')
+    }, [id])
+
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            setDetailLoading(false)
+            setDetailSource('local')
+            setDetailError('')
+            return
+        }
+        loadLiveEmployee()
+    }, [loadLiveEmployee])
+
+    const employee = live ? liveEmployee : localEmployee
+
+    if (!live && !localEmployee) {
+        return <Navigate to='/hr/employee-management/employees' replace />
+    }
+
+    if (live && detailLoading) {
+        return (
+            <section className='space-y-6'>
+                <NavLink to='/hr/employee-management/employees' className='inline-flex items-center gap-2 text-sm text-[#515DEF]'><ArrowLeft size={16} /> Employees</NavLink>
+                <FeedbackState kind='loading' title='Loading employee' description={`Fetching ${id} from the HR API…`} />
+            </section>
+        )
+    }
+
+    if (live && (detailSource === 'error' || !employee)) {
+        return (
+            <section className='space-y-6'>
+                <NavLink to='/hr/employee-management/employees' className='inline-flex items-center gap-2 text-sm text-[#515DEF]'><ArrowLeft size={16} /> Employees</NavLink>
+                <FeedbackState
+                    kind='error'
+                    title='Employee unavailable'
+                    description={detailError || `Employee ${id} was not found or you do not have permission to view it.`}
+                />
+            </section>
+        )
+    }
 
     const documents = getDocuments().filter((item) => item.employeeId === employee.id)
     const attendance = getAttendance().filter((item) => item.employeeId === employee.id)
@@ -124,6 +203,9 @@ const EmployeeProfile = () => {
     return (
         <section className='space-y-6'>
             <NavLink to='/hr/employee-management/employees' className='inline-flex items-center gap-2 text-sm text-[#515DEF]'><ArrowLeft size={16} /> Employees</NavLink>
+            {detailSource === 'backend' ? (
+                <p className='text-xs font-medium text-[#027A48]'>Live employee · GET /api/v1/hr/portal/employees · GET /api/v1/hr/employees/{'{code}'}</p>
+            ) : null}
             <div className='bg-white rounded-2xl shadow-md p-4 flex gap-4 items-center'>
                 <img src={mo_user} alt='' className='w-16 h-16 rounded-full object-cover' />
                 <div>
