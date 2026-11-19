@@ -13,6 +13,7 @@ const BASE_PORTAL_LAYOUTS = {
     [ROLES.STUDENT]: portal(ROLES.STUDENT, 'Student workspace', 'Student', true),
     [ROLES.PARENT]: portal(ROLES.PARENT, 'Guardian workspace', 'Guardian', true),
     [ROLES.LIBRARIAN]: portal(ROLES.LIBRARIAN, 'Library operations', 'Library', true),
+    [ROLES.HOSTEL_WARDEN]: portal(ROLES.HOSTEL_WARDEN, 'Hostel operations', 'Hostel Warden', true),
     [ROLES.PRM]: portal(ROLES.PRM, 'Front office', 'Front Office', true),
     [ROLES.GATEKEEPER]: portal(ROLES.GATEKEEPER, 'Security desk', 'Security', true),
     [ROLES.GATEKEEPER_MANAGER]: portal(ROLES.GATEKEEPER_MANAGER, 'Security operations', 'Security Manager', true),

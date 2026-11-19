@@ -47,6 +47,11 @@ export const LEAVE_ROUTE_CONFIG = {
         receivedList: '/front-office/leave-request/received',
         receivedView: '/front-office/leave-request/received/view',
     },
+    hostelwarden: {
+        myList: '/hostel-warden/leave-request/my-requests',
+        add: '/hostel-warden/leave-request/my-requests/add',
+        myView: '/hostel-warden/leave-request/my-requests/view',
+    },
     gatekeeper: {
         myList: '/gate-keeper/leave-request/my-requests',
         add: '/gate-keeper/leave-request/my-requests/add',

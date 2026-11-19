@@ -840,6 +840,39 @@ export const prmSidebarLinks = [
     },
 ];
 
+export const hostelWardenSidebarLinks = [
+    {
+        id: 0,
+        title: "Dashboard",
+        to: "/hostel-warden/dashboard",
+        icon: LayoutDashboard,
+    },
+    {
+        id: 1,
+        title: "Assignments",
+        to: "/hostel-warden/assignments",
+        icon: Bed,
+    },
+    {
+        id: 2,
+        title: "Payments",
+        to: "/hostel-warden/payments",
+        icon: Package,
+    },
+    {
+        id: 3,
+        title: "Announcement",
+        to: "/hostel-warden/announcement",
+        icon: Rss,
+    },
+    {
+        id: 4,
+        title: "My Leave",
+        to: "/hostel-warden/leave-request/my-requests",
+        icon: CalendarCheck,
+    },
+];
+
 export const librarianSidebarLinks = [
     {
         id: 0,
@@ -3481,6 +3514,8 @@ export const roleBasedSidebarLinks = {
     Teacher: teacherSidebarLinks,
     Coordinator: coordinatorSidebarLinks,
     Librarian: librarianSidebarLinks,
+    HostelWarden: hostelWardenSidebarLinks,
+    hostelwarden: hostelWardenSidebarLinks,
     PRM: prmSidebarLinks,
     GateKeeper: gateKeeperSidebarLinks,
     GateKeeperManager: gateKeeperManagerSidebarLinks,

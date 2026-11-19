@@ -31,6 +31,7 @@ import {
     jointDirectorAuditSidebarLinks,
     jointDirectorSidebarLinks,
     librarianSidebarLinks,
+    hostelWardenSidebarLinks,
     parentSidebarLinks,
     principalSidebarLinks,
     prmSidebarLinks,
@@ -74,6 +75,7 @@ export const normalizeRoleKey = (role) => {
     if (clean === 'hr') return ROLES.HR
     if (clean === 'accounthead' || clean === 'accounts') return ROLES.ACCOUNT_HEAD
     if (clean === 'librarian') return ROLES.LIBRARIAN
+    if (clean === 'hostelwarden') return ROLES.HOSTEL_WARDEN
     if (clean === 'driver' || clean === 'vandriver') return ROLES.DRIVER
     if (clean === 'student') return ROLES.STUDENT
     if (clean === 'parent') return ROLES.PARENT
@@ -113,6 +115,7 @@ export const ROLE_TO_BASE_PATH = Object.freeze({
     [ROLES.HR]: '/hr',
     [ROLES.ACCOUNT_HEAD]: '/account-head',
     [ROLES.LIBRARIAN]: '/librarian',
+    [ROLES.HOSTEL_WARDEN]: '/hostel-warden',
     [ROLES.CANTEEN_MANAGER]: '/canteen-manager',
     [ROLES.IT_SUPPORT_MANAGER]: '/it-support-manager',
     [ROLES.STATIONERY_STORE_MANAGER]: '/stationery-store-manager',
@@ -140,6 +143,7 @@ export const PATH_PREFIX_TO_ROLE = Object.freeze([
     { prefix: '/coordinator', role: ROLES.COORDINATOR },
     { prefix: '/teacher', role: ROLES.TEACHER },
     { prefix: '/librarian', role: ROLES.LIBRARIAN },
+    { prefix: '/hostel-warden', role: ROLES.HOSTEL_WARDEN },
     { prefix: '/canteen-manager', role: ROLES.CANTEEN_MANAGER },
     { prefix: '/it-support-manager', role: ROLES.IT_SUPPORT_MANAGER },
     { prefix: '/stationery-store-manager', role: ROLES.STATIONERY_STORE_MANAGER },
@@ -191,6 +195,7 @@ const ROLE_NAVIGATION_PROVIDERS = {
     [ROLES.HR]: () => hrSidebarLinks,
     [ROLES.ACCOUNT_HEAD]: () => accountHeadSidebarLinks,
     [ROLES.LIBRARIAN]: () => librarianSidebarLinks,
+    [ROLES.HOSTEL_WARDEN]: () => hostelWardenSidebarLinks,
     [ROLES.STUDENT]: () => studentSidebarLinks,
     [ROLES.PARENT]: () => parentSidebarLinks,
     [ROLES.CANTEEN_MANAGER]: () => canteenManagerSidebarLinks,

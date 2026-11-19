@@ -252,6 +252,22 @@ export const ENTERPRISE_USER_DIRECTORY = [
         avatarColor: '#7C3AED',
         status: 'Active',
     },
+    {
+        id: 'EMP-HSW-001',
+        employeeId: 'EMP-HSW-001',
+        email: 'hostelwarden@qmis.edu',
+        username: 'hostelwarden',
+        name: 'Hostel Warden',
+        role: ROLES.HOSTEL_WARDEN,
+        roleLabel: 'Hostel Warden',
+        department: 'Hostel Operations',
+        designation: 'Hostel Warden',
+        reportingTo: 'Principal',
+        campus: 'DPS North Campus',
+        category: 'Operations & Logistics',
+        avatarColor: '#0F766E',
+        status: 'Active',
+    },
 
     // Operations, Facilities & Logistics
     {

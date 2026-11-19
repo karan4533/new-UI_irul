@@ -8,6 +8,7 @@ import './App.css'
 const SuperAdminLayout = lazy(() => import("./Layout/SuperAdminLayout"));
 const AdminLayout = lazy(() => import("./Layout/AdminLayout"));
 const LibrarianLayout = lazy(() => import("./Layout/LibrarianLayout"));
+const HostelWardenLayout = lazy(() => import("./Layout/HostelWardenLayout"));
 const GateKeeperLayout = lazy(() => import("./Layout/GateKeeperLayout"));
 const GateKeeperManagerLayout = lazy(() => import("./Layout/GateKeeperManagerLayout"));
 const DirectorLayout = lazy(() => import("./Layout/DirectorLayout"));
@@ -132,6 +133,13 @@ const AppContent = () => {
       return <Navigate to={ROLE_HOME_PATHS[ROLES.LIBRARIAN]} replace />;
     }
     return <LibrarianLayout />;
+  }
+
+  if (role === ROLES.HOSTEL_WARDEN) {
+    if (!pathname.startsWith("/hostel-warden")) {
+      return <Navigate to={ROLE_HOME_PATHS[ROLES.HOSTEL_WARDEN]} replace />;
+    }
+    return <HostelWardenLayout />;
   }
 
   if (role === ROLES.PRM) {
@@ -326,6 +334,7 @@ const AppContent = () => {
     pathname.startsWith("/cctv") ||
     pathname.startsWith("/super-admin") ||
     pathname.startsWith("/librarian") ||
+    pathname.startsWith("/hostel-warden") ||
     pathname.startsWith("/front-office") ||
     pathname.startsWith("/student") ||
     pathname.startsWith("/parent") ||

@@ -101,7 +101,7 @@ export const EnterpriseOperationsRoutes = ({ basePath, role = null }) => (
             Admin and HR own dedicated ReceivedLeaveRequests routes — skip those stubs here. */}
         <Route path={`${basePath}/leave-request`} element={<AttendanceAndLeaveWorkspace defaultTab='my-leave' roleOverride={role} />} />
         <Route path={`${basePath}/leave-request/my-leaves`} element={<AttendanceAndLeaveWorkspace defaultTab='my-leave' roleOverride={role} />} />
-        {role !== 'admin' && role !== 'hr' && role !== 'principal' && role !== 'teacher' && role !== 'coordinator' ? (
+        {role !== 'admin' && role !== 'hr' && role !== 'principal' && role !== 'teacher' && role !== 'coordinator' && role !== 'prm' && role !== 'hostelwarden' ? (
             <>
                 <Route path={`${basePath}/leave-request/my-requests`} element={<AttendanceAndLeaveWorkspace defaultTab='my-leave' roleOverride={role} />} />
                 <Route path={`${basePath}/leave-request/my-requests/add`} element={<AttendanceAndLeaveWorkspace defaultTab='my-leave' roleOverride={role} />} />
