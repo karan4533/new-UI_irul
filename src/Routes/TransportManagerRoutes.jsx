@@ -38,6 +38,11 @@ import ViewTransportExpense from '../Pages/TransportManager/TransportExpenses/Vi
 import LeaveRequest from '../Pages/TransportManager/LeaveRequest/LeaveRequest'
 import ViewLeaveRequest from '../Pages/TransportManager/LeaveRequest/ViewLeaveRequest'
 import DriverConductorNoc from '../Pages/TransportManager/NocManagement/DriverConductorNoc'
+import MyLeaveRequestsList from '../Common/LeaveRequest/MyLeaveRequestsList'
+import AddLeaveRequestForm from '../Common/LeaveRequest/AddLeaveRequestForm'
+import ViewMyLeaveRequestPage from '../Common/LeaveRequest/ViewMyLeaveRequestPage'
+import AnnouncementListView from '../Common/Announcement/AnnouncementListView'
+import ViewAnnouncementPage from '../Common/Announcement/ViewAnnouncementPage'
 
 const TransportManagerRoutes = () => {
     return (
@@ -73,8 +78,13 @@ const TransportManagerRoutes = () => {
             <Route path="/transport-manager/transport-expenses/add/:type" element={<AddTransportExpense />} />
             <Route path="/transport-manager/transport-expenses/view/:type/:id" element={<ViewTransportExpense />} />
             <Route path="/transport-manager/attendance-and-leave" element={<AttendanceAndLeaveWorkspace defaultTab="overview" />} />
-            <Route path="/transport-manager/leave-request" element={<AttendanceAndLeaveWorkspace defaultTab="my-leaves" />} />
+            <Route path="/transport-manager/leave-request/my-requests" element={<MyLeaveRequestsList roleKey='transportmanager' />} />
+            <Route path="/transport-manager/leave-request/my-requests/add" element={<AddLeaveRequestForm roleKey='transportmanager' />} />
+            <Route path="/transport-manager/leave-request/my-requests/view/:id" element={<ViewMyLeaveRequestPage roleKey='transportmanager' />} />
+            <Route path="/transport-manager/leave-request" element={<LeaveRequest />} />
             <Route path="/transport-manager/leave-request/view/:id" element={<ViewLeaveRequest />} />
+            <Route path="/transport-manager/announcement" element={<AnnouncementListView roleKey='transportmanager' />} />
+            <Route path="/transport-manager/announcement/view/:id" element={<ViewAnnouncementPage roleKey='transportmanager' />} />
             <Route path="/transport-manager/driver-conductor-noc" element={<DriverConductorNoc />} />
             {/* Communication */}
             <Route path="/transport-manager/communication" element={<Navigate to="/transport-manager/communication/inbox" replace />} />
@@ -86,7 +96,7 @@ const TransportManagerRoutes = () => {
             {TaskManagementRoutes({ basePath: '/transport-manager' })}
 
             {/* Enterprise Functional Operations (Stores, Gate Pass, File Room, Ticketing, Monitoring, Lost & Found) */}
-            {EnterpriseOperationsRoutes({ basePath: '/transport-manager', role: 'transport-manager' })}
+            {EnterpriseOperationsRoutes({ basePath: '/transport-manager', role: 'transportmanager' })}
 
             <Route path="*" element={<Navigate to="/transport-manager/dashboard" replace />} />
         </ReactRoutes>

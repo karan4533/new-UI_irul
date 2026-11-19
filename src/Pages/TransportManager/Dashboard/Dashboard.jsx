@@ -1,86 +1,107 @@
+import React, { useCallback, useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
-import { AlertTriangle, ArrowRight, Bus, ClipboardCheck, MapPinned, Wrench } from 'lucide-react'
-import { IntegrationNotice, PageHeader, StatusBadge } from '../../../Common/ui'
+import { Bus, MapPinned, Users, UserRound } from 'lucide-react'
+import { FeedbackState, PageHeader } from '../../../Common/ui'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import {
+    listTransportDrivers,
+    listTransportRoutes,
+    listTransportStudentAssignments,
+    listTransportVehicles,
+} from '../../../services/api/transportApiService'
 
-const METRICS = [
-    { label: 'Fleet records', value: 12, detail: 'Reference vehicles', icon: Bus, to: '/transport-manager/vehicle-management' },
-    { label: 'Active routes', value: 8, detail: 'Reference route plans', icon: MapPinned, to: '/transport-manager/route-management' },
-    { label: 'Maintenance due', value: 3, detail: 'Needs scheduling review', icon: Wrench, to: '/transport-manager/vehicle-maintenance' },
-    { label: 'Approval queue', value: 4, detail: 'Requests awaiting decision', icon: ClipboardCheck, to: '/transport-manager/request-approvals' },
-]
+const Dashboard = () => {
+    const live = isLiveApiEnabled()
+    const [counts, setCounts] = useState({ drivers: 0, vehicles: 0, routes: 0, students: 0 })
+    const [loading, setLoading] = useState(Boolean(live))
+    const [error, setError] = useState('')
 
-const ATTENTION = [
-    { id: 'VH-004', title: 'Insurance renewal evidence due', context: 'Vehicle TN-09-AB-4521 · due 04-11-2026', status: 'High', to: '/transport-manager/vehicle-management' },
-    { id: 'MT-018', title: 'Preventive service schedule review', context: 'School bus 07 · odometer threshold reached', status: 'Pending', to: '/transport-manager/vehicle-maintenance' },
-    { id: 'REQ-026', title: 'Route 5 repair request', context: 'Workshop quotation awaiting approval', status: 'In Review', to: '/transport-manager/request-approvals' },
-]
+    const load = useCallback(async () => {
+        if (!isLiveApiEnabled()) {
+            setLoading(false)
+            return
+        }
+        setLoading(true)
+        setError('')
+        const [d, v, r, s] = await Promise.all([
+            listTransportDrivers(),
+            listTransportVehicles(),
+            listTransportRoutes(),
+            listTransportStudentAssignments(),
+        ])
+        setLoading(false)
+        if (!d.success || !v.success || !r.success || !s.success) {
+            setError(
+                [d.error, v.error, r.error, s.error].find((item) => typeof item === 'string') ||
+                    'Failed to load transport collections.',
+            )
+            return
+        }
+        setCounts({
+            drivers: (d.data || []).length,
+            vehicles: (v.data || []).length,
+            routes: (r.data || []).length,
+            students: (s.data || []).filter((row) => String(row.status || '').toLowerCase() !== 'inactive').length,
+        })
+    }, [])
 
-const QUICK_LINKS = [
-    { label: 'Review fleet', to: '/transport-manager/vehicle-management' },
-    { label: 'Manage routes', to: '/transport-manager/route-management' },
-    { label: 'Assign duties', to: '/transport-manager/assign-duty' },
-    { label: 'Review maintenance', to: '/transport-manager/vehicle-maintenance' },
-]
+    useEffect(() => {
+        load()
+    }, [load])
 
-const Dashboard = () => (
-    <section>
-        <PageHeader
-            title='Transport operations briefing'
-            description='Fleet readiness, route coverage, maintenance risk and approval work requiring transport management attention.'
-            context='Reference operational data · live telematics and transport services not connected'
-        />
+    const metrics = [
+        { label: 'Drivers', value: counts.drivers, icon: UserRound, to: '/transport-manager/driver-management' },
+        { label: 'Vehicles', value: counts.vehicles, icon: Bus, to: '/transport-manager/vehicle-management' },
+        { label: 'Routes', value: counts.routes, icon: MapPinned, to: '/transport-manager/route-management' },
+        { label: 'Active student assignments', value: counts.students, icon: Users, to: '/transport-manager/student-transport' },
+    ]
 
-        <IntegrationNotice
-            state='demo'
-            title='Transport reference workspace'
-            description='Counts and attention items are frontend reference data. Live GPS, vehicle telemetry, duty acknowledgement, maintenance work orders, documents and approval notifications require backend integrations.'
-            className='mb-5'
-        />
+    return (
+        <section className='space-y-6'>
+            <PageHeader
+                title='Transport Manager Dashboard'
+                description='Fleet counts from FastAPI ops transport collections.'
+                context={live ? 'Live · /api/v1/ops/transport-*' : 'Live API disabled'}
+            />
 
-        <dl className='grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4'>
-            {METRICS.map(({ label, value, detail, icon: Icon, to }) => (
-                <NavLink
-                    key={label}
-                    to={to}
-                    className='group block rounded-2xl border border-[var(--erp-line)] bg-white p-4 shadow-[var(--erp-shadow-subtle)] hover:shadow-md hover:border-[#515DEF]/40 hover:-translate-y-0.5 transition-all duration-200 cursor-pointer'
-                >
-                    <div className='flex items-start justify-between gap-3'>
-                        <div>
-                            <dt className='text-sm font-medium text-[var(--erp-muted)] group-hover:text-[#515DEF] transition-colors'>
-                                {label}
-                            </dt>
-                            <dd className='mt-1 text-2xl font-semibold text-[var(--erp-ink)]'>{value}</dd>
-                        </div>
-                        <span className='grid size-10 place-items-center rounded-xl bg-[var(--erp-primary-soft)] text-[var(--erp-primary)] group-hover:scale-105 transition-transform'>
-                            {Icon && <Icon size={19} aria-hidden='true' />}
-                        </span>
-                    </div>
-                    <p className='mt-2 text-xs text-[var(--erp-slate)]'>{detail}</p>
-                </NavLink>
-            ))}
-        </dl>
+            {error ? <FeedbackState kind='error' title='Transport API unavailable' description={error} /> : null}
+            {loading ? <FeedbackState kind='loading' title='Loading transport data' description='Fetching ops collections…' /> : null}
 
-        <div className='mt-6 grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.6fr)]'>
-            <section className='rounded-2xl border border-[var(--erp-line)] bg-white p-4 shadow-[var(--erp-shadow-subtle)]' aria-labelledby='transport-attention-heading'>
-                <div className='flex items-center gap-2'><AlertTriangle className='text-amber-600' size={19} aria-hidden='true' /><h3 id='transport-attention-heading' className='text-lg font-semibold text-[var(--erp-ink)]'>Attention queue</h3></div>
-                <div className='mt-4 divide-y divide-[var(--erp-line)]'>
-                    {ATTENTION.map((item) => (
-                        <article key={item.id} className='flex flex-col gap-3 py-4 first:pt-0 sm:flex-row sm:items-center sm:justify-between'>
-                            <div className='min-w-0'><p className='font-semibold text-[var(--erp-ink)]'>{item.title}</p><p className='mt-1 text-sm text-[var(--erp-slate)]'>{item.id} · {item.context}</p></div>
-                            <div className='flex items-center gap-2'><StatusBadge status={item.status} /><NavLink to={item.to} className='inline-flex min-h-9 items-center gap-1 rounded-lg border border-[var(--erp-primary)] px-3 py-1.5 text-sm font-semibold text-[var(--erp-primary)]'>Review <ArrowRight size={14} aria-hidden='true' /></NavLink></div>
-                        </article>
+            {!loading && !error ? (
+                <div className='grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4'>
+                    {metrics.map(({ label, value, icon: Icon, to }) => (
+                        <NavLink
+                            key={label}
+                            to={to}
+                            className='bg-white rounded-2xl shadow-md p-4 border border-transparent hover:border-[#515DEF]'
+                        >
+                            <div className='flex items-start justify-between'>
+                                <div>
+                                    <p className='text-sm text-[#808080]'>{label}</p>
+                                    <p className='text-3xl font-bold text-[#0C1E5B] mt-2'>{value}</p>
+                                </div>
+                                <span className='grid size-10 place-items-center rounded-xl bg-[#EEF2FF] text-[#515DEF]'>
+                                    <Icon size={18} aria-hidden='true' />
+                                </span>
+                            </div>
+                        </NavLink>
                     ))}
                 </div>
-            </section>
+            ) : null}
 
-            <section className='rounded-2xl border border-[var(--erp-line)] bg-white p-4 shadow-[var(--erp-shadow-subtle)]' aria-labelledby='transport-quick-links-heading'>
-                <h3 id='transport-quick-links-heading' className='text-lg font-semibold text-[var(--erp-ink)]'>Common actions</h3>
-                <div className='mt-4 grid gap-2'>
-                    {QUICK_LINKS.map((item) => <NavLink key={item.to} to={item.to} className='flex min-h-11 items-center justify-between rounded-xl border border-[var(--erp-line)] px-3 py-2 text-sm font-semibold text-[var(--erp-slate)] hover:border-[var(--erp-primary)] hover:text-[var(--erp-primary)]'>{item.label}<ArrowRight size={15} aria-hidden='true' /></NavLink>)}
-                </div>
-            </section>
-        </div>
-    </section>
-)
+            <div className='flex flex-wrap gap-3'>
+                <NavLink to='/transport-manager/driver-management' className='bg-[#515DEF] text-white text-sm px-4 py-2 rounded-md'>
+                    Manage drivers
+                </NavLink>
+                <NavLink to='/transport-manager/student-transport' className='bg-white text-[#515DEF] text-sm px-4 py-2 rounded-md border border-[#515DEF]'>
+                    Student assignments
+                </NavLink>
+                <NavLink to='/transport-manager/assign-duty' className='bg-white text-[#515DEF] text-sm px-4 py-2 rounded-md border border-[#515DEF]'>
+                    Duties
+                </NavLink>
+            </div>
+        </section>
+    )
+}
 
 export default Dashboard
