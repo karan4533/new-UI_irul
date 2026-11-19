@@ -1,12 +1,20 @@
-import React, { useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, CheckCircle2 } from 'lucide-react'
+import { toast } from 'react-toastify'
+import { FeedbackState } from '../../../Common/ui'
 import {
     forwardTcRequestToSuperAdmin,
     getTcRequestById,
     rejectTcRequest,
     statusBadgeColor,
 } from '../../../Common/TcRequest/tcRequestData'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import {
+    forwardTcRequest,
+    getTcRequest,
+    rejectTcRequestAtPrm,
+} from '../../../services/api/tcApiService'
 
 const Section = ({ title, children }) => (
     <div className='bg-white rounded-2xl shadow-md p-4'>
@@ -25,17 +33,83 @@ const Field = ({ label, value }) => (
 const ViewTcRequest = () => {
     const { id } = useParams()
     const navigate = useNavigate()
-    const [request, setRequest] = useState(() => getTcRequestById(id))
-    const [prmRemarks, setPrmRemarks] = useState(request?.prmRemarks ?? '')
+    const live = isLiveApiEnabled()
+    const [request, setRequest] = useState(() => (live ? null : getTcRequestById(id)))
+    const [prmRemarks, setPrmRemarks] = useState('')
+    const [loading, setLoading] = useState(Boolean(live))
+    const [error, setError] = useState('')
+    const [busy, setBusy] = useState(false)
 
-    const handleForward = () => {
-        const updated = forwardTcRequestToSuperAdmin(id, prmRemarks)
-        if (updated) setRequest(updated)
+    const loadLive = useCallback(async () => {
+        setLoading(true)
+        setError('')
+        const res = await getTcRequest(id)
+        setLoading(false)
+        if (!res.success || !res.data) {
+            setRequest(null)
+            setError(typeof res.error === 'string' ? res.error : 'TC request not found on the server.')
+            return
+        }
+        setRequest(res.data)
+        setPrmRemarks(res.data.prmRemarks || '')
+    }, [id])
+
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            const local = getTcRequestById(id)
+            setRequest(local)
+            setPrmRemarks(local?.prmRemarks ?? '')
+            setLoading(false)
+            return
+        }
+        loadLive()
+    }, [id, loadLive])
+
+    const handleForward = async () => {
+        if (!request) return
+        if (!isLiveApiEnabled()) {
+            const updated = forwardTcRequestToSuperAdmin(id, prmRemarks)
+            if (updated) setRequest(updated)
+            return
+        }
+        setBusy(true)
+        const res = await forwardTcRequest(request.requestId || id, prmRemarks)
+        setBusy(false)
+        if (!res.success) {
+            toast.error(typeof res.error === 'string' ? res.error : 'Could not forward TC request.')
+            return
+        }
+        toast.success('TC request forwarded on the server.')
+        setRequest(res.data)
     }
 
-    const handleReject = () => {
-        const updated = rejectTcRequest(id, prmRemarks, 'prm')
-        if (updated) setRequest(updated)
+    const handleReject = async () => {
+        if (!request) return
+        if (!isLiveApiEnabled()) {
+            const updated = rejectTcRequest(id, prmRemarks, 'prm')
+            if (updated) setRequest(updated)
+            return
+        }
+        setBusy(true)
+        const res = await rejectTcRequestAtPrm(request.requestId || id, prmRemarks)
+        setBusy(false)
+        if (!res.success) {
+            toast.error(typeof res.error === 'string' ? res.error : 'Could not reject TC request.')
+            return
+        }
+        toast.success('TC request rejected at PRM review.')
+        setRequest(res.data)
+    }
+
+    if (loading) {
+        return (
+            <section className='space-y-6'>
+                <button type='button' onClick={() => navigate('/front-office/tc-request')} className='inline-flex items-center gap-2 text-sm text-[#515DEF] border border-[#515DEF] rounded-md px-4 py-2'>
+                    <ArrowLeft size={18} /> Back to list
+                </button>
+                <FeedbackState kind='loading' title='Loading TC request' description={`Fetching ${id}…`} />
+            </section>
+        )
     }
 
     return (
@@ -45,14 +119,16 @@ const ViewTcRequest = () => {
                 Back to list
             </button>
 
+            {live ? <p className='text-xs font-medium text-[#027A48]'>Live TC · GET/POST /api/v1/tc-requests</p> : null}
+
             {!request ? (
-                <div className='bg-white rounded-2xl shadow-md p-8 text-center text-[#667085]'>TC request not found.</div>
+                <div className='bg-white rounded-2xl shadow-md p-8 text-center text-[#667085]'>{error || 'TC request not found.'}</div>
             ) : (
                 <>
                     <div className='bg-white rounded-2xl shadow-md p-4'>
                         <div className='flex flex-wrap items-center gap-3'>
                             <h1 className='text-2xl font-semibold text-black'>{request.requestId}</h1>
-                            <span className={`px-3 py-1.5 rounded-lg text-sm font-semibold whitespace-nowrap ${statusBadgeColor[request.status]}`}>
+                            <span className={`px-3 py-1.5 rounded-lg text-sm font-semibold whitespace-nowrap ${statusBadgeColor[request.status] || 'bg-slate-100 text-slate-700'}`}>
                                 {request.status}
                             </span>
                         </div>
@@ -73,41 +149,43 @@ const ViewTcRequest = () => {
                         </div>
                     </Section>
 
-                    <Section title='Manager-Level NOC Clearance (Mandatory Departmental Sign-offs)'>
-                        <div className='overflow-x-auto'>
-                            <table className='w-full text-left text-xs'>
-                                <thead>
-                                    <tr className='border-b border-slate-100 bg-[#EDEEF5] text-[#0C1E5B] font-semibold uppercase'>
-                                        <th className='py-3 px-4 rounded-s-lg'>Department</th>
-                                        <th className='py-3 px-4'>Approving Manager</th>
-                                        <th className='py-3 px-4'>Clearance Status</th>
-                                        <th className='py-3 px-4'>Remarks & Audit Notes</th>
-                                        <th className='py-3 px-4 rounded-e-lg'>Date Cleared</th>
-                                    </tr>
-                                </thead>
-                                <tbody className='divide-y divide-slate-100'>
-                                    {(request.nocClearances || []).map((noc) => (
-                                        <tr key={noc.departmentKey} className='hover:bg-slate-50/70 transition-colors'>
-                                            <td className='py-3 px-4 font-bold text-slate-900'>{noc.department}</td>
-                                            <td className='py-3 px-4 font-medium text-slate-700'>{noc.manager}</td>
-                                            <td className='py-3 px-4'>
-                                                <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
-                                                    noc.status === 'Cleared'
-                                                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                                        : 'bg-amber-50 text-amber-700 border border-amber-200'
-                                                }`}>
-                                                    <CheckCircle2 size={12} />
-                                                    {noc.status}
-                                                </span>
-                                            </td>
-                                            <td className='py-3 px-4 text-slate-600 max-w-xs'>{noc.remarks}</td>
-                                            <td className='py-3 px-4 font-mono text-slate-500'>{noc.date}</td>
+                    {(request.nocClearances || []).length > 0 ? (
+                        <Section title='Manager-Level NOC Clearance (Mandatory Departmental Sign-offs)'>
+                            <div className='overflow-x-auto'>
+                                <table className='w-full text-left text-xs'>
+                                    <thead>
+                                        <tr className='border-b border-slate-100 bg-[#EDEEF5] text-[#0C1E5B] font-semibold uppercase'>
+                                            <th className='py-3 px-4 rounded-s-lg'>Department</th>
+                                            <th className='py-3 px-4'>Approving Manager</th>
+                                            <th className='py-3 px-4'>Clearance Status</th>
+                                            <th className='py-3 px-4'>Remarks & Audit Notes</th>
+                                            <th className='py-3 px-4 rounded-e-lg'>Date Cleared</th>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </Section>
+                                    </thead>
+                                    <tbody className='divide-y divide-slate-100'>
+                                        {(request.nocClearances || []).map((noc) => (
+                                            <tr key={noc.departmentKey || noc.department} className='hover:bg-slate-50/70 transition-colors'>
+                                                <td className='py-3 px-4 font-bold text-slate-900'>{noc.department}</td>
+                                                <td className='py-3 px-4 font-medium text-slate-700'>{noc.manager}</td>
+                                                <td className='py-3 px-4'>
+                                                    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                                                        noc.status === 'Cleared'
+                                                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                                            : 'bg-amber-50 text-amber-700 border border-amber-200'
+                                                    }`}>
+                                                        <CheckCircle2 size={12} />
+                                                        {noc.status}
+                                                    </span>
+                                                </td>
+                                                <td className='py-3 px-4 text-slate-600 max-w-xs'>{noc.remarks}</td>
+                                                <td className='py-3 px-4 font-mono text-slate-500'>{noc.date}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </Section>
+                    ) : null}
 
                     {request.status === 'Pending PRM Review' ? (
                         <Section title='PRM Action'>
@@ -124,10 +202,10 @@ const ViewTcRequest = () => {
                                     />
                                 </div>
                                 <div className='flex sm:justify-end justify-center gap-x-4'>
-                                    <button type='button' onClick={handleReject} className='bg-white text-[#FF0000] text-sm px-8 py-2 rounded-md border border-[#FF0000] hover:bg-[#FF0000] hover:text-white transition-all duration-200 cursor-pointer md:w-auto w-full'>
+                                    <button type='button' disabled={busy} onClick={handleReject} className='bg-white text-[#FF0000] text-sm px-8 py-2 rounded-md border border-[#FF0000] hover:bg-[#FF0000] hover:text-white transition-all duration-200 cursor-pointer md:w-auto w-full disabled:opacity-60'>
                                         Reject
                                     </button>
-                                    <button type='button' onClick={handleForward} className='bg-[#515DEF] text-white text-sm px-8 py-2 rounded-md border border-[#515DEF] hover:opacity-90 transition-all duration-200 cursor-pointer md:w-auto w-full'>
+                                    <button type='button' disabled={busy} onClick={handleForward} className='bg-[#515DEF] text-white text-sm px-8 py-2 rounded-md border border-[#515DEF] hover:opacity-90 transition-all duration-200 cursor-pointer md:w-auto w-full disabled:opacity-60'>
                                         Forward to Super Admin
                                     </button>
                                 </div>

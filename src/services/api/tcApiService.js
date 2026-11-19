@@ -75,3 +75,29 @@ export async function decideTcRequest(ref, { decision, remarks = '' } = {}, opti
   if (!res.success) return res
   return { ...res, data: mapTcRequestToUi(res.data || {}) }
 }
+
+/** POST /api/v1/tc-requests/{ref}/forward — PRM / admin (tc.write) */
+export async function forwardTcRequest(ref, remarks = '', options = {}) {
+  const blocked = requireLive()
+  if (blocked) return blocked
+  const res = await apiClient.post(
+    `/api/v1/tc-requests/${encodeURIComponent(ref)}/forward`,
+    { remarks },
+    { skipMock: true, ...options },
+  )
+  if (!res.success) return res
+  return { ...res, data: mapTcRequestToUi(res.data || {}) }
+}
+
+/** POST /api/v1/tc-requests/{ref}/reject-prm — PRM review reject */
+export async function rejectTcRequestAtPrm(ref, remarks = '', options = {}) {
+  const blocked = requireLive()
+  if (blocked) return blocked
+  const res = await apiClient.post(
+    `/api/v1/tc-requests/${encodeURIComponent(ref)}/reject-prm`,
+    { remarks },
+    { skipMock: true, ...options },
+  )
+  if (!res.success) return res
+  return { ...res, data: mapTcRequestToUi(res.data || {}) }
+}

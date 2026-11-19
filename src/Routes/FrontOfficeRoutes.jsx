@@ -114,11 +114,13 @@ const FrontOfficeRoutes = () => {
             <Route path="/front-office/announcement" element={<AnnouncementList />} />
             <Route path="/front-office/announcement/view/:id" element={<ViewAnnouncement />} />
             <Route path="/front-office/notifications" element={<Notifications />} />
-            <Route path="/front-office/leave-request/my-requests" element={<AttendanceAndLeaveWorkspace defaultTab="my-leaves" />} />
+            {/* Formal leave — declare before EnterpriseOperationsRoutes so stubs cannot shadow. */}
+            <Route path="/front-office/leave-request/my-requests" element={<MyLeaveRequests />} />
             <Route path="/front-office/leave-request/my-requests/add" element={<AddLeaveRequest />} />
             <Route path="/front-office/leave-request/my-requests/view/:id" element={<ViewMyLeaveRequest />} />
-            <Route path="/front-office/leave-request/received" element={<AttendanceAndLeaveWorkspace defaultTab="received-leaves" />} />
+            <Route path="/front-office/leave-request/received" element={<ReceivedLeaveRequests />} />
             <Route path="/front-office/leave-request/received/view/:id" element={<ViewReceivedLeaveRequest />} />
+
             <Route path="/front-office/communication" element={<Navigate to="/front-office/communication/inbox" replace />} />
             <Route path="/front-office/communication/inbox" element={<CommunicationInbox />} />
             <Route path="/front-office/communication/inbox/:conversationId" element={<CommunicationInbox />} />

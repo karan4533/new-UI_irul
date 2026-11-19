@@ -86,7 +86,13 @@ const formatDate = (date) => {
 const parseStoredDate = (value) => {
     if (!value) return null
     if (value instanceof Date) return value
-    const [day, month, year] = String(value).split('-').map(Number)
+    const raw = String(value).trim()
+    // ISO from FastAPI (YYYY-MM-DD or full datetime)
+    if (/^\d{4}-\d{2}-\d{2}/.test(raw)) {
+        const parsed = new Date(raw.slice(0, 10))
+        return Number.isNaN(parsed.getTime()) ? null : parsed
+    }
+    const [day, month, year] = raw.split('-').map(Number)
     if (!day || !month || !year) return null
     return new Date(year, month - 1, day)
 }

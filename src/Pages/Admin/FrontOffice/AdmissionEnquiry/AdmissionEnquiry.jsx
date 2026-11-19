@@ -20,7 +20,10 @@ import {
     updateAdmissionEnquiryStatus,
 } from './admissionEnquiryData'
 import { isLiveApiEnabled } from '../../../../services/api/tokenStore'
-import { listAdmissionEnquiries } from '../../../../services/api/admissionsApiService'
+import {
+    convertAdmissionEnquiry,
+    listAdmissionEnquiries,
+} from '../../../../services/api/admissionsApiService'
 
 const AdmissionEnquiry = () => {
     const live = isLiveApiEnabled()
@@ -94,12 +97,21 @@ const AdmissionEnquiry = () => {
         toast.success('Enquiry deleted.')
     }
 
-    const handleConvertToAdmission = (record) => {
+    const handleConvertToAdmission = async (record) => {
         if (isLiveApiEnabled()) {
-            toast.info('Use the admissions convert/enroll API flow for live conversion. Opening the admission form with enquiry context.')
-            navigate(getAddAdmissionPath(pathname), {
-                state: { fromEnquiryId: record.id, enquiry: record },
-            })
+            const res = await convertAdmissionEnquiry(record.id)
+            if (!res.success) {
+                toast.error(typeof res.error === 'string' ? res.error : 'Could not convert enquiry.')
+                return
+            }
+            toast.success('Enquiry converted to admission on the server.')
+            refresh()
+            navigate(
+                pathname.startsWith('/front-office')
+                    ? '/front-office/admission-list'
+                    : '/admin/front-office/admission-list',
+                { state: { convertedAdmission: res.data } },
+            )
             return
         }
         updateAdmissionEnquiryStatus(record.id, 'Success')

@@ -178,3 +178,47 @@ export async function getAdmission(admissionId, options = {}) {
   if (!res.success) return res
   return { ...res, data: mapAdmissionToUi(res.data || {}) }
 }
+
+/** POST /api/v1/admissions/enquiries/{id}/convert */
+export async function convertAdmissionEnquiry(enquiryId, options = {}) {
+  const blocked = requireLive()
+  if (blocked) return blocked
+  const res = await apiClient.post(
+    `/api/v1/admissions/enquiries/${encodeURIComponent(enquiryId)}/convert`,
+    {},
+    { skipMock: true, ...options },
+  )
+  if (!res.success) return res
+  return { ...res, data: mapAdmissionToUi(res.data || {}) }
+}
+
+function toIsoDate(value) {
+  if (!value) return null
+  if (typeof value === 'string') return value.slice(0, 10)
+  const d = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(d.getTime())) return null
+  return d.toISOString().slice(0, 10)
+}
+
+/** Map UI enquiry form (camelCase / Date) → API create/update payload helpers already used by create/update. */
+export function enquiryFormToApiPayload(form = {}) {
+  return {
+    name: form.name || form.studentName || '',
+    mobileNumber: form.mobileNumber || form.guardianPhone || '',
+    email: form.email || '',
+    gender: form.gender || '',
+    address: form.address || '',
+    description: form.description || '',
+    note: form.note || '',
+    enquiryDate: toIsoDate(form.enquiryDate),
+    nextFollowUpDate: toIsoDate(form.nextFollowUpDate),
+    assignedTo: form.assignedTo || '',
+    reference: form.reference || '',
+    source: form.source || '',
+    className: form.className || '',
+    numberOfChild: form.numberOfChild || '',
+    city: form.city || '',
+    state: form.state || '',
+    status: form.status || 'Active',
+  }
+}
