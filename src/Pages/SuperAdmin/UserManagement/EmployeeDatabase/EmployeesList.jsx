@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { Download } from 'lucide-react'
 import mo_user from '../../../../assets/images/no-profile.png'
-import ExportModal from '../../../../Common/CommonComponents/ExportModal'
+import SuperAdminExportModal from '../../utils/SuperAdminExportModal'
 import { FeedbackState } from '../../../../Common/ui'
 import { DEPARTMENTS, EMPLOYEES_LIST, ROUTE_BASE } from './employeeDatabaseData'
 import { isLiveApiEnabled } from '../../../../services/api/tokenStore'
@@ -145,7 +145,15 @@ const EmployeesList = () => {
                             </table>
                         </div>
                     </div>
-                    <ExportModal exportModal={exportModal} setExportModal={setExportModal} recordCount={filteredEmployees.length} />
+                    <SuperAdminExportModal
+                        exportModal={exportModal}
+                        setExportModal={setExportModal}
+                        recordCount={filteredEmployees.length}
+                        documentTitle='Super Admin · Employee directory'
+                        getExportLines={() => filteredEmployees.map((employee) => (
+                            `${employee.employeeCode || employee.code || employee.id || '—'} | ${employee.name || '—'} | ${employee.department || '—'} | ${employee.designation || employee.role || '—'} | ${employee.status || '—'}`
+                        ))}
+                    />
                 </>
             ) : null}
         </section>

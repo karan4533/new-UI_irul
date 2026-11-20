@@ -32,6 +32,7 @@ const AssignDuty = () => {
     const [loading, setLoading] = useState(Boolean(live))
     const [saving, setSaving] = useState(false)
     const [error, setError] = useState('')
+    const loadGenRef = React.useRef(0)
 
     const load = useCallback(async () => {
         if (!isLiveApiEnabled()) {
@@ -39,28 +40,37 @@ const AssignDuty = () => {
             setError('Live API is disabled.')
             return
         }
+        const gen = ++loadGenRef.current
         setLoading(true)
         setError('')
-        const [d, r, v, dr] = await Promise.all([
-            listTransportDuties(),
-            listTransportRoutes(),
-            listTransportVehicles(),
-            listTransportDrivers(),
-        ])
-        setLoading(false)
-        if (!d.success) {
-            setError(typeof d.error === 'string' ? d.error : 'Failed to load duties.')
-            setRows([])
-            return
+        try {
+            const d = await listTransportDuties()
+            if (gen !== loadGenRef.current) return
+            const r = await listTransportRoutes()
+            if (gen !== loadGenRef.current) return
+            const v = await listTransportVehicles()
+            if (gen !== loadGenRef.current) return
+            const dr = await listTransportDrivers()
+            if (gen !== loadGenRef.current) return
+            if (!d.success) {
+                setError(typeof d.error === 'string' ? d.error : 'Failed to load duties.')
+                setRows([])
+                return
+            }
+            setRows(Array.isArray(d.data) ? d.data : [])
+            setRoutes(r.success && Array.isArray(r.data) ? r.data : [])
+            setVehicles(v.success && Array.isArray(v.data) ? v.data : [])
+            setDrivers(dr.success && Array.isArray(dr.data) ? dr.data : [])
+        } finally {
+            if (gen === loadGenRef.current) setLoading(false)
         }
-        setRows(Array.isArray(d.data) ? d.data : [])
-        setRoutes(r.success && Array.isArray(r.data) ? r.data : [])
-        setVehicles(v.success && Array.isArray(v.data) ? v.data : [])
-        setDrivers(dr.success && Array.isArray(dr.data) ? dr.data : [])
     }, [])
 
     useEffect(() => {
         load()
+        return () => {
+            loadGenRef.current += 1
+        }
     }, [load])
 
     const sorted = useMemo(() => rows, [rows])

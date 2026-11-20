@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { Download } from 'lucide-react'
 import mo_user from '../../../../assets/images/no-profile.png'
-import ExportModal from '../../../../Common/CommonComponents/ExportModal'
+import SuperAdminExportModal from '../../utils/SuperAdminExportModal'
 import { FeedbackState } from '../../../../Common/ui'
 import { ROUTE_BASE, STUDENTS_LIST } from './studentDatabaseData'
 import { isLiveApiEnabled } from '../../../../services/api/tokenStore'
@@ -127,7 +127,15 @@ const StudentsList = () => {
                             </table>
                         </div>
                     </div>
-                    <ExportModal exportModal={exportModal} setExportModal={setExportModal} recordCount={filtered.length} />
+                    <SuperAdminExportModal
+                        exportModal={exportModal}
+                        setExportModal={setExportModal}
+                        recordCount={filtered.length}
+                        documentTitle='Super Admin · Students directory'
+                        getExportLines={() => filtered.map((student) => (
+                            `${student.admissionNumber || '—'} | ${student.name || '—'} | ${student.className || student.class || '—'}-${student.section || '—'} | ${student.status || '—'} | ${student.email || '—'}`
+                        ))}
+                    />
                 </>
             ) : null}
         </section>

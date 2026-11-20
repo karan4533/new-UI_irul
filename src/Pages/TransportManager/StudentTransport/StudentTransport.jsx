@@ -31,6 +31,7 @@ const StudentTransport = () => {
     const [saving, setSaving] = useState(false)
     const [error, setError] = useState('')
     const [search, setSearch] = useState('')
+    const loadGenRef = React.useRef(0)
 
     const load = useCallback(async () => {
         if (!isLiveApiEnabled()) {
@@ -38,26 +39,34 @@ const StudentTransport = () => {
             setError('Live API is disabled.')
             return
         }
+        const gen = ++loadGenRef.current
         setLoading(true)
         setError('')
-        const [a, s, r] = await Promise.all([
-            listTransportStudentAssignments(),
-            listStudents(),
-            listTransportRoutes(),
-        ])
-        setLoading(false)
-        if (!a.success) {
-            setError(typeof a.error === 'string' ? a.error : 'Failed to load student assignments.')
-            setRows([])
-            return
+        try {
+            const a = await listTransportStudentAssignments()
+            if (gen !== loadGenRef.current) return
+            const s = await listStudents()
+            if (gen !== loadGenRef.current) return
+            const r = await listTransportRoutes()
+            if (gen !== loadGenRef.current) return
+            if (!a.success) {
+                setError(typeof a.error === 'string' ? a.error : 'Failed to load student assignments.')
+                setRows([])
+                return
+            }
+            setRows(Array.isArray(a.data) ? a.data : [])
+            setStudents(s.success && Array.isArray(s.data) ? s.data : [])
+            setRoutes(r.success && Array.isArray(r.data) ? r.data : [])
+        } finally {
+            if (gen === loadGenRef.current) setLoading(false)
         }
-        setRows(Array.isArray(a.data) ? a.data : [])
-        setStudents(s.success && Array.isArray(s.data) ? s.data : [])
-        setRoutes(r.success && Array.isArray(r.data) ? r.data : [])
     }, [])
 
     useEffect(() => {
         load()
+        return () => {
+            loadGenRef.current += 1
+        }
     }, [load])
 
     const filtered = useMemo(() => {

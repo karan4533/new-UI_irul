@@ -92,15 +92,21 @@ const AuditReportsSectionList = ({ sectionKey }) => {
             {sectionKey === 'compliance' && (
                 <>
                     <div className='bg-white rounded-2xl shadow-md p-4'>
-                        <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4'>
-                            <h2 className='text-lg font-semibold text-black'>Overall Compliance Score</h2>
-                            <p className='text-4xl font-bold text-[#515DEF]'>{getComplianceScore()}%</p>
+                        <div className='flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3'>
+                            <div className='min-w-0'>
+                                <h2 className='text-lg font-semibold text-black'>Overall Compliance Score</h2>
+                                <p className='text-[11px] text-amber-700 mt-2 font-medium'>MOCK demo scores · calculation unchanged · no live compliance API</p>
+                            </div>
+                            <div className='shrink-0 self-start rounded-xl border border-[#EDEEF5] bg-[#FAFBFF] px-5 py-3 text-center min-w-[7.5rem]'>
+                                <p className='text-[10px] font-medium text-[#808080] uppercase tracking-wide'>Overall</p>
+                                <p className='text-3xl font-bold text-[#515DEF] leading-none mt-1'>{getComplianceScore()}%</p>
+                            </div>
                         </div>
-                        <div className='grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3'>
+                        <div className='mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3'>
                             {complianceCards.slice(1).map((item) => (
-                                <div key={item.label} className='rounded-xl border border-[#EDEEF5] bg-[#FAFBFF] p-4 text-center'>
-                                    <p className='text-xs font-medium text-[#808080] uppercase'>{item.label}</p>
-                                    <p className='text-2xl font-bold mt-2' style={{ color: item.accent }}>{item.value}</p>
+                                <div key={item.label} className='rounded-xl border border-[#EDEEF5] bg-[#FAFBFF] px-3 py-2.5'>
+                                    <p className='text-[10px] font-medium text-[#808080] uppercase tracking-wide'>{item.label}</p>
+                                    <p className='text-xl font-bold mt-1.5 leading-none' style={{ color: item.accent }}>{item.value}</p>
                                 </div>
                             ))}
                         </div>

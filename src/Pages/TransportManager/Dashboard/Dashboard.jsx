@@ -15,38 +15,49 @@ const Dashboard = () => {
     const [counts, setCounts] = useState({ drivers: 0, vehicles: 0, routes: 0, students: 0 })
     const [loading, setLoading] = useState(Boolean(live))
     const [error, setError] = useState('')
+    const loadGenRef = React.useRef(0)
 
     const load = useCallback(async () => {
         if (!isLiveApiEnabled()) {
             setLoading(false)
             return
         }
+        const gen = ++loadGenRef.current
         setLoading(true)
         setError('')
-        const [d, v, r, s] = await Promise.all([
-            listTransportDrivers(),
-            listTransportVehicles(),
-            listTransportRoutes(),
-            listTransportStudentAssignments(),
-        ])
-        setLoading(false)
-        if (!d.success || !v.success || !r.success || !s.success) {
-            setError(
-                [d.error, v.error, r.error, s.error].find((item) => typeof item === 'string') ||
-                    'Failed to load transport collections.',
-            )
-            return
+        try {
+            // Sequential loads reduce request fan-out on local uvicorn; NullPool is the real fix.
+            const d = await listTransportDrivers()
+            if (gen !== loadGenRef.current) return
+            const v = await listTransportVehicles()
+            if (gen !== loadGenRef.current) return
+            const r = await listTransportRoutes()
+            if (gen !== loadGenRef.current) return
+            const s = await listTransportStudentAssignments()
+            if (gen !== loadGenRef.current) return
+            if (!d.success || !v.success || !r.success || !s.success) {
+                setError(
+                    [d.error, v.error, r.error, s.error].find((item) => typeof item === 'string') ||
+                        'Failed to load transport collections.',
+                )
+                return
+            }
+            setCounts({
+                drivers: (d.data || []).length,
+                vehicles: (v.data || []).length,
+                routes: (r.data || []).length,
+                students: (s.data || []).filter((row) => String(row.status || '').toLowerCase() !== 'inactive').length,
+            })
+        } finally {
+            if (gen === loadGenRef.current) setLoading(false)
         }
-        setCounts({
-            drivers: (d.data || []).length,
-            vehicles: (v.data || []).length,
-            routes: (r.data || []).length,
-            students: (s.data || []).filter((row) => String(row.status || '').toLowerCase() !== 'inactive').length,
-        })
     }, [])
 
     useEffect(() => {
         load()
+        return () => {
+            loadGenRef.current += 1
+        }
     }, [load])
 
     const metrics = [

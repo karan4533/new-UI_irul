@@ -133,12 +133,12 @@ const OPERATIONAL_DEPARTMENTS = [
 ]
 
 const QUICK_NAV_LINKS = [
-    { label: 'Student Database', path: '/super-admin/user-database/students', icon: GraduationCap, count: '1,240' },
-    { label: 'Employee Database', path: '/super-admin/user-database/employees', icon: Users, count: '248' },
-    { label: 'Admin User Creation', path: '/super-admin/user-creation', icon: UserPlus, count: 'Manage' },
-    { label: 'Governance Approvals', path: '/super-admin/approvals', icon: ClipboardCheck, count: '10 Pending' },
-    { label: 'Star Recognition Awards', path: '/super-admin/star-ratings/star-of-month', icon: Trophy, count: 'SOM/SOY' },
-    { label: 'System Activity Logs', path: '/super-admin/activity-logs/login-history', icon: Activity, count: 'Audit' },
+    { label: 'Student Database', path: '/super-admin/user-database/students', icon: GraduationCap, countKey: 'students', fallback: 'Open' },
+    { label: 'Employee Database', path: '/super-admin/user-database/employees', icon: Users, countKey: 'employees', fallback: 'Open' },
+    { label: 'Admin User Creation', path: '/super-admin/user-creation', icon: UserPlus, fallback: 'Manage' },
+    { label: 'Governance Approvals', path: '/super-admin/approvals', icon: ClipboardCheck, fallback: 'Review' },
+    { label: 'Star Recognition Awards', path: '/super-admin/star-ratings/star-of-month', icon: Trophy, fallback: 'SOM/SOY' },
+    { label: 'System Activity Logs', path: '/super-admin/activity-logs/login-history', icon: Activity, fallback: 'Audit' },
 ]
 
 const ProgressBar = ({ label, value, target, color }) => (
@@ -395,6 +395,8 @@ const Dashboard = () => {
                 <div className='grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3'>
                     {QUICK_NAV_LINKS.map((link) => {
                         const Icon = link.icon
+                        const liveCount = link.countKey && liveKpis ? liveKpis[link.countKey] : null
+                        const badge = liveCount == null ? (link.fallback || 'Open') : String(liveCount)
                         return (
                             <Link
                                 key={link.path}
@@ -406,7 +408,7 @@ const Dashboard = () => {
                                         <Icon size={16} />
                                     </div>
                                     <span className='text-[11px] font-bold text-indigo-600 group-hover:translate-x-0.5 transition-transform'>
-                                        {link.count}
+                                        {badge}
                                     </span>
                                 </div>
                                 <span className='text-xs font-semibold text-slate-800 mt-2 block truncate'>

@@ -6,7 +6,7 @@ import { Calendar, ChevronLeft, ChevronRight, Download, EllipsisIcon, Plus } fro
 import Dropdown from '../../../Common/CommonComponents/Dropdown'
 import DeleteRequestModal from '../../../Common/CommonComponents/DeleteRequestModal'
 import ExportModal from '../../../Common/CommonComponents/ExportModal'
-import { useAuth } from '../../../Context/AuthContext'
+import { useAuth } from '../../../context/AuthContext'
 import { canRoleDelete } from '../../../Common/RBAC/actionPermissions'
 import {
     APPROVAL_STATUSES,
