@@ -71,6 +71,17 @@ export {
 } from './api/studentApiService.js';
 export { getAdminDashboard } from './api/adminDashboardApiService.js';
 export {
+  listApprovalsInbox,
+  getApproval,
+  decideApproval,
+  mapApprovalToUi,
+} from './api/approvalsApiService.js';
+export {
+  listAuditLogs,
+  getAuditLog,
+  mapAuditLogToUi,
+} from './api/auditLogsApiService.js';
+export {
   listAdmissionEnquiries,
   getAdmissionEnquiry,
   createAdmissionEnquiry,

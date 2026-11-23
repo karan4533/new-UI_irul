@@ -3,9 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Save } from 'lucide-react'
 import { toast } from 'react-toastify'
 import UserCreationForm from './Components/UserCreationForm'
-import { ConfirmAction, IntegrationNotice, PageHeader, Surface } from '../ui'
+import { ConfirmAction, PageHeader, Surface } from '../ui'
 import { CREATABLE_ROLE_LABELS } from './createdUsersData'
-import { isLiveApiEnabled } from '../../services/api/tokenStore'
 
 const CreateUserPage = ({
     routeBase,
@@ -70,14 +69,6 @@ const CreateUserPage = ({
             </button>
 
             <PageHeader title={pageTitle} description={pageDescription} context='Identity and access provisioning' />
-
-            <IntegrationNotice
-                state={isLiveApiEnabled() ? 'connected' : 'demo'}
-                title={isLiveApiEnabled() ? 'Live administrator provisioning' : 'Local provisioning only'}
-                description={isLiveApiEnabled()
-                    ? 'Creates a real login via POST /api/v1/admin/users. Success only after the server confirms. Module permission toggles are not writable via API.'
-                    : 'This creates a browser-local profile. The production identity service must issue invitations, establish credentials and record the provisioning audit event.'}
-            />
 
             <Surface title='User profile' description='Required identity fields are validated when you review the account.' contentClassName='p-4 sm:p-5'>
                 <UserCreationForm

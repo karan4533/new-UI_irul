@@ -53,8 +53,12 @@ const CATEGORY_TABS = [
     { key: 'administrative', label: 'Institutional Gala', icon: Landmark, color: 'text-indigo-600' },
 ]
 
+import FeedbackState from '../ui/FeedbackState'
+import useActivitiesLive from './useActivitiesLive'
+
 export default function CentralActivitiesWorkspace({ defaultCategory = 'all', roleKey = 'admin' }) {
     const { role: userRole } = useAuth()
+    const { live, version, loading, error: liveError } = useActivitiesLive()
     const isDirectorOrAdmin = ['director', 'admin', 'super-admin'].includes(userRole || roleKey)
 
     const [activeCategory, setActiveCategory] = useState(defaultCategory)
@@ -89,8 +93,9 @@ export default function CentralActivitiesWorkspace({ defaultCategory = 'all', ro
     // Fetch activities
     const allActivities = useMemo(() => {
         void refreshTrigger
+        void version
         return getActivities()
-    }, [refreshTrigger])
+    }, [refreshTrigger, version])
 
     // Filter by category, status, and search
     const filteredActivities = useMemo(() => {
@@ -274,6 +279,13 @@ export default function CentralActivitiesWorkspace({ defaultCategory = 'all', ro
         setIsEnrollModalOpen(false)
         setRefreshTrigger((k) => k + 1)
         setTimeout(() => setActionFeedback(''), 3000)
+    }
+
+    if (live && loading) {
+        return <FeedbackState kind='loading' title='Loading activities' description='Fetching activities…' />
+    }
+    if (live && liveError) {
+        return <FeedbackState kind='error' title='Unable to load activities' description={liveError} />
     }
 
     return (
@@ -895,12 +907,14 @@ export default function CentralActivitiesWorkspace({ defaultCategory = 'all', ro
                             </button>
 
                             <div className='flex items-center gap-2'>
+                                {!live && (
                                 <button
                                     onClick={() => setIsEnrollModalOpen(true)}
                                     className='rounded-xl border border-blue-200 bg-blue-50 text-blue-700 px-3 py-2 text-xs font-semibold hover:bg-blue-100 transition'
                                 >
                                     + Enroll Participant
                                 </button>
+                                )}
                                 {selectedActivity.mdApprovalStatus !== 'Approved' && (
                                     <button
                                         onClick={() => {

@@ -87,8 +87,6 @@ const ViewTeacher = () => {
                 <ArrowLeft size={18} />
                 Back to list
             </button>
-            {live ? <p className='text-xs font-medium text-[#027A48]'>Live teacher · shared HR API</p> : null}
-
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='flex flex-col sm:flex-row sm:items-center gap-4'>
                     <img src={employee.profileImage || mo_user} alt='' className='w-20 h-20 rounded-full object-cover ring-2 ring-indigo-100' />

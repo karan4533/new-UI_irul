@@ -140,3 +140,51 @@ export async function resetAdminUserPassword(userId, options = {}) {
   if (!res.success) return res
   return { ...res, data: mapAdminUserToUi(res.data || {}) }
 }
+
+/** Read-only system roles catalog — GET /api/v1/admin/roles */
+export async function listAdminRoles(options = {}) {
+  const blocked = requireLive()
+  if (blocked) return { ...blocked, data: [] }
+  const res = await apiClient.get('/api/v1/admin/roles', { skipMock: true, ...options })
+  if (!res.success) return { ...res, data: [] }
+  const rows = Array.isArray(res.data) ? res.data : []
+  return {
+    ...res,
+    data: rows.map((role) => ({
+      id: role.id || role.code || role.role || '',
+      label: role.label || role.name || role.id || '',
+      userCount: Number(role.userCount ?? role.user_count ?? 0),
+      permissionCount: Number(role.permissionCount ?? role.permission_count ?? 0),
+      creatable: Boolean(role.creatable),
+    })),
+  }
+}
+
+/** Read-only role permissions — GET /api/v1/admin/roles/{code}/permissions */
+export async function getAdminRolePermissions(roleCode, options = {}) {
+  const blocked = requireLive()
+  if (blocked) return blocked
+  const res = await apiClient.get(
+    `/api/v1/admin/roles/${encodeURIComponent(roleCode)}/permissions`,
+    { skipMock: true, ...options },
+  )
+  if (!res.success) return res
+  const raw = res.data || {}
+  const permissions = Array.isArray(raw.permissions)
+    ? raw.permissions
+    : Array.isArray(raw)
+      ? raw
+      : []
+  return {
+    ...res,
+    data: {
+      role: raw.role || roleCode,
+      label: raw.label || roleCode,
+      permissions: permissions.map((permission) => ({
+        code: permission.code || permission.id || '',
+        description: permission.description || permission.label || '',
+        granted: permission.granted !== false,
+      })),
+    },
+  }
+}

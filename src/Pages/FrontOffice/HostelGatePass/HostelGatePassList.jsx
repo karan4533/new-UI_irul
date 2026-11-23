@@ -4,7 +4,7 @@ const HostelGatePassList = () => (
     <FrontOfficeRecordsList
         collection='hostel-gate-passes'
         title='Hostel Gate Pass'
-        description='Hostel gate passes from the Front Office API. Add/edit remain local until field-mapped.'
+        description='Hostel gate passes recorded for boarders leaving and returning to campus.'
         addPath='/front-office/add-hostel-gate-pass'
         viewPathPrefix='/front-office/hostel-gate-pass/view'
         searchKeys={['id', 'studentName', 'hostelName', 'reason', 'status']}

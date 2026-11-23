@@ -3,7 +3,7 @@ import { UploadCloud, Paperclip, X, Image as ImageIcon, FileText } from 'lucide-
 import { toast } from 'react-toastify'
 import RecipientSelect from './RecipientSelect'
 
-const EscalationForm = ({ form, onChange, roleConfig, readOnly = false }) => {
+const EscalationForm = ({ form, onChange, roleConfig, readOnly = false, recipientOptions }) => {
     const fileInputRef = useRef(null)
 
     const handleChange = (field) => (event) => {
@@ -107,6 +107,7 @@ const EscalationForm = ({ form, onChange, roleConfig, readOnly = false }) => {
                 <RecipientSelect
                     targetRoleKey={roleConfig.escalatesToRoleKey}
                     roleLabel={roleConfig.escalatesTo}
+                    options={recipientOptions}
                     value={form.recipientUserId || ''}
                     onChange={(recipientUserId) => onChange?.({ ...form, recipientUserId })}
                 />

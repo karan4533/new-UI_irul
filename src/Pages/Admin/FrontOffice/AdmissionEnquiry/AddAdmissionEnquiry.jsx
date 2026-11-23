@@ -150,12 +150,6 @@ const AddAdmissionEnquiry = () => {
 
     return (
         <section>
-            {live ? (
-                <p className='mb-3 text-xs font-medium text-[#027A48]'>
-                    Live enquiry {isEdit ? 'update' : 'create'} ·{' '}
-                    {isEdit ? 'PATCH' : 'POST'} /api/v1/admissions/enquiries
-                </p>
-            ) : null}
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <h2 className='text-xl font-semibold text-black'>
                     {isEdit ? 'Edit Admission Enquiry' : 'Admission Enquiry Information'}

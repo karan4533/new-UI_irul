@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect, useCallback } from 'react'
 import {
     FileCheck2,
     Calendar,
@@ -42,6 +42,37 @@ import {
     statusBadgeColor,
     DEFAULT_NOC_CLEARANCES
 } from '../TcRequest/tcRequestData'
+import LiveOpsGate from '../ui/LiveOpsGate'
+import { createOpsLiveStore } from '../../services/api/opsLiveStore'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
+import { listEmployees } from '../../services/api/hrApiService'
+import {
+    createTcRequest as createLiveTcRequest,
+    decideTcRequest,
+    forwardTcRequest,
+    listTcRequests,
+} from '../../services/api/tcApiService'
+
+// Live mode: staff exits come from FastAPI /api/v1/hr/exits and student TCs from /api/v1/tc-requests.
+// No browser mock data is read or seeded when VITE_USE_MOCK=false.
+const liveExitsStore = createOpsLiveStore({ collection: 'exits', api: 'hr', idPrefix: 'EXT' })
+const RELIEVING_LIVE_COLLECTIONS = ['hr:exits']
+
+const readExits = () => (isLiveApiEnabled() ? liveExitsStore.read() : getExits())
+const writeExits = (rows) => (isLiveApiEnabled() ? liveExitsStore.write(rows) : saveExits(rows))
+
+/** Backend TC rows carry per-manager NOCs; present them in the clearance rows this screen renders. */
+const toClearanceRows = (request) => ({
+    ...request,
+    nocClearances: (request.nocs || []).map((noc) => ({
+        departmentKey: noc.roleCode || noc.id || '',
+        department: noc.roleLabel || noc.roleCode || '',
+        manager: noc.decidedByName || '',
+        status: noc.status === 'Approved' ? 'Cleared' : noc.status || 'Pending',
+        remarks: noc.remarks || '',
+        date: noc.decidedAt ? String(noc.decidedAt).slice(0, 10) : '',
+    })),
+})
 
 const NOC_CLEARANCE_STEPS = [
     { key: 'departmentClearance', label: 'Department HOD Sign-off', icon: Building2, desc: 'Syllabus, grade register, and project task handover completed' },
@@ -60,7 +91,8 @@ const STUDENT_NOC_DEPARTMENTS = [
     { key: 'academics', label: 'Academics & Examination', icon: School, desc: 'Grade book sign-off, marksheets & cumulative record' }
 ]
 
-export default function StaffRelievingWorkspace({ roleOverride = null }) {
+function StaffRelievingWorkspaceInner({ roleOverride = null }) {
+    const live = isLiveApiEnabled()
     const { role: authRole, email: authEmail, name: authName } = useAuth()
     const activeRole = (roleOverride || authRole || 'teacher').toLowerCase().replace(/[-_\s]/g, '')
     const roleLabel = getProfileLabel(roleOverride || authRole || 'teacher')
@@ -68,24 +100,43 @@ export default function StaffRelievingWorkspace({ roleOverride = null }) {
     // Top view tab: staff relieving vs student TC clearance
     const [viewMode, setViewMode] = useState('staff')
 
+    // Employee directory: live HR employees, or the demo roster in mock mode
+    const [liveEmployees, setLiveEmployees] = useState([])
+    useEffect(() => {
+        if (!live) return undefined
+        let cancelled = false
+        listEmployees().then((res) => {
+            if (!cancelled && res.success) setLiveEmployees(res.data || [])
+        })
+        return () => {
+            cancelled = true
+        }
+    }, [live])
+    const directory = live ? liveEmployees : ENTERPRISE_EMPLOYEES
+
     // Find current employee profile
     const currentEmployee = useMemo(() => {
+        if (live) {
+            return (
+                liveEmployees.find((e) => authEmail && String(e.email || '').toLowerCase() === authEmail.toLowerCase()) || null
+            )
+        }
         return (
             ENTERPRISE_EMPLOYEES.find(
                 (e) => (authEmail && e.email.toLowerCase() === authEmail.toLowerCase()) ||
                        e.roleKey.toLowerCase().replace(/[-_\s]/g, '') === activeRole
             ) || ENTERPRISE_EMPLOYEES[0]
         )
-    }, [authEmail, activeRole])
+    }, [live, liveEmployees, authEmail, activeRole])
 
-    const employeeId = currentEmployee?.id || 'EMP-TCH-006'
+    const employeeId = currentEmployee?.id || (live ? authEmail || '' : 'EMP-TCH-006')
     const employeeName = authName || currentEmployee?.name || roleLabel
 
     // Live Exits from HR Store
     const [refreshKey, setRefreshKey] = useState(0)
     const exits = useMemo(() => {
         void refreshKey
-        return getExits()
+        return readExits()
     }, [refreshKey])
 
     const existingExit = useMemo(() => {
@@ -101,14 +152,53 @@ export default function StaffRelievingWorkspace({ roleOverride = null }) {
         return d.toISOString().split('T')[0]
     })
     const [reason, setReason] = useState('')
-    const [handoverColleague, setHandoverColleague] = useState(
-        ENTERPRISE_EMPLOYEES.find((e) => e.id !== employeeId)?.name || 'Sandy Selva'
-    )
+    const [handoverColleagueChoice, setHandoverColleague] = useState('')
+    const handoverColleague = handoverColleagueChoice
+        || directory.find((e) => e.id !== employeeId)?.name
+        || (live ? '' : 'Sandy Selva')
     const [attachedFile, setAttachedFile] = useState(null)
     const [isSubmitting, setIsSubmitting] = useState(false)
 
     // Student TC State
-    const [tcRequests, setTcRequests] = useState(() => getAllTcRequests())
+    const [tcRequests, setTcRequests] = useState(() => (isLiveApiEnabled() ? [] : getAllTcRequests()))
+    const [tcLoading, setTcLoading] = useState(isLiveApiEnabled())
+    const [tcError, setTcError] = useState('')
+
+    const refreshTcRequests = useCallback(async () => {
+        if (!isLiveApiEnabled()) {
+            setTcRequests(getAllTcRequests())
+            return null
+        }
+        const res = await listTcRequests()
+        if (res.success) {
+            const rows = (res.data || []).map(toClearanceRows)
+            setTcRequests(rows)
+            setTcError('')
+            return rows
+        }
+        setTcRequests([])
+        setTcError(typeof res.error === 'string' ? res.error : res.error?.message || 'Transfer certificate requests could not be loaded.')
+        return null
+    }, [])
+
+    useEffect(() => {
+        if (!live) return undefined
+        let cancelled = false
+        listTcRequests().then((res) => {
+            if (cancelled) return
+            if (res.success) {
+                setTcRequests((res.data || []).map(toClearanceRows))
+                setTcError('')
+            } else {
+                setTcRequests([])
+                setTcError(typeof res.error === 'string' ? res.error : res.error?.message || 'Transfer certificate requests could not be loaded.')
+            }
+            setTcLoading(false)
+        })
+        return () => {
+            cancelled = true
+        }
+    }, [live])
     const [tcSearch, setTcSearch] = useState('')
     const [tcStatusFilter, setTcStatusFilter] = useState('All')
     const [selectedTcForClearance, setSelectedTcForClearance] = useState(null)
@@ -152,7 +242,7 @@ export default function StaffRelievingWorkspace({ roleOverride = null }) {
 
         setIsSubmitting(true)
         try {
-            const currentExits = getExits()
+            const currentExits = readExits()
             const newExitId = nextId('EXT-2026', currentExits)
             const newRecord = {
                 id: newExitId,
@@ -170,12 +260,12 @@ export default function StaffRelievingWorkspace({ roleOverride = null }) {
                 hrClearance: false,
                 exitInterview: false,
                 handoverColleague,
-                attachmentName: attachedFile?.name || 'Resignation_Letter.pdf',
+                attachmentName: attachedFile?.name || (live ? '' : 'Resignation_Letter.pdf'),
                 appliedDate: new Date().toISOString().split('T')[0],
                 status: 'Initiated'
             }
 
-            saveExits([newRecord, ...currentExits])
+            writeExits([newRecord, ...currentExits])
             toast.success('Relieving Application submitted successfully! HR & Department Head notified.')
             setRefreshKey((k) => k + 1)
         } catch (err) {
@@ -193,7 +283,7 @@ export default function StaffRelievingWorkspace({ roleOverride = null }) {
             [stepKey]: !existingExit[stepKey]
         }
         const updatedExits = exits.map((x) => (x.id === existingExit.id ? updated : x))
-        saveExits(updatedExits)
+        writeExits(updatedExits)
         setRefreshKey((k) => k + 1)
         toast.success(`Updated clearance status for ${stepKey}!`)
     }
@@ -224,8 +314,47 @@ export default function StaffRelievingWorkspace({ roleOverride = null }) {
     }, [tcRequests, tcSearch, tcStatusFilter])
 
     // Student TC Create
-    const handleCreateTcSubmit = (e) => {
+    const failureMessage = (res, fallback) =>
+        (typeof res?.error === 'string' ? res.error : res?.error?.message) || fallback
+
+    const resetNewTcForm = () => setNewTcForm({
+        studentName: '',
+        admissionNumber: '',
+        classSection: '10-A',
+        reason: 'Family relocation to another city',
+        transferTo: 'Delhi Public School',
+        lastDateOfAttendance: new Date().toISOString().split('T')[0],
+        requestedBy: 'Parent'
+    })
+
+    const handleCreateTcSubmit = async (e) => {
         e.preventDefault()
+        if (live) {
+            if (!newTcForm.admissionNumber.trim()) {
+                toast.error('Admission number is required to file a TC request.')
+                return
+            }
+            if (!newTcForm.reason.trim() || !newTcForm.transferTo.trim()) {
+                toast.error('Reason and receiving school are required.')
+                return
+            }
+            const res = await createLiveTcRequest({
+                studentRef: newTcForm.admissionNumber.trim(),
+                reason: newTcForm.reason.trim(),
+                transferTo: newTcForm.transferTo.trim(),
+                lastDateOfAttendance: newTcForm.lastDateOfAttendance,
+                requestedBy: newTcForm.requestedBy,
+            })
+            if (!res.success) {
+                toast.error(failureMessage(res, 'Failed to create TC request.'))
+                return
+            }
+            await refreshTcRequests()
+            setShowNewTcModal(false)
+            resetNewTcForm()
+            toast.success(`Transfer Certificate request ${res.data?.requestId || ''} submitted.`)
+            return
+        }
         if (!newTcForm.studentName.trim()) {
             toast.error('Student Name is required.')
             return
@@ -259,6 +388,10 @@ export default function StaffRelievingWorkspace({ roleOverride = null }) {
 
     // Toggle single department clearance on a student TC
     const handleToggleStudentClearance = (requestId, deptKey, currentStatus) => {
+        if (live) {
+            toast.info('Clearances are recorded by each department manager from their own NOC screen.')
+            return
+        }
         const nextStatus = currentStatus === 'Cleared' ? 'Pending' : 'Cleared'
         const updated = updateNocClearance(
             requestId,
@@ -276,7 +409,27 @@ export default function StaffRelievingWorkspace({ roleOverride = null }) {
     }
 
     // Super Admin / Principal approval
-    const handleApproveTc = (requestId) => {
+    const syncSelectedTc = (rows, requestId) => {
+        if (selectedTcForClearance?.id === requestId) {
+            setSelectedTcForClearance(rows?.find((row) => row.id === requestId) || null)
+        }
+    }
+
+    const handleApproveTc = async (requestId) => {
+        if (live) {
+            const res = await decideTcRequest(requestId, {
+                decision: 'approve',
+                remarks: 'Transfer Certificate approved and issued by Principal / Super Admin.',
+            })
+            if (!res.success) {
+                toast.error(failureMessage(res, 'Could not approve this TC request.'))
+                return
+            }
+            const rows = await refreshTcRequests()
+            syncSelectedTc(rows, requestId)
+            toast.success(`TC ${requestId} Approved & Transfer Certificate Issued!`)
+            return
+        }
         const updated = approveTcRequest(requestId, 'Transfer Certificate approved and issued by Principal / Super Admin.')
         if (updated) {
             setTcRequests(getAllTcRequests())
@@ -288,7 +441,18 @@ export default function StaffRelievingWorkspace({ roleOverride = null }) {
     }
 
     // PRM Forward to Super Admin
-    const handleForwardTc = (requestId) => {
+    const handleForwardTc = async (requestId) => {
+        if (live) {
+            const res = await forwardTcRequest(requestId, 'PRM verification complete. Forwarded for final approval.')
+            if (!res.success) {
+                toast.error(failureMessage(res, 'Could not forward this TC request.'))
+                return
+            }
+            const rows = await refreshTcRequests()
+            syncSelectedTc(rows, requestId)
+            toast.success(`TC ${requestId} moved to the next approval stage.`)
+            return
+        }
         const updated = forwardTcRequestToSuperAdmin(requestId, 'PRM verification complete. Forwarded for final approval.')
         if (updated) {
             setTcRequests(getAllTcRequests())
@@ -498,7 +662,7 @@ export default function StaffRelievingWorkspace({ roleOverride = null }) {
                                                 onChange={(e) => setHandoverColleague(e.target.value)}
                                                 className='w-full rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-800 focus:border-indigo-500 focus:outline-none'
                                             >
-                                                {ENTERPRISE_EMPLOYEES.filter((e) => e.id !== employeeId).map((emp) => (
+                                                {directory.filter((e) => e.id !== employeeId).map((emp) => (
                                                     <option key={emp.id} value={emp.name}>
                                                         {emp.name} ({emp.designation} - {emp.department})
                                                     </option>
@@ -726,8 +890,19 @@ export default function StaffRelievingWorkspace({ roleOverride = null }) {
                                 <tbody className='divide-y divide-slate-100'>
                                     {filteredTcRequests.length === 0 ? (
                                         <tr>
-                                            <td colSpan={7} className='py-8 text-center text-slate-400'>
-                                                No Student TC requests found matching filters.
+                                            <td colSpan={7} className={`py-8 text-center ${tcError ? 'text-rose-600' : 'text-slate-400'}`}>
+                                                {tcLoading
+                                                    ? 'Loading Student TC requests…'
+                                                    : tcError
+                                                        ? (
+                                                            <span>
+                                                                {tcError}{' '}
+                                                                <button type='button' onClick={refreshTcRequests} className='font-semibold underline cursor-pointer'>
+                                                                    Retry
+                                                                </button>
+                                                            </span>
+                                                        )
+                                                        : 'No Student TC requests found matching filters.'}
                                             </td>
                                         </tr>
                                     ) : (
@@ -1060,5 +1235,13 @@ export default function StaffRelievingWorkspace({ roleOverride = null }) {
                 </div>
             )}
         </div>
+    )
+}
+
+export default function StaffRelievingWorkspace(props) {
+    return (
+        <LiveOpsGate collections={RELIEVING_LIVE_COLLECTIONS} title='Staff Relieving & NOC'>
+            <StaffRelievingWorkspaceInner {...props} />
+        </LiveOpsGate>
     )
 }

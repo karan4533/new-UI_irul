@@ -4,7 +4,7 @@ const GoodsReceivedPassList = () => (
     <FrontOfficeRecordsList
         collection='goods-received-passes'
         title='Goods Received Pass'
-        description='Goods received passes from the Front Office API. Add/edit remain local until field-mapped.'
+        description='Goods received passes for inbound deliveries.'
         addPath='/front-office/add-goods-received-pass'
         viewPathPrefix='/front-office/goods-received-pass/view'
         searchKeys={['id', 'supplierName', 'invoiceNumber', 'status']}

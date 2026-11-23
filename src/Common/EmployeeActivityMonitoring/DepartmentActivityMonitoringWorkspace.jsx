@@ -34,12 +34,16 @@ import { ROLES } from '../../constants/roles'
 import {
     getAllEmployeeActivities,
     getHierarchicalActivityMonitoring,
+    getEmployeeActivityHydrateError,
+    hydrateEmployeeActivitiesFromAudit,
     reviewEmployeeActivity,
+    summarizeLiveAuditActivities,
     ACTIVITY_TYPES
 } from './employeeActivityMonitoringData'
 import { ENTERPRISE_EMPLOYEES } from '../AttendanceAndLeave/attendanceLeaveData'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
 
-export default function DepartmentActivityMonitoringWorkspace({ defaultTab = 'overview', roleOverride = null }) {
+export default function DepartmentActivityMonitoringWorkspace({ defaultTab = 'activity-stream', roleOverride = null }) {
     const { role: authRole, email: authEmail, name: authName } = useAuth()
     const { tab } = useParams()
     const activeRole = roleOverride || authRole || 'director'
@@ -74,7 +78,7 @@ export default function DepartmentActivityMonitoringWorkspace({ defaultTab = 'ov
         'accounthead'
     ].includes(cleanRole)
 
-    const targetTab = tab || defaultTab
+    const targetTab = (tab || defaultTab) === 'overview' ? 'activity-stream' : (tab || defaultTab)
     // State
     const [activeTab, setActiveTab] = useState(targetTab)
     const [actionMessage, setActionMessage] = useState('')
@@ -93,6 +97,32 @@ export default function DepartmentActivityMonitoringWorkspace({ defaultTab = 'ov
     const [selectedActivityForReview, setSelectedActivityForReview] = useState(null)
     const [reviewDecision, setReviewDecision] = useState('Approved')
     const [reviewRemarks, setReviewRemarks] = useState('')
+    const live = isLiveApiEnabled()
+    const [liveLoading, setLiveLoading] = useState(Boolean(live))
+    const [liveError, setLiveError] = useState('')
+
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            setLiveLoading(false)
+            return undefined
+        }
+        let cancelled = false
+        setLiveLoading(true)
+        setLiveError('')
+        hydrateEmployeeActivitiesFromAudit({ force: true })
+            .then(() => {
+                if (cancelled) return
+                setLiveLoading(false)
+                setRefreshKey((k) => k + 1)
+            })
+            .catch((err) => {
+                if (cancelled) return
+                setLiveLoading(false)
+                setLiveError(err?.message || getEmployeeActivityHydrateError() || 'Activity feed unavailable.')
+                setRefreshKey((k) => k + 1)
+            })
+        return () => { cancelled = true }
+    }, [])
 
     const notify = (msg) => {
         setActionMessage(msg)
@@ -137,33 +167,49 @@ export default function DepartmentActivityMonitoringWorkspace({ defaultTab = 'ov
         })
     }, [activeRole, currentUserId, authName, currentUser?.name, selectedDept, selectedEmployeeId, roleFilter, dateFilter, activityTypeFilter, refreshKey])
 
-    // Tabs
+    const liveSummary = useMemo(() => {
+        void refreshKey
+        if (!live) return null
+        return summarizeLiveAuditActivities(getAllEmployeeActivities())
+    }, [live, refreshKey])
+
+    // Tabs — Monitoring Overview is intentionally hidden; stream is the default live view.
     const availableTabs = useMemo(() => {
         const pendingCount = monitoringData.summary?.pendingReviewCount || 0
         const tabs = [
-            { id: 'overview', label: 'Monitoring Overview', icon: BarChart3 },
             { id: 'activity-stream', label: 'Team Activity Stream', icon: Activity }
         ]
-        if (isSupervisoryRole) {
+        if (isSupervisoryRole && !live) {
             tabs.push(
                 { id: 'pending-approvals', label: 'Pending HOD Approvals', icon: ShieldCheck, badge: pendingCount },
                 { id: 'hierarchical-drilldown', label: 'Hierarchical Drill-Down', icon: Layers },
                 { id: 'delayed-activities', label: 'Bottlenecks & Delays', icon: AlertTriangle }
             )
         }
+        if (isSupervisoryRole && live) {
+            tabs.push(
+                { id: 'hierarchical-drilldown', label: 'By Module / Actor', icon: Layers }
+            )
+        }
         return tabs
-    }, [isSupervisoryRole, monitoringData.summary?.pendingReviewCount])
+    }, [isSupervisoryRole, live, monitoringData.summary?.pendingReviewCount])
 
     useEffect(() => {
         const currentTarget = tab || defaultTab
-        if (currentTarget && availableTabs.some((t) => t.id === currentTarget)) {
-            setActiveTab(currentTarget)
+        if (currentTarget === 'overview' || !availableTabs.some((t) => t.id === currentTarget)) {
+            setActiveTab('activity-stream')
+            return
         }
+        setActiveTab(currentTarget)
     }, [tab, defaultTab, availableTabs])
 
     const handleCommitReview = (e) => {
         e.preventDefault()
         if (!selectedActivityForReview) return
+        if (live) {
+            notify('Live activity feed is read-only (campus audit trail). Review decisions stay on the originating module.')
+            return
+        }
         if (reviewDecision !== 'Approved' && !reviewRemarks.trim()) {
             notify('Remarks are mandatory when requesting revision.')
             return
@@ -188,6 +234,9 @@ export default function DepartmentActivityMonitoringWorkspace({ defaultTab = 'ov
 
     // Role-scoped available departments
     const availableDepartments = useMemo(() => {
+        if (live && liveSummary?.departments?.length) {
+            return liveSummary.departments
+        }
         const set = new Set(ENTERPRISE_EMPLOYEES.map((e) => e.department))
         const allDepts = Array.from(set).sort()
         if (['superadmin', 'admin', 'director', 'md'].includes(cleanRole)) {
@@ -224,7 +273,7 @@ export default function DepartmentActivityMonitoringWorkspace({ defaultTab = 'ov
             return allDepts.filter((d) => d === userDept)
         }
         return allDepts
-    }, [cleanRole])
+    }, [cleanRole, live, liveSummary])
 
     // List of all 29 roles for multi-facet filtering
     const allRolesList = useMemo(() => {
@@ -236,9 +285,14 @@ export default function DepartmentActivityMonitoringWorkspace({ defaultTab = 'ov
 
     // Employees in currently selected department
     const departmentEmployees = useMemo(() => {
+        if (live) {
+            const source = liveSummary?.employees || []
+            if (selectedDept === 'ALL') return source
+            return source.filter((e) => e.department === selectedDept)
+        }
         if (selectedDept === 'ALL') return ENTERPRISE_EMPLOYEES
         return ENTERPRISE_EMPLOYEES.filter((e) => e.department === selectedDept)
-    }, [selectedDept])
+    }, [selectedDept, live, liveSummary])
 
     // Filtered Stream
     const filteredActivities = useMemo(() => {
@@ -305,6 +359,21 @@ export default function DepartmentActivityMonitoringWorkspace({ defaultTab = 'ov
                     <span>{actionMessage}</span>
                 </div>
             )}
+            {live && liveLoading ? (
+                <div className='rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600'>
+                    Loading campus activity from audit trail…
+                </div>
+            ) : null}
+            {live && liveError ? (
+                <div className='rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800'>
+                    {liveError}
+                </div>
+            ) : null}
+            {live && !liveLoading && !liveError ? (
+                <div className='rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600'>
+                    Showing live campus audit events ({getAllEmployeeActivities().length} records). Review actions stay read-only here.
+                </div>
+            ) : null}
 
             {/* Header: Title, Role Badge */}
             <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4'>
@@ -322,20 +391,40 @@ export default function DepartmentActivityMonitoringWorkspace({ defaultTab = 'ov
                             </span>
                         </div>
                         <p className='text-xs text-slate-500 mt-0.5'>
-                            Upward management visibility: cross-department operational trail (tasks, helpdesk tickets, store issues, and gate movements).
+                            {live
+                                ? 'Live campus audit trail from FastAPI /api/v1/audit-logs (logins, mutations, approvals, and system events).'
+                                : 'Upward management visibility: cross-department operational trail (tasks, helpdesk tickets, store issues, and gate movements).'}
                         </p>
                     </div>
                 </div>
 
                 <div className='flex items-center gap-2.5'>
                     <button
+                        type='button'
+                        disabled={live && liveLoading}
                         onClick={() => {
-                            setRefreshKey((k) => k + 1)
-                            notify('Activity telemetry synchronized.')
+                            if (!live) {
+                                setRefreshKey((k) => k + 1)
+                                notify('Activity telemetry synchronized.')
+                                return
+                            }
+                            setLiveLoading(true)
+                            setLiveError('')
+                            hydrateEmployeeActivitiesFromAudit({ force: true })
+                                .then((rows) => {
+                                    setLiveLoading(false)
+                                    setRefreshKey((k) => k + 1)
+                                    notify(`Synced ${Array.isArray(rows) ? rows.length : 0} audit events from API.`)
+                                })
+                                .catch((err) => {
+                                    setLiveLoading(false)
+                                    setLiveError(err?.message || 'Sync failed.')
+                                    notify(err?.message || 'Sync failed.')
+                                })
                         }}
-                        className='inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-xs transition'
+                        className='inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-xs transition disabled:opacity-50'
                     >
-                        <RefreshCw size={14} className='text-blue-600' /> Sync Live Feed
+                        <RefreshCw size={14} className={`text-blue-600 ${live && liveLoading ? 'animate-spin' : ''}`} /> Sync Live Feed
                     </button>
                 </div>
             </div>
@@ -376,6 +465,61 @@ export default function DepartmentActivityMonitoringWorkspace({ defaultTab = 'ov
                 <div className='space-y-6'>
                     {/* KPI Cards */}
                     <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5'>
+                        {live ? (
+                            <>
+                                <div className='rounded-[1.25rem] border border-blue-100 bg-[#E8F1FD]/60 p-4 shadow-2xs'>
+                                    <div className='flex items-center justify-between'>
+                                        <span className='text-xs font-semibold text-slate-600'>Audit events</span>
+                                        <Activity size={16} className='text-blue-600' />
+                                    </div>
+                                    <div className='mt-2 flex items-baseline gap-2'>
+                                        <span className='text-2xl font-bold text-slate-900'>{liveSummary?.totalEvents ?? 0}</span>
+                                        <span className='text-[11px] font-medium text-blue-700'>From /audit-logs</span>
+                                    </div>
+                                </div>
+                                <div className='rounded-[1.25rem] border border-emerald-100 bg-emerald-50/50 p-4 shadow-2xs'>
+                                    <div className='flex items-center justify-between'>
+                                        <span className='text-xs font-semibold text-slate-600'>Today</span>
+                                        <Calendar size={16} className='text-emerald-600' />
+                                    </div>
+                                    <div className='mt-2 flex items-baseline gap-2'>
+                                        <span className='text-2xl font-bold text-emerald-700'>{liveSummary?.todayEvents ?? 0}</span>
+                                        <span className='text-[11px] font-medium text-emerald-800'>Events today</span>
+                                    </div>
+                                </div>
+                                <div className='rounded-[1.25rem] border border-amber-100 bg-amber-50/50 p-4 shadow-2xs'>
+                                    <div className='flex items-center justify-between'>
+                                        <span className='text-xs font-semibold text-slate-600'>Auth events</span>
+                                        <ShieldCheck size={16} className='text-amber-600' />
+                                    </div>
+                                    <div className='mt-2 flex items-baseline gap-2'>
+                                        <span className='text-2xl font-bold text-amber-700'>{liveSummary?.authEvents ?? 0}</span>
+                                        <span className='text-[11px] font-medium text-amber-800'>Login / OTP / Logout</span>
+                                    </div>
+                                </div>
+                                <div className='rounded-[1.25rem] border border-indigo-100 bg-indigo-50/50 p-4 shadow-2xs'>
+                                    <div className='flex items-center justify-between'>
+                                        <span className='text-xs font-semibold text-slate-600'>Unique actors</span>
+                                        <Users size={16} className='text-indigo-600' />
+                                    </div>
+                                    <div className='mt-2 flex items-baseline gap-2'>
+                                        <span className='text-2xl font-bold text-indigo-700'>{liveSummary?.uniqueActors ?? 0}</span>
+                                        <span className='text-[11px] font-medium text-indigo-800'>Staff in trail</span>
+                                    </div>
+                                </div>
+                                <div className='rounded-[1.25rem] border border-rose-100 bg-rose-50/50 p-4 shadow-2xs'>
+                                    <div className='flex items-center justify-between'>
+                                        <span className='text-xs font-semibold text-slate-600'>Failed / blocked</span>
+                                        <AlertTriangle size={16} className='text-rose-600' />
+                                    </div>
+                                    <div className='mt-2 flex items-baseline gap-2'>
+                                        <span className='text-2xl font-bold text-rose-600'>{liveSummary?.failedEvents ?? 0}</span>
+                                        <span className='text-[11px] font-medium text-rose-700'>Auth / deny events</span>
+                                    </div>
+                                </div>
+                            </>
+                        ) : (
+                            <>
                         <div className='rounded-[1.25rem] border border-blue-100 bg-[#E8F1FD]/60 p-4 shadow-2xs'>
                             <div className='flex items-center justify-between'>
                                 <span className='text-xs font-semibold text-slate-600'>Logged Activities</span>
@@ -430,6 +574,8 @@ export default function DepartmentActivityMonitoringWorkspace({ defaultTab = 'ov
                                 <span className='text-[11px] font-medium text-rose-700'>Overdue Actions</span>
                             </div>
                         </div>
+                            </>
+                        )}
                     </div>
 
                     {/* Department Productivity Breakdown */}
@@ -438,16 +584,26 @@ export default function DepartmentActivityMonitoringWorkspace({ defaultTab = 'ov
                         <div className='lg:col-span-2 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-xs'>
                             <div className='flex items-center justify-between mb-4 border-b border-slate-100 pb-3'>
                                 <div>
-                                    <h3 className='text-sm font-semibold text-slate-900'>Department Operational Workload</h3>
-                                    <p className='text-xs text-slate-500'>Completed vs Pending action items across school divisions</p>
+                                    <h3 className='text-sm font-semibold text-slate-900'>
+                                        {live ? 'Events by module' : 'Department Operational Workload'}
+                                    </h3>
+                                    <p className='text-xs text-slate-500'>
+                                        {live
+                                            ? 'Grouped by audit entity / module from the live trail'
+                                            : 'Completed vs Pending action items across school divisions'}
+                                    </p>
                                 </div>
                             </div>
 
                             <div className='space-y-3'>
-                                {Object.entries(monitoringData?.summary?.departmentBreakdown || {}).map(([deptName, stats]) => {
+                                {Object.entries(
+                                    live
+                                        ? (liveSummary?.moduleBreakdown || {})
+                                        : (monitoringData?.summary?.departmentBreakdown || {})
+                                ).map(([deptName, stats]) => {
                                     const total = stats?.total ?? stats?.count ?? 0
                                     const completed = stats?.completed ?? 0
-                                    const delayed = stats?.delayed ?? 0
+                                    const delayed = live ? (stats?.failed ?? 0) : (stats?.delayed ?? 0)
                                     const completedPercent = total > 0 ? (completed / total) * 100 : 0
                                     const delayedPercent = total > 0 ? (delayed / total) * 100 : 0
 
@@ -455,7 +611,7 @@ export default function DepartmentActivityMonitoringWorkspace({ defaultTab = 'ov
                                         <div key={deptName} className='rounded-xl border border-slate-100 p-3 bg-slate-50/50 space-y-2'>
                                             <div className='flex items-center justify-between text-xs'>
                                                 <span className='font-bold text-slate-900'>{deptName}</span>
-                                                <span className='font-mono font-semibold text-slate-600'>{total} Total Actions</span>
+                                                <span className='font-mono font-semibold text-slate-600'>{total} {live ? 'Events' : 'Total Actions'}</span>
                                             </div>
                                             <div className='flex items-center gap-2'>
                                                 <div className='h-2 flex-1 rounded-full bg-slate-200 overflow-hidden flex'>
@@ -470,12 +626,15 @@ export default function DepartmentActivityMonitoringWorkspace({ defaultTab = 'ov
                                                 </div>
                                             </div>
                                             <div className='flex items-center justify-between text-[11px] text-slate-500'>
-                                                <span className='text-emerald-700 font-semibold'>{completed} Completed</span>
-                                                <span className='text-rose-700 font-semibold'>{delayed} Delayed</span>
+                                                <span className='text-emerald-700 font-semibold'>{completed} {live ? 'Recorded' : 'Completed'}</span>
+                                                <span className='text-rose-700 font-semibold'>{delayed} {live ? 'Failed' : 'Delayed'}</span>
                                             </div>
                                         </div>
                                     )
                                 })}
+                                {live && Object.keys(liveSummary?.moduleBreakdown || {}).length === 0 ? (
+                                    <p className='text-sm text-slate-500 py-6 text-center'>No audit events yet for this campus.</p>
+                                ) : null}
                             </div>
                         </div>
 
@@ -516,7 +675,7 @@ export default function DepartmentActivityMonitoringWorkspace({ defaultTab = 'ov
                                         <option value='ALL'>All Staff Members in Selection</option>
                                         {departmentEmployees.map((emp) => (
                                             <option key={emp.employeeId} value={emp.employeeId}>
-                                                {emp.name} ({emp.employeeId} - {emp.designation})
+                                                {emp.name || emp.employeeName} ({emp.employeeId}{emp.designation ? ` - ${emp.designation}` : ''})
                                             </option>
                                         ))}
                                     </select>

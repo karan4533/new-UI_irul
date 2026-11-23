@@ -1,15 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, CheckCircle2, XCircle } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
     ConfirmAction,
     FeedbackState,
-    IntegrationNotice,
     PageHeader,
     StatusBadge,
     Surface,
     WorkflowTimeline,
 } from '../../../Common/ui'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { decideApproval, getApproval } from '../../../services/api/approvalsApiService'
 import {
     formatAmount,
     getApprovalRequestById,
@@ -36,11 +37,38 @@ const requestDateToIso = (value) => {
 const ViewApproval = () => {
     const { id } = useParams()
     const navigate = useNavigate()
-    const [request, setRequest] = useState(() => getApprovalRequestById(id))
-    const [remarks, setRemarks] = useState(request?.superAdminRemarks ?? '')
+    const live = isLiveApiEnabled()
+    const [request, setRequest] = useState(() => (live ? null : getApprovalRequestById(id)))
+    const [remarks, setRemarks] = useState(() => (live ? '' : (getApprovalRequestById(id)?.superAdminRemarks ?? '')))
     const [pendingDecision, setPendingDecision] = useState('')
     const [validationMessage, setValidationMessage] = useState('')
     const [confirmationMessage, setConfirmationMessage] = useState('')
+    const [loading, setLoading] = useState(Boolean(live))
+    const [saving, setSaving] = useState(false)
+
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            const local = getApprovalRequestById(id)
+            setRequest(local)
+            setRemarks(local?.superAdminRemarks ?? '')
+            setLoading(false)
+            return
+        }
+        let cancelled = false
+        ;(async () => {
+            setLoading(true)
+            const res = await getApproval(id)
+            if (cancelled) return
+            setLoading(false)
+            if (!res.success) {
+                setRequest(null)
+                return
+            }
+            setRequest(res.data)
+            setRemarks('')
+        })()
+        return () => { cancelled = true }
+    }, [id])
 
     const timeline = useMemo(() => request ? [
         {
@@ -79,13 +107,34 @@ const ViewApproval = () => {
         setPendingDecision(decision)
     }
 
-    const confirmDecision = () => {
+    const confirmDecision = async () => {
+        if (isLiveApiEnabled()) {
+            setSaving(true)
+            const res = await decideApproval(id, {
+                decision: pendingDecision,
+                comment: remarks.trim() || null,
+            })
+            setSaving(false)
+            if (!res.success) {
+                setValidationMessage(typeof res.error === 'string' ? res.error : 'Decision failed.')
+                setPendingDecision('')
+                return
+            }
+            setRequest(res.data)
+            setConfirmationMessage(`Request was ${pendingDecision.toLowerCase()}.`)
+            setPendingDecision('')
+            return
+        }
         const updated = updateApprovalRequestStatus(id, pendingDecision, remarks.trim())
         if (updated) {
             setRequest(updated)
-            setConfirmationMessage(`Request ${updated.requestId} was ${pendingDecision.toLowerCase()} in this demo workspace.`)
+            setConfirmationMessage(`Request ${updated.requestId} was ${pendingDecision.toLowerCase()}.`)
         }
         setPendingDecision('')
+    }
+
+    if (loading) {
+        return <FeedbackState kind='loading' title='Loading approval' description='Please wait…' />
     }
 
     if (!request) {
@@ -94,7 +143,7 @@ const ViewApproval = () => {
                 <button type='button' onClick={() => navigate(ROUTE_BASE)} className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] bg-white px-4 text-sm font-semibold text-[var(--erp-ink)]'>
                     <ArrowLeft aria-hidden='true' size={17} /> Back to approvals
                 </button>
-                <FeedbackState kind='empty' title='Approval request not found' description='This request may no longer exist in the local demonstration queue.' />
+                <FeedbackState kind='empty' title='Approval request not found' description='This request may no longer exist.' />
             </section>
         )
     }
@@ -111,12 +160,6 @@ const ViewApproval = () => {
                         <ArrowLeft aria-hidden='true' size={17} /> Back to approvals
                     </button>
                 )}
-            />
-
-            <IntegrationNotice
-                state='demo'
-                title='Frontend-only approval decision'
-                description='This action updates browser session data only. The production API must validate approver authority, enforce segregation of duties, create an immutable audit event and notify the requester.'
             />
 
             {confirmationMessage && (
@@ -254,11 +297,12 @@ const ViewApproval = () => {
                 onClose={() => setPendingDecision('')}
                 onConfirm={confirmDecision}
                 title={`${pendingDecision === 'Rejected' ? 'Reject' : 'Approve'} request?`}
-                description='This changes the request state for everyone using this browser session.'
+                description='Confirm this decision for the selected request.'
                 confirmLabel={pendingDecision === 'Rejected' ? 'Confirm rejection' : 'Confirm approval'}
                 tone={pendingDecision === 'Rejected' ? 'danger' : 'primary'}
+                busy={saving}
             >
-                <p><strong>{request.requestId}</strong> will be marked <strong>{pendingDecision}</strong>. Production must repeat permission and conflict-of-interest checks on the server.</p>
+                <p><strong>{request.requestId || request.id}</strong> will be marked <strong>{pendingDecision}</strong>.</p>
                 {remarks.trim() && <p className='mt-2 rounded-md bg-[var(--erp-canvas)] p-2'>Remarks: {remarks.trim()}</p>}
             </ConfirmAction>
         </section>

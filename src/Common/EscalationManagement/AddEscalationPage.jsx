@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import EscalationForm from './Components/EscalationForm'
@@ -9,10 +9,12 @@ import {
     getEscalationRecipientSelectOptions,
 } from './escalationUsersData'
 import { useEscalationContext } from './useEscalationContext'
-import IntegrationNotice from '../ui/IntegrationNotice'
 import PageHeader from '../ui/PageHeader'
 import Surface from '../ui/Surface'
 import UnavailableWorkflowPage from '../ui/UnavailableWorkflowPage'
+import FeedbackState from '../ui/FeedbackState'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
+import { listEscalationRecipients, raiseEscalation } from '../../services/api/escalationApiService'
 
 const AddEscalationPage = ({ roleKey }) => {
     const navigate = useNavigate()
@@ -27,16 +29,54 @@ const AddEscalationPage = ({ roleKey }) => {
         [roleConfig?.escalatesToRoleKey],
     )
 
-    const [form, setForm] = useState(() => emptyEscalationForm(defaultRecipientId))
+    const live = isLiveApiEnabled()
+    const [form, setForm] = useState(() => emptyEscalationForm(live ? '' : defaultRecipientId))
+    const [recipientOptions, setRecipientOptions] = useState(undefined)
+    const [recipientError, setRecipientError] = useState('')
+    const [submitting, setSubmitting] = useState(false)
+
+    useEffect(() => {
+        if (!live) return undefined
+        let cancelled = false
+        listEscalationRecipients().then((res) => {
+            if (cancelled) return
+            if (!res.success) {
+                setRecipientOptions([])
+                setRecipientError(typeof res.error === 'string' ? res.error : 'Could not load recipients.')
+                return
+            }
+            setRecipientOptions(res.data)
+            setRecipientError('')
+        })
+        return () => { cancelled = true }
+    }, [live])
 
     if (!roleConfig?.escalatesToRoleKey) {
         return <UnavailableWorkflowPage title='Escalation creation is unavailable' description='This role does not have a configured escalation destination.' alternateHref={roleConfig?.routeBase} alternateLabel='Open escalations' />
     }
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         if (e) e.preventDefault()
         if (!form.description.trim()) {
             toast.error('Description is required.')
+            return
+        }
+
+        if (live) {
+            setSubmitting(true)
+            const res = await raiseEscalation({
+                description: form.description,
+                fullDescription: form.fullDescription,
+                remarks: form.remarks,
+                recipientUserId: form.recipientUserId || null,
+            })
+            setSubmitting(false)
+            if (!res.success) {
+                toast.error(typeof res.error === 'string' ? res.error : 'Escalation could not be raised.')
+                return
+            }
+            toast.success(`Escalation ${res.data.displayId} routed to ${roleConfig.escalatesTo}.`)
+            navigate(roleConfig.routeBase)
             return
         }
 
@@ -63,9 +103,11 @@ const AddEscalationPage = ({ roleKey }) => {
     return (
         <form onSubmit={handleSubmit} noValidate className='space-y-5'>
             <PageHeader title='Raise escalation' description={`Route an issue through ${roleConfig.hierarchyLabel}.`} />
-            <IntegrationNotice state='demo' title='Local escalation routing' description='This escalation is stored in this browser. Recipient notification, evidence upload and the production audit trail are not connected.' />
+            {live && recipientError && (
+                <FeedbackState kind='error' compact title='Recipients unavailable' description={recipientError} />
+            )}
             <Surface title='Escalation information' description='Choose the responsible recipient and provide enough context for a 24-hour response.' contentClassName='p-4 sm:p-5'>
-                <EscalationForm form={form} onChange={setForm} roleConfig={roleConfig} />
+                <EscalationForm form={form} onChange={setForm} roleConfig={roleConfig} recipientOptions={live ? (recipientOptions || []) : undefined} />
             </Surface>
 
             <div className='flex flex-col-reverse gap-2 sm:flex-row sm:justify-end'>
@@ -78,6 +120,7 @@ const AddEscalationPage = ({ roleKey }) => {
                 </button>
                 <button
                     type='submit'
+                    disabled={submitting}
                     className='bg-[#515DEF] text-white text-sm text-center px-12 py-2 rounded-md border border-[#515DEF] hover:opacity-90 transition-all duration-200 cursor-pointer md:w-auto w-full'
                 >
                     Raise escalation

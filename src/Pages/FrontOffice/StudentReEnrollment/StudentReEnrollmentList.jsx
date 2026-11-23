@@ -4,7 +4,7 @@ const StudentReEnrollmentList = () => (
     <FrontOfficeRecordsList
         collection='student-re-enrollments'
         title='Student Re-Enrollment'
-        description='Campus re-enrollment records from the Front Office API. Add/edit forms remain local until mapped field-by-field.'
+        description='Campus student re-enrollment records.'
         addPath='/front-office/student-re-enrollment/add'
         viewPathPrefix='/front-office/student-re-enrollment/view'
         searchKeys={['id', 'studentName', 'admissionNumber', 'tcNumber', 'status']}

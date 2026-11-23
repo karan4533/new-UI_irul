@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Save, ShieldCheck } from 'lucide-react'
 import { toast } from 'react-toastify'
 import {
     ConfirmAction,
     DataTable,
     DataToolbar,
+    FeedbackState,
     IntegrationNotice,
     PageHeader,
     Pagination,
@@ -20,14 +21,156 @@ import {
     setPermissionsForRole,
 } from '../../../Common/RBAC/rolePermissionsData'
 import { paginateRows } from '../../../Common/ui/dataTableState'
+import { getAdminRolePermissions, listAdminRoles } from '../../../services/api/adminUsersApiService'
 import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 
 const EDITABLE_ROLES = ['teacher', 'coordinator']
 const ENFORCED_MODULE_KEYS = ['lessonPlans', 'taskManagement', 'unitTests', 'markEntry', 'deliverables']
 const editableModules = ROLE_PERMISSION_MODULES.filter((module) => ENFORCED_MODULE_KEYS.includes(module.key))
 
-const RolesPage = () => {
-    const live = isLiveApiEnabled()
+const PermissionList = ({ state }) => {
+    if (!state || state.status === 'loading') {
+        return <p className='text-sm text-[var(--erp-muted)]'>Loading permissions…</p>
+    }
+    if (state.status === 'error') {
+        return <p className='text-sm text-[#B42318]'>{state.message}</p>
+    }
+    const granted = (state.data?.permissions || []).filter((permission) => permission.granted)
+    if (granted.length === 0) {
+        return <p className='text-sm text-[var(--erp-muted)]'>This role holds no permissions.</p>
+    }
+    return (
+        <ul className='grid grid-cols-1 gap-x-6 gap-y-1 text-sm md:grid-cols-2'>
+            {granted.map((permission) => (
+                <li key={permission.code}>
+                    <code className='rounded bg-[var(--erp-canvas)] px-1.5 py-0.5 text-xs'>{permission.code}</code>{' '}
+                    <span className='text-[var(--erp-muted)]'>{permission.description}</span>
+                </li>
+            ))}
+        </ul>
+    )
+}
+
+const LiveRolesCatalog = () => {
+    const [roles, setRoles] = useState(null)
+    const [error, setError] = useState('')
+    const [open, setOpen] = useState('')
+    const [permissions, setPermissions] = useState({})
+    const [roleQuery, setRoleQuery] = useState('')
+    const [catalogPage, setCatalogPage] = useState(1)
+    const [catalogPageSize, setCatalogPageSize] = useState(10)
+
+    useEffect(() => {
+        let cancelled = false
+        listAdminRoles()
+            .then((res) => {
+                if (cancelled) return
+                if (!res.success) {
+                    setError(typeof res.error === 'string' ? res.error : 'Could not load roles.')
+                    setRoles([])
+                    return
+                }
+                setRoles(res.data || [])
+            })
+            .catch((err) => {
+                if (!cancelled) {
+                    setError(err?.message || 'Could not load roles.')
+                    setRoles([])
+                }
+            })
+        return () => { cancelled = true }
+    }, [])
+
+    const togglePermissions = async (roleId) => {
+        if (open === roleId) {
+            setOpen('')
+            return
+        }
+        setOpen(roleId)
+        if (permissions[roleId]?.status === 'ready') return
+        setPermissions((prev) => ({ ...prev, [roleId]: { status: 'loading' } }))
+        const res = await getAdminRolePermissions(roleId)
+        if (!res.success) {
+            setPermissions((prev) => ({
+                ...prev,
+                [roleId]: { status: 'error', message: typeof res.error === 'string' ? res.error : 'Could not load permissions.' },
+            }))
+            return
+        }
+        setPermissions((prev) => ({ ...prev, [roleId]: { status: 'ready', data: res.data } }))
+    }
+
+    const filteredRoles = (roles || []).filter((role) => [role.label, role.id]
+        .some((value) => String(value || '').toLowerCase().includes(roleQuery.trim().toLowerCase())))
+    const rolePagination = paginateRows(filteredRoles, { page: catalogPage, pageSize: catalogPageSize })
+
+    const columns = [
+        { key: 'label', label: 'Role', required: true, render: (role) => <span className='font-semibold text-[var(--erp-ink)]'>{role.label}</span> },
+        { key: 'id', label: 'Role key' },
+        { key: 'userCount', label: 'Users' },
+        { key: 'permissionCount', label: 'Permissions' },
+        {
+            key: 'creatable',
+            label: 'Creatable here',
+            render: (role) => (role.creatable ? <StatusBadge status='Active' label='Yes' /> : <StatusBadge status='Pending' label='No' />),
+        },
+        {
+            key: 'details',
+            label: 'Details',
+            render: (role) => (
+                <button
+                    type='button'
+                    onClick={() => togglePermissions(role.id)}
+                    className='text-xs font-semibold text-[var(--erp-indigo)] hover:underline'
+                >
+                    {open === role.id ? 'Hide permissions' : 'View permissions'}
+                </button>
+            ),
+        },
+    ]
+
+    return (
+        <section className='space-y-5'>
+            <PageHeader
+                title='Roles and access'
+                description='System roles and the permissions each role holds. This view is read-only; role permissions are managed by the backend.'
+                context={roles ? `${roles.length} system roles` : 'Loading roles…'}
+            />
+
+            {roles === null && !error ? (
+                <FeedbackState kind='loading' title='Loading roles' description='Fetching role catalog from the API…' />
+            ) : null}
+            {error ? (
+                <FeedbackState kind='error' title='Roles unavailable' description={error} />
+            ) : null}
+
+            <Surface title='System role catalog' description='Expand a role to inspect its granted FastAPI permissions.'>
+                <DataToolbar
+                    query={roleQuery}
+                    onQueryChange={(value) => { setRoleQuery(value); setCatalogPage(1) }}
+                    searchPlaceholder='Search system roles'
+                    resultCount={filteredRoles.length}
+                    onReset={() => { setRoleQuery(''); setCatalogPage(1) }}
+                />
+                <DataTable caption='System roles' rows={rolePagination.rows} columns={columns} rowKey='id' />
+                {open ? (
+                    <div className='mt-4 rounded-xl border border-[var(--erp-line)] bg-[var(--erp-canvas)] p-4'>
+                        <p className='mb-2 text-sm font-semibold text-[var(--erp-ink)]'>Permissions for {open}</p>
+                        <PermissionList state={permissions[open]} />
+                    </div>
+                ) : null}
+                <Pagination
+                    {...rolePagination}
+                    onPageChange={setCatalogPage}
+                    onPageSizeChange={(value) => { setCatalogPageSize(value); setCatalogPage(1) }}
+                    pageSizeOptions={[5, 10, 25]}
+                />
+            </Surface>
+        </section>
+    )
+}
+
+const DemoRolesPage = () => {
     const roles = getAllRolesForManagement()
     const [selectedRole, setSelectedRole] = useState('teacher')
     const [savedPermissions, setSavedPermissions] = useState(() => getPermissionsForRole('teacher'))
@@ -52,19 +195,10 @@ const RolesPage = () => {
     }
 
     const togglePermission = (key) => {
-        if (live) {
-            toast.error('Permission matrix write is blocked. Backend only exposes read APIs for role permissions.')
-            return
-        }
         setDraftPermissions((current) => ({ ...current, [key]: !current[key] }))
     }
 
     const savePermissions = () => {
-        if (live) {
-            toast.error('Permission matrix write is blocked until a backend write contract exists.')
-            setConfirmOpen(false)
-            return
-        }
         setPermissionsForRole(selectedRole, draftPermissions)
         setSavedPermissions(draftPermissions)
         setConfigured(true)
@@ -100,11 +234,9 @@ const RolesPage = () => {
             />
 
             <IntegrationNotice
-                state={live ? 'failed' : 'demo'}
-                title={live ? 'Permission writes blocked' : 'Frontend policy prototype'}
-                description={live
-                    ? 'Live mode: role permission matrix can be viewed for planning only. Saving or toggling modules is blocked — FastAPI mounts read endpoints only (no POST/PATCH for permission matrices). User account create/status uses /api/v1/admin/users instead.'
-                    : 'Teacher and Coordinator navigation policies are enforced in this browser. Production authorization must be loaded from the backend and checked again on every API request.'}
+                state='demo'
+                title='Frontend policy prototype'
+                description='Teacher and Coordinator navigation policies are enforced in this browser.'
             />
 
             <div className='grid grid-cols-1 gap-5 xl:grid-cols-[minmax(18rem,0.75fr)_minmax(0,1.25fr)]'>
@@ -157,14 +289,14 @@ const RolesPage = () => {
                     <button
                         type='button'
                         onClick={() => setConfirmOpen(true)}
-                        disabled={live || (configured && changes.changedCount === 0)}
+                        disabled={configured && changes.changedCount === 0}
                         className='mt-5 inline-flex min-h-10 items-center gap-2 rounded-lg bg-[var(--erp-indigo)] px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45'
                     >
-                        <Save aria-hidden='true' size={16} /> {live ? 'Save blocked in live mode' : 'Review and save policy'}
+                        <Save aria-hidden='true' size={16} /> Review and save policy
                     </button>
                 </Surface>
 
-                <Surface title='System role catalog' description='Roles outside the supported frontend policy editor remain view-only until the backend RBAC contract is connected.'>
+                <Surface title='System role catalog' description='Local catalog used when the live API is off.'>
                     <DataToolbar
                         query={roleQuery}
                         onQueryChange={(value) => { setRoleQuery(value); setCatalogPage(1) }}
@@ -200,5 +332,7 @@ const RolesPage = () => {
         </section>
     )
 }
+
+const RolesPage = () => (isLiveApiEnabled() ? <LiveRolesCatalog /> : <DemoRolesPage />)
 
 export default RolesPage

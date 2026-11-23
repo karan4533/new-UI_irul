@@ -1,5 +1,17 @@
+import { createOpsLiveStore } from '../../../services/api/opsLiveStore.js'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore.js'
+
 const STORAGE_KEY = 'material-gate-pass-front-office'
 const MGP_COUNTER_KEY = 'material-gate-pass-mgp-counter'
+
+const materialLiveStore = createOpsLiveStore({
+    collection: 'material-gate-passes',
+    api: 'front-office',
+    idPrefix: 'MGP',
+    idKeys: ['mgpNo'],
+})
+
+let _memoryMaterialGatePasses = null
 
 export const APPROVAL_ROLES = [
     { key: 'storeKeeper', label: 'Store Keeper', useRoleSelect: true },
@@ -179,7 +191,24 @@ const hydrateRecord = (record) => ({
     status: record.status ?? deriveOverallStatus(record.approvals),
 })
 
+export const hydrateMaterialGatePassesFromApi = async ({ force = true } = {}) => {
+    if (!isLiveApiEnabled()) return getMaterialGatePasses()
+    const res = await materialLiveStore.hydrate({ force })
+    if (!res.success) {
+        _memoryMaterialGatePasses = []
+        throw new Error(typeof res.error === 'string' ? res.error : 'Could not load material gate passes.')
+    }
+    _memoryMaterialGatePasses = materialLiveStore.read().map(hydrateRecord)
+    return _memoryMaterialGatePasses
+}
+
 export const getMaterialGatePasses = () => {
+    if (isLiveApiEnabled()) {
+        const rows = Array.isArray(_memoryMaterialGatePasses)
+            ? _memoryMaterialGatePasses
+            : materialLiveStore.read().map(hydrateRecord)
+        return rows
+    }
     const stored = localStorage.getItem(STORAGE_KEY)
     if (stored) {
         const records = JSON.parse(stored).map(hydrateRecord)
@@ -192,6 +221,11 @@ export const getMaterialGatePasses = () => {
 }
 
 export const saveMaterialGatePasses = (records) => {
+    _memoryMaterialGatePasses = records
+    if (isLiveApiEnabled()) {
+        materialLiveStore.write(records)
+        return
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(records))
 }
 
@@ -200,9 +234,13 @@ export const getMaterialGatePassById = (id) =>
 
 export const addMaterialGatePass = (payload) => {
     const records = getMaterialGatePasses()
-    const mgpNo = generateMgpNo()
+    const mgpNo = isLiveApiEnabled()
+        ? formatPassNumber(
+            records.reduce((max, row) => Math.max(max, parsePassNumber(row.mgpNo)), 0) + 1,
+        )
+        : generateMgpNo()
     const record = hydrateRecord({
-        id: `mgp-${mgpNo}`,
+        id: `MGP-${mgpNo}`,
         mgpNo,
         ...payload,
         status: deriveOverallStatus(payload.approvals),

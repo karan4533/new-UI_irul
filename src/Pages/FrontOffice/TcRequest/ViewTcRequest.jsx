@@ -119,8 +119,6 @@ const ViewTcRequest = () => {
                 Back to list
             </button>
 
-            {live ? <p className='text-xs font-medium text-[#027A48]'>Live TC · GET/POST /api/v1/tc-requests</p> : null}
-
             {!request ? (
                 <div className='bg-white rounded-2xl shadow-md p-8 text-center text-[#667085]'>{error || 'TC request not found.'}</div>
             ) : (

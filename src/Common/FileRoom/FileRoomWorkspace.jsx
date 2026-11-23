@@ -38,8 +38,10 @@ import {
     issuePhysicalFile,
     returnPhysicalFile
 } from './fileRoomData'
+import { FILE_ROOM_LIVE_COLLECTIONS } from './fileRoomData'
+import LiveOpsGate from '../ui/LiveOpsGate'
 
-export default function FileRoomWorkspace({ defaultTab = 'overview', roleOverride = null }) {
+function FileRoomWorkspaceInner({ defaultTab = 'overview', roleOverride = null }) {
     const { role: authRole, email: authEmail, name: authName } = useAuth()
     const { tab } = useParams()
     const activeRole = roleOverride || authRole || 'admin'
@@ -1286,3 +1288,10 @@ export default function FileRoomWorkspace({ defaultTab = 'overview', roleOverrid
     )
 }
 
+export default function FileRoomWorkspace(props) {
+    return (
+        <LiveOpsGate collections={FILE_ROOM_LIVE_COLLECTIONS} title='Physical File Room'>
+            <FileRoomWorkspaceInner {...props} />
+        </LiveOpsGate>
+    )
+}

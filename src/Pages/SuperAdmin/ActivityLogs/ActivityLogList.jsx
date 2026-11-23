@@ -1,16 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowUpRight, Download, RefreshCw, Users, FileText } from 'lucide-react'
 import { NavLink, useSearchParams } from 'react-router-dom'
 import {
     DataTable,
     DataToolbar,
     FeedbackState,
-    IntegrationNotice,
     PageHeader,
     Pagination,
     StatusBadge,
 } from '../../../Common/ui'
 import { paginateRows, parseTableState, serializeTableState } from '../../../Common/ui/dataTableState'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { listAuditLogs } from '../../../services/api/auditLogsApiService'
 import {
     LOG_TYPES,
     ROUTE_BASE,
@@ -25,16 +26,34 @@ import UserActivityTimeline from './UserActivityTimeline'
 
 const ActivityLogList = ({ logType }) => {
     const config = LOG_TYPES[logType]
+    const live = isLiveApiEnabled()
     const [urlParams, setUrlParams] = useSearchParams()
     const initialTableState = parseTableState(urlParams)
     const [viewMode, setViewMode] = useState('table') // 'table' | 'timeline'
-    const [records, setRecords] = useState(() => getLogsByType(logType))
+    const [records, setRecords] = useState(() => (live ? [] : getLogsByType(logType)))
     const [search, setSearch] = useState(initialTableState.query)
     const [status, setStatus] = useState(initialTableState.filters.status || '')
     const [fromDate, setFromDate] = useState(initialTableState.filters.fromDate || '')
     const [toDate, setToDate] = useState(initialTableState.filters.toDate || '')
     const [page, setPage] = useState(initialTableState.page)
     const [pageSize, setPageSize] = useState(urlParams.has('pageSize') ? initialTableState.pageSize : 5)
+
+    const loadLive = useCallback(async () => {
+        const res = await listAuditLogs(logType)
+        if (!res.success) {
+            setRecords([])
+            return
+        }
+        setRecords(Array.isArray(res.data) ? res.data : [])
+    }, [logType])
+
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            setRecords(getLogsByType(logType))
+            return
+        }
+        loadLive()
+    }, [loadLive, logType])
 
     const listColumns = useMemo(() => getListColumns(logType), [logType])
     const statusOptions = useMemo(() => getLogStatusOptions(records), [records])
@@ -80,13 +99,7 @@ const ActivityLogList = ({ logType }) => {
             <PageHeader
                 title={config.listTitle}
                 description={`Review ${config.label.toLowerCase()} with actor, timestamp, device and record context for governance follow-up.`}
-                context={`${records.length} browser-stored records · ${filteredRecords.length} matching`}
-            />
-
-            <IntegrationNotice
-                state='demo'
-                title='Demonstration audit evidence'
-                description='These records are local sample data. Production logs must be generated server-side, append-only, access-controlled and retained according to policy; client-side data is not admissible audit evidence.'
+                context={`${records.length} records · ${filteredRecords.length} matching`}
             />
 
             <div className='grid grid-cols-2 gap-3 lg:grid-cols-4'>
@@ -120,7 +133,7 @@ const ActivityLogList = ({ logType }) => {
                             : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
                     }`}
                 >
-                    <Users size={15} /> User Activity Timeline (29 Users)
+                    <Users size={15} /> User Activity Timeline
                 </button>
             </div>
 
@@ -154,7 +167,11 @@ const ActivityLogList = ({ logType }) => {
                     )}
                     actions={(
                         <>
-                            <button type='button' onClick={() => setRecords(getLogsByType(logType))} className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] px-4 text-sm font-semibold text-[var(--erp-ink)]'>
+                            <button
+                                type='button'
+                                onClick={() => (isLiveApiEnabled() ? loadLive() : setRecords(getLogsByType(logType)))}
+                                className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] px-4 text-sm font-semibold text-[var(--erp-ink)]'
+                            >
                                 <RefreshCw aria-hidden='true' size={16} /> Refresh
                             </button>
                             <button type='button' disabled title='Secure export service is not connected' className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] px-4 text-sm font-semibold text-[var(--erp-muted)] opacity-65'>

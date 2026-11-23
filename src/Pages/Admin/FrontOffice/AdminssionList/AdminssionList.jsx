@@ -178,15 +178,16 @@ const AdminssionList = () => {
                 ) : null}
             />
 
-            <IntegrationNotice
-                state={listSource === 'backend' ? 'connected' : listSource === 'error' ? 'failed' : 'demo'}
-                title={listSource === 'backend' ? 'Live admissions directory' : listSource === 'error' ? 'Admissions API unavailable' : 'Browser-stored admission records'}
-                description={listSource === 'backend'
-                    ? 'GET /api/v1/admissions. Admin view is read-focused; hard delete and local enrol are disabled in live mode.'
-                    : listSource === 'error'
-                        ? listError
-                        : 'Records, enrolment and parent mapping are local demo workflows. Production submission, document verification, payment and identity checks require backend APIs.'}
-            />
+            {listSource === 'error' ? (
+                <FeedbackState kind='error' title='Unable to load admissions' description={listError} />
+            ) : null}
+            {listSource !== 'backend' && listSource !== 'error' ? (
+                <IntegrationNotice
+                    state='demo'
+                    title='Browser-stored admission records'
+                    description='Records, enrolment and parent mapping are local demo workflows.'
+                />
+            ) : null}
 
             {listLoading ? (
                 <FeedbackState kind='loading' title='Loading admissions' description='Fetching from the admissions API…' />

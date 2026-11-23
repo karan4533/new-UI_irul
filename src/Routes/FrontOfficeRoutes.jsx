@@ -57,8 +57,11 @@ import { TaskManagementRoutes } from '../Common/TaskManagement/TaskManagementRou
 import AnnouncementList from '../Pages/FrontOffice/Announcement/AnnouncementList'
 import ViewAnnouncement from '../Pages/FrontOffice/Announcement/ViewAnnouncement'
 import Dashboard from '../Pages/FrontOffice/Dashboard/Dashboard'
+import LiveFrontOfficeReports from '../Pages/FrontOffice/Reports/LiveFrontOfficeReports'
+import { isLiveApiEnabled } from '../services/api/tokenStore'
 
 const FrontOfficeRoutes = () => {
+    const liveReports = isLiveApiEnabled()
     return (
         <ReactRoutes>
             <Route path="/front-office" element={<Navigate to="/front-office/dashboard" replace />} />
@@ -120,6 +123,15 @@ const FrontOfficeRoutes = () => {
             <Route path="/front-office/leave-request/my-requests/view/:id" element={<ViewMyLeaveRequest />} />
             <Route path="/front-office/leave-request/received" element={<ReceivedLeaveRequests />} />
             <Route path="/front-office/leave-request/received/view/:id" element={<ViewReceivedLeaveRequest />} />
+
+            {/* Live FO reports — before UniversalReportsAnalyticsWorkspace sample suite. */}
+            {liveReports ? (
+                <>
+                    <Route path="/front-office/reports-analytics" element={<LiveFrontOfficeReports />} />
+                    <Route path="/front-office/reports" element={<LiveFrontOfficeReports />} />
+                    <Route path="/front-office/analytics" element={<LiveFrontOfficeReports />} />
+                </>
+            ) : null}
 
             <Route path="/front-office/communication" element={<Navigate to="/front-office/communication/inbox" replace />} />
             <Route path="/front-office/communication/inbox" element={<CommunicationInbox />} />

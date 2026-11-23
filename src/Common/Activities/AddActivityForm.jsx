@@ -14,6 +14,8 @@ import {
     parseTimeForInput,
     updateActivity,
 } from './activitiesData'
+import FeedbackState from '../ui/FeedbackState'
+import useActivitiesLive from './useActivitiesLive'
 import { getActivityConfig, getActivityRoutes } from './activityConfigs'
 import { getClassSelectOptions } from '../RBAC/academicsCatalogData'
 import MdApprovalSubmitModal from './MdApprovalSubmitModal'
@@ -42,7 +44,7 @@ const activityToForm = (activity, personField) => ({
     description: activity.description || '',
 })
 
-export default function AddActivityForm({ roleKey, activityType, mode = 'add' }) {
+function ActivityFormInner({ roleKey, activityType, mode = 'add' }) {
     const { id } = useParams()
     const isEdit = mode === 'edit'
     const navigate = useNavigate()
@@ -278,4 +280,15 @@ export default function AddActivityForm({ roleKey, activityType, mode = 'add' })
             />
         </section>
     )
+}
+
+export default function AddActivityForm(props) {
+    const { live, loading, error } = useActivitiesLive()
+    if (props.mode === 'edit' && live && loading) {
+        return <FeedbackState kind='loading' title='Loading activity' description='Fetching activity…' />
+    }
+    if (props.mode === 'edit' && live && error) {
+        return <FeedbackState kind='error' title='Unable to load activity' description={error} />
+    }
+    return <ActivityFormInner {...props} />
 }

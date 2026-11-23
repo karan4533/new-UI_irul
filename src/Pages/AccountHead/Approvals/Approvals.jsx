@@ -5,7 +5,7 @@ import {
     ConfirmAction,
     DataTable,
     DataToolbar,
-    IntegrationNotice,
+    FeedbackState,
     PageHeader,
     Pagination,
     StatusBadge,
@@ -194,18 +194,12 @@ const Approvals = () => {
                 )}
             />
 
-            <IntegrationNotice
-                state={live ? (liveError ? 'failed' : 'connected') : 'demo'}
-                title={live ? (liveError ? 'Finance API unavailable' : 'Live approval queue') : 'Browser-stored approval decisions'}
-                description={
-                    live
-                        ? (liveError
-                            || (liveLoading
-                                ? 'Loading campus approvals…'
-                                : 'Decisions call POST /api/v1/finance/actions/decide-approval against the campus snapshot.'))
-                        : 'Decisions are local demonstration records. Production requires permission checks, append-only audit events, posting controls and payout integrations.'
-                }
-            />
+            {live && liveError ? (
+                <FeedbackState kind='error' title='Unable to load approvals' description={liveError} />
+            ) : null}
+            {live && !liveError && liveLoading ? (
+                <FeedbackState kind='loading' title='Loading approvals' description='Fetching campus approvals…' />
+            ) : null}
 
             <FinancialActionFlow current='Approve' completed={['Calculate', 'Review']} title='Expense and claim lifecycle' />
 
@@ -245,7 +239,7 @@ const Approvals = () => {
                             columns={columns}
                             rowKey='id'
                             emptyTitle={live && !liveLoading ? `No ${selectedStatus.toLowerCase()} campus approvals` : `No ${selectedStatus.toLowerCase()} finance requests`}
-                            emptyDescription={live ? 'Seed approvals into /finance/state or change filters.' : 'Change the search or department filter to see other records.'}
+                            emptyDescription={live ? 'Change the search or department filter to see other records.' : 'Change the search or department filter to see other records.'}
                             renderActions={selectedStatus === 'Pending' ? (row) => (
                                 <>
                                     <button type='button' onClick={() => openDecision(row, 'Rejected')} className='inline-flex min-h-9 items-center gap-1.5 rounded-md border border-[var(--erp-red)] px-3 text-sm font-semibold text-[var(--erp-red)]'><X aria-hidden='true' size={15} /> Reject</button>

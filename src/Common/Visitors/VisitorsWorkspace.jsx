@@ -13,6 +13,7 @@ import { useAuth } from '../../context/AuthContext'
 import { getProfileLabel } from '../../Pages/Authentication/profileOptions'
 import {
     getVisitorLogs,
+    hydrateVisitorLogsFromApi,
     registerVisitorCheckIn,
     recordVisitorCheckOut,
     calculateVisitDuration,
@@ -20,11 +21,13 @@ import {
     getAuthorizedStaffDirectory,
     ID_PROOF_TYPES,
 } from '../GatePassSecurity/gatePassSecurityData'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
 
 export default function VisitorsWorkspace({ roleOverride = null }) {
     const { role: authRole, name: authName } = useAuth()
     const activeRole = roleOverride || authRole || 'prm'
     const roleLabel = getProfileLabel(activeRole)
+    const live = isLiveApiEnabled()
 
     // Data States
     const [refreshKey, setRefreshKey] = useState(0)
@@ -33,6 +36,8 @@ export default function VisitorsWorkspace({ roleOverride = null }) {
     const [dateFilter, setDateFilter] = useState('Today') // 'Today', 'All Dates'
     const [currentTime, setCurrentTime] = useState(Date.now())
     const [notification, setNotification] = useState('')
+    const [liveLoading, setLiveLoading] = useState(Boolean(live))
+    const [liveError, setLiveError] = useState('')
 
     // Modal State
     const [isModalOpen, setIsModalOpen] = useState(false)
@@ -42,6 +47,30 @@ export default function VisitorsWorkspace({ roleOverride = null }) {
         setNotification(msg)
         setTimeout(() => setNotification(''), 4500)
     }
+
+    // Live API hydrate (ops:gate-visitors)
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            setLiveLoading(false)
+            return undefined
+        }
+        let cancelled = false
+        setLiveLoading(true)
+        setLiveError('')
+        hydrateVisitorLogsFromApi({ force: true })
+            .then(() => {
+                if (cancelled) return
+                setLiveLoading(false)
+                setRefreshKey((k) => k + 1)
+            })
+            .catch((err) => {
+                if (cancelled) return
+                setLiveLoading(false)
+                setLiveError(err?.message || 'Visitors could not be loaded.')
+                setRefreshKey((k) => k + 1)
+            })
+        return () => { cancelled = true }
+    }, [])
 
     // Live sync event listener
     useEffect(() => {
@@ -187,6 +216,16 @@ export default function VisitorsWorkspace({ roleOverride = null }) {
                     </button>
                 </div>
             )}
+            {live && liveLoading ? (
+                <div className='rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600'>
+                    Loading visitor register…
+                </div>
+            ) : null}
+            {live && liveError ? (
+                <div className='rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800'>
+                    {liveError}
+                </div>
+            ) : null}
 
             {/* Header: Title, Subtitle, and Primary Check-in Button */}
             <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-4'>

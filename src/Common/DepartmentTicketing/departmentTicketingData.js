@@ -9,6 +9,86 @@
  */
 
 import { recordAuditLog, dispatchNotification } from '../AuditAndNotifications/centralAuditEngine.js'
+import { createOpsLiveStore } from '../../services/api/opsLiveStore.js'
+import { isLiveApiEnabled } from '../../services/api/tokenStore.js'
+
+// Live-mode store (FastAPI /api/v1/ops/it-support-tickets). No mock data is read or seeded when VITE_USE_MOCK=false.
+const liveTickets = createOpsLiveStore({ collection: 'it-support-tickets', idPrefix: 'TICK' })
+
+/** Collections the Department Ticketing workspace needs hydrated in live mode. */
+export const TICKETING_LIVE_COLLECTIONS = ['it-support-tickets']
+
+const BACKEND_STATUS_TO_UI = {
+    Open: 'Submitted',
+    Assigned: 'Assigned',
+    'In Progress': 'In Progress',
+    'In-Progress': 'In Progress',
+    Resolved: 'Resolved',
+    Closed: 'Closed',
+}
+
+const formatLiveDateTime = (value) => {
+    if (!value) return ''
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return String(value)
+    return `${date.toLocaleDateString('en-GB')} ${date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`
+}
+
+const resolveDepartmentName = (name) => {
+    const text = String(name || '').trim()
+    if (!text) return 'IT Support & Systems'
+    const lowered = text.toLowerCase()
+    const match = DEPARTMENT_CONFIGS.find(
+        (d) => d.name.toLowerCase() === lowered || d.name.toLowerCase().startsWith(lowered.split(' ')[0]),
+    )
+    return match ? match.name : text
+}
+
+/**
+ * Tickets raised through the backend self-service endpoint use the API shape (subject / department / ...).
+ * Give them the fields this workspace renders; rows already in workspace shape pass through unchanged.
+ */
+const toWorkspaceTicket = (row) => {
+    if (!row || row.ticketTitle) return row
+    const createdDateTime = formatLiveDateTime(row.createdAt || row.createdDate)
+    const history = Array.isArray(row.history) ? row.history : []
+    return {
+        ...row,
+        ticketTitle: row.subject || row.ticketTitle || 'Support ticket',
+        targetDepartment: resolveDepartmentName(row.department),
+        issueCategory: row.issueType || row.category || 'General',
+        requestedById: row.requesterUserId || row.requesterEmail || '',
+        requestedByName: row.requesterName || row.requesterEmail || 'Requester',
+        requestingDepartment: row.requesterRole || '',
+        assignedToId: row.assignedToId || '',
+        assignedToName: row.assignedToName || row.assignedTo || '',
+        attachments: row.attachments || (row.attachmentName ? [row.attachmentName] : []),
+        slaHours: row.slaHours ?? null,
+        createdDateTime,
+        targetResolutionDateTime: row.targetResolutionDateTime || '',
+        actualResolutionDateTime: row.actualResolutionDateTime || null,
+        status: BACKEND_STATUS_TO_UI[row.status] || row.status || 'Submitted',
+        timeline:
+            row.timeline ||
+            (history.length
+                ? history.map((h) => ({
+                      timestamp: formatLiveDateTime(h.at || h.timestamp),
+                      actorName: h.by || h.actor || h.actorName || 'System',
+                      action: h.status || h.action || 'Updated',
+                      notes: h.note || h.notes || h.remarks || '',
+                  }))
+                : [
+                      {
+                          timestamp: createdDateTime,
+                          actorName: row.requesterName || 'Requester',
+                          action: 'Submitted',
+                          notes: `Ticket raised for ${row.department || 'IT Support'}.`,
+                      },
+                  ]),
+        resolutionSummary: row.resolutionSummary || row.remarks || '',
+        requesterFeedback: row.requesterFeedback ?? null,
+    }
+}
 
 export const TICKETS_STORAGE_KEY = 'schoolerp-department-tickets-v1'
 
@@ -235,6 +315,7 @@ export const INITIAL_TICKETS = [
 
 // Storage Accessors
 export const getDepartmentTickets = () => {
+    if (isLiveApiEnabled()) return liveTickets.read().map(toWorkspaceTicket)
     try {
         if (typeof localStorage !== 'undefined') {
             const raw = localStorage.getItem(TICKETS_STORAGE_KEY)
@@ -255,6 +336,10 @@ export const getDepartmentTickets = () => {
 }
 
 export const saveDepartmentTickets = (tickets) => {
+    if (isLiveApiEnabled()) {
+        liveTickets.write(tickets)
+        return
+    }
     _memoryTickets = tickets
     try {
         if (typeof localStorage !== 'undefined') {

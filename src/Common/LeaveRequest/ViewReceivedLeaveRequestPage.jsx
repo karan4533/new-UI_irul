@@ -6,7 +6,6 @@ import { useAuth } from '../../context/AuthContext'
 import ConfirmAction from '../ui/ConfirmAction'
 import FeedbackState from '../ui/FeedbackState'
 import FormField from '../ui/FormField'
-import IntegrationNotice from '../ui/IntegrationNotice'
 import PageHeader from '../ui/PageHeader'
 import Surface from '../ui/Surface'
 import WorkflowContextBar from '../ui/WorkflowContextBar'
@@ -141,14 +140,6 @@ export default function ViewReceivedLeaveRequestPage({ roleKey: roleKeyProp }) {
                         <ArrowLeft aria-hidden='true' size={17} /> Back to approvals
                     </button>
                 )}
-            />
-
-            <IntegrationNotice
-                state={live ? 'connected' : 'demo'}
-                title={live ? 'Live leave decision' : 'Browser-stored approval'}
-                description={live
-                    ? 'POST /api/v1/leave-requests/{id}/decide records the approval or rejection on the server.'
-                    : 'Decisions are saved locally for this prototype. Staff notifications and the production leave API are not connected.'}
             />
 
             <WorkflowContextBar

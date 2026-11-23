@@ -5,7 +5,6 @@ import { useAuth } from '../../context/AuthContext'
 import DataTable from '../ui/DataTable'
 import DataToolbar from '../ui/DataToolbar'
 import FeedbackState from '../ui/FeedbackState'
-import IntegrationNotice from '../ui/IntegrationNotice'
 import PageHeader from '../ui/PageHeader'
 import Pagination from '../ui/Pagination'
 import StatusBadge from '../ui/StatusBadge'
@@ -126,17 +125,9 @@ export default function MyLeaveRequestsList({ roleKey: roleKeyProp }) {
                 ) : null}
             />
 
-            {listSource === 'backend' ? (
-                <IntegrationNotice
-                    state='connected'
-                    title='Live my-leave queue'
-                    description='GET /api/v1/leave-requests?box=mine. Apply/create still uses the leave form; decisions require leave.decide on the approver role.'
-                />
-            ) : listSource === 'error' ? (
+            {listSource === 'error' ? (
                 <FeedbackState kind='error' title='Leave API unavailable' description={listError} />
-            ) : (
-                <IntegrationNotice state='demo' title='Browser-stored leave requests' description='Requests and decisions are local to this browser. Notifications and production leave balances are not connected.' />
-            )}
+            ) : null}
 
             {listLoading ? (
                 <FeedbackState kind='loading' title='Loading leave requests' description='Fetching your leave queue…' />

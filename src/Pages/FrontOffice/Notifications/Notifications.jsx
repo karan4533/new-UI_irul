@@ -1,17 +1,5 @@
-import React from 'react'
-import NotificationsListView from '../../../Common/Notifications/NotificationsListView'
-import {
-    STAFF_NOTIFICATIONS,
-    STAFF_NOTIFICATION_TYPES,
-    staffTypeBadgeColor,
-} from '../../../Common/Notifications/staffNotificationsData'
+import StaffNotificationsPage from '../../../Common/Notifications/StaffNotificationsPage'
 
-const Notifications = () => (
-    <NotificationsListView
-        notifications={STAFF_NOTIFICATIONS}
-        notificationTypes={STAFF_NOTIFICATION_TYPES}
-        typeBadgeColor={staffTypeBadgeColor}
-    />
-)
+const Notifications = () => <StaffNotificationsPage title='Notifications' />
 
 export default Notifications

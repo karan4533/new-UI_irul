@@ -1,24 +1,28 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react'
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import {
     Bell,
     Check,
     CheckCheck,
     Search,
-    Calendar,
-    UserRound,
-    AlertCircle,
     Info,
     CalendarDays,
     BookOpen,
     DollarSign,
     PartyPopper,
-    X,
-    Filter
+    ClipboardCheck,
+    ShieldAlert,
+    ListChecks,
 } from 'lucide-react'
 import {
     STAFF_NOTIFICATIONS,
     staffTypeBadgeColor,
 } from '../../Notifications/staffNotificationsData'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import {
+    listNotifications,
+    markAllNotificationsRead,
+    markNotificationRead,
+} from '../../../services/api/notificationsApiService'
 
 const STORAGE_KEY = 'schoolerp-notifications-v2'
 
@@ -29,62 +33,106 @@ const TYPE_ICONS = {
     Payment: DollarSign,
     Announcement: Info,
     General: Bell,
+    Leave: CalendarDays,
+    Approval: ClipboardCheck,
+    Escalation: ShieldAlert,
+    Task: ListChecks,
+    Ops: Bell,
+    Duty: ClipboardCheck,
+}
+
+function loadMockNotifications() {
+    try {
+        const stored = localStorage.getItem(STORAGE_KEY)
+        if (stored) {
+            const parsed = JSON.parse(stored)
+            if (Array.isArray(parsed) && parsed.length > 0) return parsed
+        }
+    } catch {
+        /* ignore */
+    }
+    return STAFF_NOTIFICATIONS
 }
 
 const UserNotifications = () => {
+    const live = isLiveApiEnabled()
     const [open, setOpen] = useState(false)
-    const [activeFilter, setActiveFilter] = useState('all') // 'all' | 'unread'
+    const [activeFilter, setActiveFilter] = useState('all')
     const [searchQuery, setSearchQuery] = useState('')
+    const [loading, setLoading] = useState(live)
+    const [error, setError] = useState('')
+    const [notifications, setNotifications] = useState(() => (live ? [] : loadMockNotifications()))
     const dropdownRef = useRef(null)
 
-    // Load persisted notifications or seed with default
-    const [notifications, setNotifications] = useState(() => {
-        try {
-            const stored = localStorage.getItem(STORAGE_KEY)
-            if (stored) {
-                const parsed = JSON.parse(stored)
-                if (Array.isArray(parsed) && parsed.length > 0) {
-                    return parsed
-                }
-            }
-        } catch (e) {
-            console.error('Failed to parse stored notifications:', e)
+    const loadLive = useCallback(async () => {
+        if (!isLiveApiEnabled()) return
+        setLoading(true)
+        setError('')
+        const res = await listNotifications()
+        if (!res.success) {
+            setNotifications([])
+            setError(res.error || 'Unable to load notifications.')
+            setLoading(false)
+            return
         }
-        return STAFF_NOTIFICATIONS
-    })
+        setNotifications(Array.isArray(res.data) ? res.data : [])
+        setLoading(false)
+    }, [])
+
+    useEffect(() => {
+        if (!live) return undefined
+        loadLive()
+        const timer = window.setInterval(loadLive, 60_000)
+        return () => window.clearInterval(timer)
+    }, [live, loadLive])
+
+    useEffect(() => {
+        if (live && open) loadLive()
+    }, [live, open, loadLive])
 
     const unreadCount = useMemo(
         () => notifications.filter((n) => !n.isRead).length,
-        [notifications]
+        [notifications],
     )
 
-    const markAsRead = (id) => {
-        setNotifications((prev) => {
-            const next = prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
-            try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
-            } catch (e) {
-                console.error('Failed to store notifications:', e)
-            }
-            return next
-        })
+    const persistMock = (next) => {
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+        } catch {
+            /* ignore */
+        }
     }
 
-    const markAllAsRead = () => {
+    const markAsRead = async (id) => {
+        if (!id) return
         setNotifications((prev) => {
-            const next = prev.map((n) => ({ ...n, isRead: true }))
-            try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
-            } catch (e) {
-                console.error('Failed to store notifications:', e)
-            }
+            const next = prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
+            if (!live) persistMock(next)
             return next
         })
+        if (!live) return
+        const res = await markNotificationRead(id)
+        if (!res.success) {
+            setNotifications((prev) =>
+                prev.map((n) => (n.id === id ? { ...n, isRead: false } : n)),
+            )
+        }
+    }
+
+    const markAllAsRead = async () => {
+        const snapshot = notifications
+        setNotifications((prev) => {
+            const next = prev.map((n) => ({ ...n, isRead: true }))
+            if (!live) persistMock(next)
+            return next
+        })
+        if (!live) return
+        const res = await markAllNotificationsRead(snapshot)
+        if (!res.success) loadLive()
     }
 
     const toggleDropdown = () => setOpen((prev) => !prev)
 
-    // Close dropdown when clicking outside
     useEffect(() => {
         const handleClickOutside = (event) => {
             if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -95,12 +143,9 @@ const UserNotifications = () => {
         return () => document.removeEventListener('mousedown', handleClickOutside)
     }, [])
 
-    // Close on Escape key
     useEffect(() => {
         const handleKeyDown = (e) => {
-            if (e.key === 'Escape' && open) {
-                setOpen(false)
-            }
+            if (e.key === 'Escape' && open) setOpen(false)
         }
         window.addEventListener('keydown', handleKeyDown)
         return () => window.removeEventListener('keydown', handleKeyDown)
@@ -115,9 +160,7 @@ const UserNotifications = () => {
                 const matchesMessage = item.message?.toLowerCase().includes(q)
                 const matchesType = item.type?.toLowerCase().includes(q)
                 const matchesPoster = item.postedBy?.toLowerCase().includes(q)
-                if (!matchesTitle && !matchesMessage && !matchesType && !matchesPoster) {
-                    return false
-                }
+                if (!matchesTitle && !matchesMessage && !matchesType && !matchesPoster) return false
             }
             return true
         })
@@ -145,10 +188,8 @@ const UserNotifications = () => {
                 )}
             </button>
 
-            {/* Expanded Notification Panel */}
             {open && (
                 <div className='fixed inset-x-3 top-[4.75rem] sm:absolute sm:inset-auto sm:right-0 sm:top-full sm:mt-2 w-auto sm:w-[420px] md:w-[460px] rounded-2xl border border-slate-200/90 bg-white shadow-2xl z-50 overflow-hidden flex flex-col max-h-[calc(100vh-6rem)] sm:max-h-[580px] animate-scaleUp text-xs font-inter'>
-                    {/* Header */}
                     <div className='flex items-center justify-between border-b border-slate-100 p-4 bg-slate-50/80'>
                         <div className='flex items-center gap-2.5'>
                             <div className='flex size-8 items-center justify-center rounded-xl bg-blue-100 text-blue-700'>
@@ -157,7 +198,9 @@ const UserNotifications = () => {
                             <div>
                                 <h3 className='font-bold text-slate-900 text-sm'>Notifications</h3>
                                 <p className='text-[11px] text-slate-500'>
-                                    {unreadCount} unread update{unreadCount === 1 ? '' : 's'}
+                                    {loading
+                                        ? 'Refreshing…'
+                                        : `${unreadCount} unread update${unreadCount === 1 ? '' : 's'}`}
                                 </p>
                             </div>
                         </div>
@@ -173,7 +216,6 @@ const UserNotifications = () => {
                         )}
                     </div>
 
-                    {/* Filter Tabs & Search Bar */}
                     <div className='p-3 border-b border-slate-100 bg-white flex flex-col gap-2'>
                         <div className='flex items-center justify-between gap-2'>
                             <div className='flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl'>
@@ -214,9 +256,23 @@ const UserNotifications = () => {
                         </div>
                     </div>
 
-                    {/* Notifications Scroll List */}
                     <div className='overflow-y-auto divide-y divide-slate-100 max-h-[420px]'>
-                        {filteredNotifications.length === 0 ? (
+                        {error ? (
+                            <div className='p-8 text-center space-y-2'>
+                                <p className='text-xs font-semibold text-rose-600'>{error}</p>
+                                <button
+                                    type='button'
+                                    onClick={loadLive}
+                                    className='text-[11px] font-semibold text-blue-600 hover:underline cursor-pointer'
+                                >
+                                    Retry
+                                </button>
+                            </div>
+                        ) : loading && notifications.length === 0 ? (
+                            <div className='p-8 text-center text-slate-400 text-xs font-semibold'>
+                                Loading notifications…
+                            </div>
+                        ) : filteredNotifications.length === 0 ? (
                             <div className='p-8 text-center text-slate-400 space-y-2'>
                                 <div className='mx-auto flex size-10 items-center justify-center rounded-full bg-slate-100 text-slate-400'>
                                     <Bell size={18} />
@@ -243,7 +299,6 @@ const UserNotifications = () => {
                                         }`}
                                     >
                                         <div className='flex items-start gap-3'>
-                                            {/* Type Icon */}
                                             <div
                                                 className={`size-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
                                                     !item.isRead
@@ -254,7 +309,6 @@ const UserNotifications = () => {
                                                 <IconComponent size={15} />
                                             </div>
 
-                                            {/* Notification Content */}
                                             <div className='flex-1 min-w-0 space-y-1'>
                                                 <div className='flex items-center justify-between gap-2'>
                                                     <div className='flex items-center gap-1.5 flex-wrap'>
@@ -281,7 +335,7 @@ const UserNotifications = () => {
                                                 </p>
 
                                                 <div className='flex items-center justify-between pt-1 text-[10px] text-slate-400'>
-                                                    <span>By: {item.postedBy || 'Administration'}</span>
+                                                    <span>By: {item.postedBy || 'System'}</span>
 
                                                     {!item.isRead && (
                                                         <button
@@ -301,7 +355,6 @@ const UserNotifications = () => {
                         )}
                     </div>
 
-                    {/* Footer */}
                     <div className='p-2.5 border-t border-slate-100 bg-slate-50/50 text-center text-[11px] text-slate-500'>
                         Institution Broadcasts & Operational Alerts
                     </div>

@@ -140,12 +140,6 @@ const AddAdmission = () => {
                 meta={draftSavedAt ? <span>Draft saved at {formatSavedTime(draftSavedAt)}</span> : <span>Draft not yet saved</span>}
             />
 
-            <IntegrationNotice
-                state='demo'
-                title='Local draft storage'
-                description='Draft fields stay in this browser until the admissions API is connected. Guardian passwords are excluded from drafts and must be re-entered.'
-            />
-
             <Surface contentClassName='p-4 sm:p-5'>
                 <div className='flex items-center justify-between gap-3 text-sm'>
                     <span className='font-semibold text-[var(--erp-ink)]'>{progress.completed} of {progress.total} stages complete</span>

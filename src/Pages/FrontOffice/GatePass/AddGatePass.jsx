@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import { ArrowLeft, Send } from 'lucide-react'
@@ -9,6 +9,8 @@ import {
     formatGatePassDate,
     validateStudentGatePassForm,
 } from './gatePassData'
+import { hydrateStudentGatePassesFromApi } from '../../../Common/GatePassSecurity/gatePassSecurityData'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 
 const AddGatePass = () => {
     const navigate = useNavigate()
@@ -18,6 +20,14 @@ const AddGatePass = () => {
     })
     const [errors, setErrors] = useState({})
     const [submitting, setSubmitting] = useState(false)
+
+    useEffect(() => {
+        if (!isLiveApiEnabled()) return undefined
+        hydrateStudentGatePassesFromApi({ force: true }).catch(() => {
+            /* list page still shows API rows; create will retry persist */
+        })
+        return undefined
+    }, [])
 
     const handleSave = () => {
         const validationErrors = validateStudentGatePassForm(formData)

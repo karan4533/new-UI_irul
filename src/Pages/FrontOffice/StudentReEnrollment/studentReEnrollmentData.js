@@ -1,4 +1,15 @@
+import { createOpsLiveStore } from '../../../services/api/opsLiveStore.js'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore.js'
+
 const STORAGE_KEY = 'front-office-student-re-enrollment'
+
+const reEnrollmentLiveStore = createOpsLiveStore({
+    collection: 'student-re-enrollments',
+    api: 'front-office',
+    idPrefix: 'SRE',
+})
+
+let _memoryReEnrollments = null
 
 export const ROUTE_BASE = '/front-office/student-re-enrollment'
 export const ADD_ROUTE = '/front-office/student-re-enrollment/add'
@@ -87,7 +98,21 @@ const DEFAULT_RECORDS = [
     },
 ]
 
+export const hydrateReEnrollmentsFromApi = async ({ force = true } = {}) => {
+    if (!isLiveApiEnabled()) return getReEnrollments()
+    const res = await reEnrollmentLiveStore.hydrate({ force })
+    if (!res.success) {
+        _memoryReEnrollments = []
+        throw new Error(typeof res.error === 'string' ? res.error : 'Could not load re-enrollments.')
+    }
+    _memoryReEnrollments = reEnrollmentLiveStore.read()
+    return _memoryReEnrollments
+}
+
 export const getReEnrollments = () => {
+    if (isLiveApiEnabled()) {
+        return Array.isArray(_memoryReEnrollments) ? _memoryReEnrollments : reEnrollmentLiveStore.read()
+    }
     try {
         const stored = localStorage.getItem(STORAGE_KEY)
         if (stored) return JSON.parse(stored)
@@ -98,6 +123,11 @@ export const getReEnrollments = () => {
 }
 
 export const saveReEnrollments = (records) => {
+    _memoryReEnrollments = records
+    if (isLiveApiEnabled()) {
+        reEnrollmentLiveStore.write(records)
+        return
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(records))
 }
 

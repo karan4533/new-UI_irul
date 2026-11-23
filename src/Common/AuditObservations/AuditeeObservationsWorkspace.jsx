@@ -33,9 +33,11 @@ import {
     submitAuditeeAtr,
     receiveAuditQuantities
 } from './auditeeObservationsData'
+import { AUDITEE_LIVE_COLLECTIONS } from './auditeeObservationsData'
+import LiveOpsGate from '../ui/LiveOpsGate'
 import { priorityBadgeColor, statusBadgeColor } from '../../Pages/ProcessAuditor/Observations/observationsData'
 
-export default function AuditeeObservationsWorkspace({ roleOverride = null }) {
+function AuditeeObservationsWorkspaceInner({ roleOverride = null }) {
     const { role: authRole, name: authName } = useAuth()
     const activeRole = roleOverride || authRole || 'employee'
     const roleLabel = getProfileLabel(activeRole)
@@ -710,3 +712,10 @@ export default function AuditeeObservationsWorkspace({ roleOverride = null }) {
     )
 }
 
+export default function AuditeeObservationsWorkspace(props) {
+    return (
+        <LiveOpsGate collections={AUDITEE_LIVE_COLLECTIONS} title='Audit Observations'>
+            <AuditeeObservationsWorkspaceInner {...props} />
+        </LiveOpsGate>
+    )
+}

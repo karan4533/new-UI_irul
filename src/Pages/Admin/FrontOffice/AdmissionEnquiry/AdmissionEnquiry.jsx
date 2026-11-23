@@ -124,19 +124,11 @@ const AdmissionEnquiry = () => {
 
     return (
         <section className='space-y-4'>
-            {live ? (
-                <div className='rounded-2xl border border-emerald-200 bg-emerald-50/60 px-4 py-3'>
-                    <p className='text-xs font-semibold uppercase tracking-wide text-emerald-800'>
-                        Live admission enquiries · GET /api/v1/admissions/enquiries
-                    </p>
-                    {listLoading ? (
-                        <div className='mt-2'><FeedbackState kind='loading' title='Loading enquiries' description='Fetching from the admissions API…' /></div>
-                    ) : listError ? (
-                        <div className='mt-2'><FeedbackState kind='error' title='Enquiries API unavailable' description={listError} /></div>
-                    ) : (
-                        <p className='mt-1 text-xs text-slate-600'>{records.length} enquiry record(s) from the server.</p>
-                    )}
-                </div>
+            {live && listLoading ? (
+                <FeedbackState kind='loading' title='Loading enquiries' description='Fetching admission enquiries…' />
+            ) : null}
+            {live && !listLoading && listError ? (
+                <FeedbackState kind='error' title='Unable to load enquiries' description={listError} />
             ) : null}
             {!listLoading && !listError ? (
             <>

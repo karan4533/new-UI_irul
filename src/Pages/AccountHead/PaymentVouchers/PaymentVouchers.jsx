@@ -5,6 +5,7 @@ import { openPrintDocument } from '../../../Common/printDocument'
 import { useFinance } from '../financeDomain/FinanceContext'
 import { formatCurrency } from '../financeDomain/financeHelpers'
 import { purchaseService } from '../../../services/modules/purchaseService'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 
 const escapeHtml = (value) => String(value ?? '—')
     .replaceAll('&', '&amp;')
@@ -45,6 +46,7 @@ const voucherPrintBody = (transaction, payee) => `
 `
 
 export default function PaymentVouchers() {
+    const live = isLiveApiEnabled()
     const { transactions = [], students = [], recordVoucherAction } = useFinance()
     const [selectedId, setSelectedId] = useState(null)
     const [liabilities, setLiabilities] = useState([])
@@ -162,8 +164,10 @@ export default function PaymentVouchers() {
         <section className='space-y-5'>
             <PageHeader
                 title='Payment Vouchers & Accounts Payable'
-                description='Inspect, print or download vouchers generated from finance collections and approved purchase orders.'
-                context={`${allVouchers.length} total voucher${allVouchers.length === 1 ? '' : 's'} (${mappedLiabilities.length} Vendor AP liabilities, ${transactions.length} Student fee vouchers)`}
+                description={live
+                    ? 'Inspect, print or download vouchers from the live finance ledger and approved purchase liabilities.'
+                    : 'Inspect, print or download vouchers generated from finance collections and approved purchase orders.'}
+                context={`${allVouchers.length} total voucher${allVouchers.length === 1 ? '' : 's'} (${mappedLiabilities.length} Vendor AP liabilities, ${transactions.length} Student fee vouchers)${live ? ' · live finance API' : ''}`}
             />
 
             {/* Voucher Segment Filter Pills */}
@@ -194,11 +198,13 @@ export default function PaymentVouchers() {
                 </button>
             </div>
 
-            <IntegrationNotice
-                state='demo'
-                title='Integrated Institutional Voucher Register'
-                description='Displays unified Accounts Payable liability vouchers emitted by approved Stores Purchase Orders alongside student fee receipt transactions.'
-            />
+            {!live ? (
+                <IntegrationNotice
+                    state='demo'
+                    title='Integrated Institutional Voucher Register'
+                    description='Displays unified Accounts Payable liability vouchers emitted by approved Stores Purchase Orders alongside student fee receipt transactions.'
+                />
+            ) : null}
 
             <section className='overflow-hidden rounded-[var(--erp-radius-surface)] border border-[var(--erp-line)] bg-white'>
                 <DataTable

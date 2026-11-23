@@ -13,13 +13,34 @@ import ChatPanel from './Components/ChatPanel'
 import NewMessageModal from './Components/NewMessageModal'
 import ConfirmAction from '../ui/ConfirmAction'
 import FeedbackState from '../ui/FeedbackState'
-import IntegrationNotice from '../ui/IntegrationNotice'
+import { useAuth } from '../../context/AuthContext'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
+import {
+    getConversation as getLiveConversation,
+    listCommunicationDirectory,
+    listConversations as listLiveConversations,
+    sendConversationMessage,
+    setConversationFlags,
+    startConversation as startLiveConversation,
+} from '../../services/api/communicationApiService'
 
 const CommunicationPage = ({ roleKey }) => {
     const roleConfig = getCommunicationRoleConfig(roleKey)
     const navigate = useNavigate()
     const { conversationId } = useParams()
-    const currentUser = roleConfig?.currentUser || { id: 'unconfigured', name: 'Unconfigured user' }
+    const live = isLiveApiEnabled()
+    const { user: authUser } = useAuth()
+    const currentUser = useMemo(() => {
+        const base = roleConfig?.currentUser || { id: 'unconfigured', name: 'Unconfigured user' }
+        if (!live) return base
+        return {
+            ...base,
+            id: authUser?.id ? String(authUser.id) : base.id,
+            name: authUser?.name || base.name,
+            department: authUser?.department || base.department,
+        }
+    }, [live, roleConfig, authUser])
+    const [directory, setDirectory] = useState([])
 
     const [conversations, setConversations] = useState([])
     const [loading, setLoading] = useState(true)
@@ -34,15 +55,27 @@ const CommunicationPage = ({ roleKey }) => {
     const persist = useCallback(
         (next) => {
             setConversations(next)
-            saveConversationsForRole(roleKey, next)
+            if (!live) saveConversationsForRole(roleKey, next)
         },
-        [roleKey]
+        [roleKey, live]
     )
 
     const loadConversations = useCallback(
         (withSkeleton = true) => {
             if (withSkeleton) setLoading(true)
             setError('')
+            if (live) {
+                listLiveConversations().then((res) => {
+                    if (!res.success) {
+                        setConversations([])
+                        setError(typeof res.error === 'string' ? res.error : 'Failed to load conversations.')
+                    } else {
+                        setConversations(res.data)
+                    }
+                    setLoading(false)
+                })
+                return
+            }
             try {
                 const data = getConversationsForRole(roleKey, currentUser.id)
                 setConversations(data)
@@ -53,7 +86,7 @@ const CommunicationPage = ({ roleKey }) => {
                 setLoading(false)
             }
         },
-        [roleKey, currentUser.id]
+        [roleKey, currentUser.id, live]
     )
 
     useEffect(() => {
@@ -61,12 +94,49 @@ const CommunicationPage = ({ roleKey }) => {
         return () => clearTimeout(timer)
     }, [loadConversations])
 
+    // Live: load the contact directory once, and the full thread whenever a conversation is opened.
+    useEffect(() => {
+        if (!live) return undefined
+        let cancelled = false
+        listCommunicationDirectory().then((res) => {
+            if (!cancelled && res.success) setDirectory(res.data)
+        })
+        return () => {
+            cancelled = true
+        }
+    }, [live])
+
+    useEffect(() => {
+        if (!live || !selectedId) return undefined
+        let cancelled = false
+        getLiveConversation(selectedId).then((res) => {
+            if (cancelled) return
+            if (!res.success) {
+                setError(typeof res.error === 'string' ? res.error : 'Failed to load this conversation.')
+                return
+            }
+            setError('')
+            setConversations((prev) =>
+                prev.some((conv) => conv.id === res.data.id)
+                    ? prev.map((conv) => (conv.id === res.data.id ? { ...res.data } : conv))
+                    : [res.data, ...prev]
+            )
+        })
+        return () => {
+            cancelled = true
+        }
+    }, [live, selectedId])
+
     const selectedConversation = useMemo(
         () => conversations.find((conv) => conv.id === selectedId && !conv.deleted) || null,
         [conversations, selectedId]
     )
 
     const openConversation = (id) => {
+        if (live) {
+            navigate(`${roleConfig.routeBase}/inbox/${id}`)
+            return
+        }
         persist(
             conversations.map((conv) =>
                 conv.id === id
@@ -87,15 +157,43 @@ const CommunicationPage = ({ roleKey }) => {
 
     const deleteConversation = (id) => setPendingDeleteId(id)
 
-    const confirmDeleteConversation = () => {
+    const confirmDeleteConversation = async () => {
         const id = pendingDeleteId
+        if (live) {
+            const res = await setConversationFlags(id, { deleted: true })
+            if (!res.success) {
+                toast.error(typeof res.error === 'string' ? res.error : 'Could not remove the conversation.')
+                setPendingDeleteId('')
+                return
+            }
+            setConversations((prev) => prev.map((conv) => (conv.id === id ? { ...conv, deleted: true } : conv)))
+            if (selectedId === id) goToInbox()
+            setPendingDeleteId('')
+            toast.success('Conversation removed from your inbox.')
+            return
+        }
         persist(conversations.map((conv) => (conv.id === id ? { ...conv, deleted: true } : conv)))
         if (selectedId === id) goToInbox()
         setPendingDeleteId('')
         toast.success('Conversation removed from this browser.')
     }
 
-    const createOrOpenConversation = (contact) => {
+    const createOrOpenConversation = async (contact) => {
+        if (live) {
+            setShowNewMessage(false)
+            const res = await startLiveConversation(contact.id)
+            if (!res.success) {
+                toast.error(typeof res.error === 'string' ? res.error : 'Could not start the conversation.')
+                return
+            }
+            setConversations((prev) =>
+                prev.some((conv) => conv.id === res.data.id)
+                    ? prev.map((conv) => (conv.id === res.data.id ? { ...res.data } : conv))
+                    : [res.data, ...prev]
+            )
+            navigate(`${roleConfig.routeBase}/inbox/${res.data.id}`)
+            return
+        }
         const existing = conversations.find(
             (conv) => !conv.deleted && conv.participant.id === contact.id
         )
@@ -133,6 +231,34 @@ const CommunicationPage = ({ roleKey }) => {
 
     const sendMessage = async ({ text, files = [], replyTo }) => {
         if (!selectedConversation) return
+
+        if (live) {
+            const outgoing = []
+            if (text?.trim()) outgoing.push({ text: text.trim(), file: null })
+            files.forEach((file) => outgoing.push({ text: '', file }))
+            for (const item of outgoing) {
+                const res = await sendConversationMessage(selectedConversation.id, item)
+                if (!res.success) {
+                    toast.error(typeof res.error === 'string' ? res.error : 'Message could not be sent.')
+                    return
+                }
+                setConversations((prev) =>
+                    prev.map((conv) =>
+                        conv.id === selectedConversation.id
+                            ? {
+                                  ...conv,
+                                  messages: [...conv.messages, res.data],
+                                  lastMessage: res.data.content || res.data.attachment?.name || conv.lastMessage,
+                                  lastMessageAt: res.data.createdAt,
+                                  unreadCount: 0,
+                                  archived: false,
+                              }
+                            : conv
+                    )
+                )
+            }
+            return
+        }
 
         const now = new Date().toISOString()
         const baseMessages = []
@@ -243,11 +369,9 @@ const CommunicationPage = ({ roleKey }) => {
 
     return (
         <div className='space-y-4'>
-            <IntegrationNotice
-                state='demo'
-                title='Browser-only conversations'
-                description='Messages and delivery/read transitions are simulated locally. No message, attachment or notification is sent to another user.'
-            />
+            {live && error && !conversations.length && !loading && (
+                <FeedbackState kind='error' title='Communication API unavailable' description={error} compact />
+            )}
             <div className="overflow-hidden rounded-[var(--erp-radius-surface)] border border-[var(--erp-line)] bg-white">
             <div className="flex h-[calc(100vh-13rem)] min-h-140">
                 <div className={`${showChatOnMobile ? 'hidden' : 'flex'} w-full lg:flex lg:w-auto`}>
@@ -287,6 +411,7 @@ const CommunicationPage = ({ roleKey }) => {
                 open={showNewMessage}
                 onClose={() => setShowNewMessage(false)}
                 currentUserId={currentUser.id}
+                contacts={live ? directory : undefined}
                 existingParticipantIds={conversations
                     .filter((c) => !c.deleted)
                     .map((c) => c.participant.id)}

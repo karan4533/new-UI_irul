@@ -74,3 +74,21 @@ export async function decideLeaveRequest(requestId, { decision, comment = null }
   if (!res.success) return res
   return { ...res, data: mapLeaveRequestToUi(res.data || {}) }
 }
+
+export async function createLeaveRequest(payload = {}, options = {}) {
+  const blocked = requireLive()
+  if (blocked) return blocked
+  const body = {
+    leaveType: payload.leaveType || payload.type || '',
+    fromDate: payload.fromDate || '',
+    toDate: payload.toDate || '',
+    reason: payload.reason || '',
+    totalDays: payload.totalDays ?? null,
+    hours: payload.hours ?? null,
+    requestedTo: payload.requestedTo || null,
+    department: payload.department || null,
+  }
+  const res = await apiClient.post('/api/v1/leave-requests', body, { skipMock: true, ...options })
+  if (!res.success) return res
+  return { ...res, data: mapLeaveRequestToUi(res.data || {}) }
+}

@@ -131,12 +131,6 @@ const ViewAdmissionEnquiry = () => {
                 Back to list
             </button>
 
-            {live ? (
-                <p className='text-xs font-medium text-[#027A48]'>
-                    Live enquiry · GET /api/v1/admissions/enquiries/{'{id}'}
-                </p>
-            ) : null}
-
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='flex flex-wrap items-start justify-between gap-3 mb-2'>
                     <div>

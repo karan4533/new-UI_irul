@@ -190,14 +190,6 @@ const ViewAdminUser = () => {
                 Back to list
             </button>
 
-            {live ? (
-                <IntegrationNotice
-                    state='connected'
-                    title='Live administrator record'
-                    description='Status and password reset use /api/v1/admin/users. Editing the module permission matrix is BLOCKED — no mounted write API.'
-                />
-            ) : null}
-
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='flex flex-wrap items-center gap-3'>
                     <div className='p-2 rounded-xl bg-[#515DEF]/10 text-[#515DEF]'>
@@ -273,8 +265,8 @@ const ViewAdminUser = () => {
                             state={live ? 'failed' : 'demo'}
                             title={live ? 'Permission matrix write blocked' : 'Local permission preview'}
                             description={live
-                                ? 'Only Active/Inactive status is sent via PATCH /api/v1/admin/users/{id}. Role permission edits require an unmounted RBAC write API.'
-                                : 'This prototype updates the current browser session only. The production RBAC API must enforce the same permissions on every protected endpoint.'}
+                                ? 'Only account status can be updated here. Module permission matrix editing is not available yet.'
+                                : 'This preview updates the current browser session only.'}
                             className='mb-5'
                         />
                         <div className='mb-6 max-w-xs'>
@@ -366,7 +358,7 @@ const ViewAdminUser = () => {
                 onConfirm={handleSave}
                 title={live ? 'Update administrator status?' : 'Apply access changes?'}
                 description={live
-                    ? 'This sends PATCH /api/v1/admin/users/{id} with the selected Active/Inactive status.'
+                    ? 'This updates the administrator Active/Inactive status.'
                     : 'These changes alter what this administrator can see and operate.'}
                 confirmLabel={live ? 'Save status' : 'Apply changes'}
                 tone={form.status === 'Inactive' || permissionChanges.revoked.length ? 'danger' : 'primary'}

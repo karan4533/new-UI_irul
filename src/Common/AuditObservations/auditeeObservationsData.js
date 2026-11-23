@@ -1,5 +1,41 @@
-import { getObservations as getProcessObservations, saveObservations as saveProcessObservations, buildTimeline } from '../../Pages/ProcessAuditor/Observations/observationsData'
-import { getObservations as getQualityObservations, saveObservations as saveQualityObservations } from '../../Pages/QualityAuditor/Observations/observationsData'
+import {
+    getObservations as getMockProcessObservations,
+    saveObservations as saveMockProcessObservations,
+    buildTimeline,
+} from '../../Pages/ProcessAuditor/Observations/observationsData'
+import {
+    getObservations as getMockQualityObservations,
+    saveObservations as saveMockQualityObservations,
+} from '../../Pages/QualityAuditor/Observations/observationsData'
+import { createOpsLiveStore } from '../../services/api/opsLiveStore'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
+
+// Live mode: observations come from FastAPI /api/v1/campus-audit/{process,quality}-observations.
+// No browser mock data is read or seeded when VITE_USE_MOCK=false.
+const liveProcessObservations = createOpsLiveStore({
+    collection: 'process-observations',
+    api: 'campus-audit',
+    idPrefix: 'POB',
+    idKeys: ['observationId'],
+})
+const liveQualityObservations = createOpsLiveStore({
+    collection: 'quality-observations',
+    api: 'campus-audit',
+    idPrefix: 'QOB',
+    idKeys: ['observationId'],
+})
+
+/** Collections the auditee observations workspace needs hydrated in live mode. */
+export const AUDITEE_LIVE_COLLECTIONS = ['campus-audit:process-observations', 'campus-audit:quality-observations']
+
+const getProcessObservations = () =>
+    (isLiveApiEnabled() ? liveProcessObservations.read() : getMockProcessObservations())
+const getQualityObservations = () =>
+    (isLiveApiEnabled() ? liveQualityObservations.read() : getMockQualityObservations())
+const saveProcessObservations = (records) =>
+    (isLiveApiEnabled() ? liveProcessObservations.write(records) : saveMockProcessObservations(records))
+const saveQualityObservations = (records) =>
+    (isLiveApiEnabled() ? liveQualityObservations.write(records) : saveMockQualityObservations(records))
 
 export const AUDIT_STREAMS = ['All', 'Process Audit', 'Quality Audit']
 

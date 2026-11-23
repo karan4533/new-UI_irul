@@ -276,13 +276,7 @@ export default function AnnouncementListView({ roleKey }) {
                 ) : null}
             />
 
-            {listSource === 'backend' ? (
-                <IntegrationNotice
-                    state='connected'
-                    title='Backend announcements'
-                    description='Live data from GET/POST /api/v1/announcements. Audience is assigned by the server.'
-                />
-            ) : listSource === 'error' ? (
+            {listSource === 'backend' ? null : listSource === 'error' ? (
                 <IntegrationNotice state='failed' title='Announcements API unavailable' description={listError} />
             ) : (
                 <IntegrationNotice state='demo' title='Browser-stored announcements' description='Local browser data (mock mode).' />

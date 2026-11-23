@@ -70,19 +70,11 @@ const TcRequestApprovalList = () => {
                 </p>
             </div>
 
-            {live ? (
-                <div className={`rounded-2xl border px-4 py-3 ${listSource === 'error' ? 'border-red-200 bg-red-50/60' : 'border-emerald-200 bg-emerald-50/60'}`}>
-                    <p className={`text-xs font-semibold uppercase tracking-wide ${listSource === 'error' ? 'text-red-800' : 'text-emerald-800'}`}>
-                        {listSource === 'error' ? 'TC API unavailable' : 'Live TC requests · GET /api/v1/tc-requests'}
-                    </p>
-                    {listLoading ? (
-                        <div className='mt-2'><FeedbackState kind='loading' title='Loading TC requests' description='Fetching from the TC API…' /></div>
-                    ) : listError ? (
-                        <p className='mt-1 text-xs text-red-700'>{listError}</p>
-                    ) : (
-                        <p className='mt-1 text-xs text-slate-600'>{requests.length} request(s) · {pendingCount} awaiting administrator approval.</p>
-                    )}
-                </div>
+            {live && listLoading ? (
+                <FeedbackState kind='loading' title='Loading TC requests' description='Fetching transfer certificate requests…' />
+            ) : null}
+            {live && !listLoading && listError ? (
+                <FeedbackState kind='error' title='Unable to load TC requests' description={listError} />
             ) : null}
 
             {pendingCount > 0 ? (

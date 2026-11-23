@@ -41,6 +41,7 @@ export function mapTcRequestToUi(row = {}) {
     tcIssuedDate: row.tcIssuedDate || '',
     tcDocumentName: row.tcDocumentName || '',
     nocClearances: row.nocClearances || [],
+    nocs: Array.isArray(row.nocs) ? row.nocs : [],
     dataSource: 'backend',
   }
 }
@@ -96,6 +97,22 @@ export async function rejectTcRequestAtPrm(ref, remarks = '', options = {}) {
   const res = await apiClient.post(
     `/api/v1/tc-requests/${encodeURIComponent(ref)}/reject-prm`,
     { remarks },
+    { skipMock: true, ...options },
+  )
+  if (!res.success) return res
+  return { ...res, data: mapTcRequestToUi(res.data || {}) }
+}
+
+/** POST /api/v1/tc-requests — file a TC request (tc.write). `studentRef` is an admission number or student id. */
+export async function createTcRequest(
+  { studentRef, reason, transferTo, lastDateOfAttendance = null, requestedBy = null } = {},
+  options = {},
+) {
+  const blocked = requireLive()
+  if (blocked) return blocked
+  const res = await apiClient.post(
+    '/api/v1/tc-requests',
+    { studentRef, reason, transferTo, lastDateOfAttendance: lastDateOfAttendance || null, requestedBy },
     { skipMock: true, ...options },
   )
   if (!res.success) return res

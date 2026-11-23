@@ -78,6 +78,7 @@ import {
     FileCheck,
 } from "lucide-react";
 
+/** Super Admin menu — API-backed modules only (demo/enterprise stubs removed). */
 export const superAdminSidebarLinks = [
     {
         id: 1,
@@ -87,9 +88,13 @@ export const superAdminSidebarLinks = [
     },
     {
         id: 2,
-        title: "Attendance & Leave Management",
-        to: "/super-admin/attendance-and-leave",
+        title: "Attendance & Leave",
+        to: "#0",
         icon: CalendarCheck,
+        subLinks: [
+            { icon: GraduationCap, title: "Student Attendance", to: "/super-admin/attendance/students/list" },
+            { icon: ClipboardCheck, title: "Received Leave", to: "/super-admin/leave-request/received" },
+        ],
     },
     {
         id: 3,
@@ -98,7 +103,7 @@ export const superAdminSidebarLinks = [
         icon: UserRound,
         subLinks: [
             { icon: GraduationCap, title: "Student Database", to: "/super-admin/user-database/students" },
-            { icon: UserRoundCog, title: "Teacher Database", to: "/super-admin/user-database/employees" },
+            { icon: UserRoundCog, title: "Employee Database", to: "/super-admin/user-database/employees" },
         ],
     },
     {
@@ -121,143 +126,32 @@ export const superAdminSidebarLinks = [
     },
     {
         id: 7,
-        title: "Finance",
-        to: "#0",
+        title: "Finance Overview",
+        to: "/super-admin/finance/overview",
         icon: Landmark,
-        subLinks: [
-            { icon: LayoutDashboard, title: "Finance Overview", to: "/super-admin/finance/overview" },
-            { icon: BadgeDollarSign, title: "Fees Management", to: "/super-admin/finance/fees" },
-            { icon: BadgeDollarSign, title: "Collections", to: "/super-admin/finance/collections" },
-            { icon: Wallet, title: "Wallet Management", to: "/super-admin/finance/wallets" },
-            { icon: Bus, title: "Transport Finance", to: "/super-admin/finance/transport" },
-            { icon: BookCopy, title: "Accounting", to: "/super-admin/finance/accounting" },
-            { icon: BarChart3, title: "Reports & Analytics", to: "/super-admin/finance/reports" },
-        ],
     },
     {
         id: 8,
-        title: "Audit Reports",
-        to: "#0",
-        icon: ShieldCheck,
-        subLinks: [
-            { icon: LayoutDashboard, title: "Overview", to: "/super-admin/audit-reports/overview" },
-            { icon: BarChart3, title: "Compliance Score", to: "/super-admin/audit-reports/compliance" },
-            { icon: Trophy, title: "Department Ranking", to: "/super-admin/audit-reports/department-ranking" },
-            { icon: AlertTriangle, title: "Pending Findings", to: "/super-admin/audit-reports/pending-findings" },
-            { icon: ShieldAlert, title: "Critical Findings", to: "/super-admin/audit-reports/critical-findings" },
-            { icon: CircleHelp, title: "Risk Dashboard", to: "/super-admin/audit-reports/risk-dashboard" },
-        ],
-    },
-    {
-        id: 9,
-        title: "Star Ratings",
-        to: "#0",
-        icon: Star,
-        subLinks: [
-            { icon: Star, title: "Star of the Month", to: "/super-admin/star-ratings/star-of-month" },
-            { icon: Trophy, title: "Star of the Year", to: "/super-admin/star-ratings/star-of-year" },
-        ],
-    },
-    {
-        id: 10,
-        title: "Task Management",
-        to: "/super-admin/task-management",
-        icon: ClipboardList,
-    },
-    
-    {
-        id: 12,
         title: "Approvals",
         to: "/super-admin/approvals",
         icon: ClipboardCheck,
     },
     {
-        id: 13,
+        id: 9,
         title: "Announcement",
         to: "/super-admin/announcement",
         icon: Rss,
     },
     {
-        id: 14,
-        title: "Communication",
-        to: "/super-admin/communication/inbox",
-        icon: MessageCircle,
-    },
-    {
-        id: 15,
-        title: "Calendar",
-        to: "/super-admin/academic-calendar",
-        icon: CalendarDays,
-    },
-    {
-        id: 17,
-        title: "Report Issue / Escalation",
-        to: "/super-admin/escalation-management",
-        icon: ShieldAlert,
-    },
-    {
-        id: 18,
+        id: 10,
         title: "Activity Logs",
         to: "#0",
         icon: History,
         subLinks: [
             { icon: History, title: "Login History", to: "/super-admin/activity-logs/login-history" },
-            { icon: FileText, title: "Data Changes", to: "/super-admin/activity-logs/data-changes" },
-            { icon: FileX, title: "Deleted Records", to: "/super-admin/activity-logs/deleted-records" },
-            { icon: ClipboardCheck, title: "Approval Actions", to: "/super-admin/activity-logs/approval-actions" },
-            { icon: ShieldCheck, title: "Audit Logs", to: "/super-admin/activity-logs/audit-logs" },
-            { icon: AlertTriangle, title: "Failed Logins", to: "/super-admin/activity-logs/failed-logins" },
-            { icon: History, title: "Demo Activity", to: "/super-admin/activity-logs/demo-activity" },
+            { icon: History, title: "Audit Logs", to: "/super-admin/activity-logs/audit-logs" },
+            { icon: History, title: "Failed Logins", to: "/super-admin/activity-logs/failed-logins" },
         ],
-    },
-    {
-        id: 19,
-        title: "Re-entry Approvals",
-        to: "/super-admin/reentry",
-        icon: ClipboardCheck,
-    },
-
-    {
-        id: 21,
-        title: "Stores & Procurement",
-        to: "/super-admin/stores-procurement",
-        icon: ShoppingCart,
-    },
-    {
-        id: 22,
-        title: "Physical File Room",
-        to: "/super-admin/file-room",
-        icon: Archive,
-    },
-    {
-        id: 23,
-        title: "Department Helpdesk",
-        to: "/super-admin/department-ticketing",
-        icon: Ticket,
-    },
-    {
-        id: 24,
-        title: "Activity Monitoring",
-        to: "/super-admin/activity-monitoring",
-        icon: BarChart3,
-    },
-    {
-        id: 25,
-        title: "Lost & Found",
-        to: "/super-admin/lost-and-found",
-        icon: Sparkles,
-    },
-    {
-        id: 26,
-        title: "Audit Observations",
-        to: "/super-admin/audit-observations",
-        icon: ShieldCheck,
-    },
-    {
-        id: 27,
-        title: "Staff Relieving & NOC",
-        to: "/super-admin/relieving-request",
-        icon: FileText,
     },
 ];
 

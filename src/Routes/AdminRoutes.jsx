@@ -1,7 +1,12 @@
 import React from 'react'
 import { Navigate, Route, Routes as ReactRoutes } from 'react-router-dom'
-import AttendanceAndLeaveWorkspace from '../Common/AttendanceAndLeave/AttendanceAndLeaveWorkspace'
+import AttendanceAndLeaveWorkspace from '../Pages/Admin/Attendance/AdminAttendanceAndLeave'
 import ReportCardGenerator from '../Common/Academic/ReportCardGenerator'
+import { isLiveApiEnabled } from '../services/api/tokenStore'
+import LiveCollectionTabs from '../Pages/Admin/Live/LiveCollectionTabs'
+import LiveDocuments from '../Pages/Admin/Documents/LiveDocuments'
+import LiveReportsAnalytics from '../Pages/Admin/Reports/LiveReportsAnalytics'
+import LiveReportCards from '../Pages/Admin/Reports/LiveReportCards'
 import { EnterpriseOperationsRoutes } from './EnterpriseOperationsRoutes'
 import AdmissionList from '../Pages/Admin/FrontOffice/AdminssionList/AdminssionList'
 import AdmissionEnquiry from '../Pages/Admin/FrontOffice/AdmissionEnquiry/AdmissionEnquiry'
@@ -84,10 +89,48 @@ import EditTeacherAllocation from '../Pages/Principal/TeacherAllocation/EditTeac
 import StudentTransfer from '../Pages/FrontOffice/StudentTransfer/StudentTransfer'
 import AddStudentTransfer from '../Pages/FrontOffice/StudentTransfer/AddStudentTransfer'
 
+const GATE_PASS_TABS = [
+    { id: 'student', label: 'Student passes', collection: 'front-office:student-gate-passes' },
+    { id: 'hostel', label: 'Hostel passes', collection: 'front-office:hostel-gate-passes' },
+    { id: 'material', label: 'Material passes', collection: 'front-office:material-gate-passes' },
+    { id: 'visitors', label: 'Visitors', collection: 'ops:gate-visitors' },
+    { id: 'registers', label: 'Registers', collection: 'ops:gate-registers' },
+    { id: 'handover', label: 'Handover', collection: 'ops:gate-handover' },
+    { id: 'vendors', label: 'Vendors', collection: 'ops:gate-vendors' },
+    { id: 'incidents', label: 'Incidents', collection: 'ops:gate-incidents' },
+    { id: 'duties', label: 'Duty assignments', collection: 'ops:gate-duty-assignments' },
+]
+
+const HOSTEL_TABS = [
+    { id: 'assignments', label: 'Room assignments', collection: 'ops:hostel-assignments' },
+    { id: 'payments', label: 'Hostel payments', collection: 'ops:hostel-payments' },
+]
+
 const AdminRoutes = () => {
+    const live = isLiveApiEnabled()
     return (
         <ReactRoutes>
             <Route path="/admin/dashboard" element={<Dashboard />} />
+
+            {/* Live mode (VITE_USE_MOCK=false): FastAPI-backed modules only; declared before the enterprise routes. */}
+            {live ? (
+                <>
+                    <Route path='/admin/gate-pass' element={<LiveCollectionTabs title='Gate pass & security' description='Gate passes, visitors, registers and incidents recorded on campus.' tabs={GATE_PASS_TABS} />} />
+                    <Route path='/admin/gate-pass/:tab' element={<LiveCollectionTabs title='Gate pass & security' description='Gate passes, visitors, registers and incidents recorded on campus.' tabs={GATE_PASS_TABS} />} />
+                    <Route path='/admin/hostel' element={<LiveCollectionTabs title='Hostel management' description='Room assignments and hostel payments.' tabs={HOSTEL_TABS} />} />
+                    <Route path='/admin/hostel-management' element={<LiveCollectionTabs title='Hostel management' description='Room assignments and hostel payments.' tabs={HOSTEL_TABS} />} />
+                    <Route path='/admin/hostel-management/:tab' element={<LiveCollectionTabs title='Hostel management' description='Room assignments and hostel payments.' tabs={HOSTEL_TABS} />} />
+                    <Route path='/admin/reports-analytics' element={<LiveReportsAnalytics />} />
+                    <Route path='/admin/student-evaluation/report-cards' element={<LiveReportCards />} />
+                    <Route path='/admin/documents/student-documents' element={<LiveDocuments kind='students' />} />
+                    <Route path='/admin/documents/employee-documents' element={<LiveDocuments kind='employees' />} />
+                    <Route path='/admin/documents/add-student-documents' element={<Navigate to='/admin/documents/student-documents' replace />} />
+                    <Route path='/admin/documents/view-student-documents/:id' element={<Navigate to='/admin/documents/student-documents' replace />} />
+                    <Route path='/admin/documents/edit-student-documents/:id' element={<Navigate to='/admin/documents/student-documents' replace />} />
+                    <Route path='/admin/documents/add-employee-documents' element={<Navigate to='/admin/documents/employee-documents' replace />} />
+                    <Route path='/admin/documents/edit-employee-documents/:id' element={<Navigate to='/admin/documents/employee-documents' replace />} />
+                </>
+            ) : null}
 
             {/* Front Office */}
             <Route path="/admin/front-office/admission-list" element={<AdmissionList />} />
@@ -103,7 +146,7 @@ const AdminRoutes = () => {
             <Route path="/admin/front-office/add-driver" element={<AddDriverList />} />
 
             {/* Attendance */}
-            <Route path="/admin/attendance/students-list" element={<StudentsList />} />
+            <Route path="/admin/attendance/students-list" element={isLiveApiEnabled() ? <AttendanceAndLeaveWorkspace defaultTab="overview" /> : <StudentsList />} />
             <Route path="/admin/attendance-and-leave" element={<AttendanceAndLeaveWorkspace defaultTab="overview" />} />
             <Route path="/admin/attendance/employees-list" element={<AttendanceAndLeaveWorkspace defaultTab="records" />} />
             <Route path="/admin/attendance/leave-request-list" element={<Navigate to='/admin/leave-request/my-requests' replace />} />
@@ -124,7 +167,7 @@ const AdminRoutes = () => {
             <Route path="/admin/class/add-timetable" element={<AddTimeTable />} />
             <Route path="/admin/class/subjects" element={<Subjects />} />
             <Route path="/admin/class/add-subjects" element={<AddSubjects />} />
-            <Route path="/admin/student-evaluation/report-cards" element={<ReportCardGenerator />} />
+            {!live ? <Route path="/admin/student-evaluation/report-cards" element={<ReportCardGenerator />} /> : null}
 
             {/* Library Details */}
             <Route path="/admin/library-details/book-list" element={<BookList />} />

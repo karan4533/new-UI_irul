@@ -37,3 +37,13 @@ eslint_src_report.json
 probe_snippets.py
 scratch_probe.py
 extracted_*.txt
+
+# Backend (FastAPI copied from QMIS)
+backend/.venv/
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.pytest_cache/
+backend/*.db
+backend/uploads/*
+!backend/uploads/.gitkeep

@@ -4,7 +4,7 @@ const StudentTransfer = () => (
     <FrontOfficeRecordsList
         collection='student-transfers'
         title='Student Transfer List'
-        description='Campus student transfer records from the Front Office API. Add form remains local until mapped field-by-field.'
+        description='Campus student transfer records.'
         addPath='/front-office/student-transfer/add'
         searchKeys={['id', 'studentName', 'admissionNumber', 'transferTo', 'status']}
         columns={[

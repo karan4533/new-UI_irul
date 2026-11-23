@@ -1,10 +1,12 @@
-import React, { useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { Calendar, ChevronLeft, ChevronRight, Download, EllipsisIcon } from 'lucide-react'
 import Dropdown from '../../../Common/CommonComponents/Dropdown'
 import ExportModal from '../../../Common/CommonComponents/ExportModal'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { listFrontOfficeCollection } from '../../../services/api/frontOfficeApiService'
 import {
     PASS_CATEGORIES,
     ROUTE_BASE,
@@ -15,14 +17,63 @@ import {
     statusBadgeColor,
 } from './gatePassData'
 
+const COLLECTIONS = [
+    { key: 'student-gate-passes', passCategory: 'Student' },
+    { key: 'hostel-gate-passes', passCategory: 'Hostel' },
+    { key: 'material-gate-passes', passCategory: 'Material' },
+]
+
+function mapFoRow(row, passCategory) {
+    const id = row.id || row.passId || row.gatePassId || row.mgpNo || ''
+    return {
+        id: `${passCategory.toLowerCase()}-${id}`,
+        passCategory,
+        passId: row.passId || row.gatePassId || row.mgpNo || id,
+        subjectName: row.studentName || row.driverName || row.visitorName || row.name || '—',
+        subjectDetail: row.classSection || row.vehicleNo || row.hostel || row.destination || '—',
+        date: row.date || row.outDate || row.createdAt || '',
+        status: row.status || 'Pending',
+        createdBy: row.createdBy || 'Front Office',
+        createdAt: row.createdAt || row.date || row.outDate || '',
+        details: { ...row, passCategory, passId: row.passId || row.gatePassId || row.mgpNo || id },
+    }
+}
+
 const GatePassList = () => {
-    const [records] = useState(() => getAllGatePasses())
+    const live = isLiveApiEnabled()
+    const [records, setRecords] = useState(() => (live ? [] : getAllGatePasses()))
     const [fromDate, setFromDate] = useState(new Date())
     const [toDate, setToDate] = useState(new Date())
     const [search, setSearch] = useState('')
     const [status, setStatus] = useState('')
     const [passCategory, setPassCategory] = useState('')
     const [exportModal, setExportModal] = useState(false)
+
+    const loadLive = useCallback(async () => {
+        const results = await Promise.all(
+            COLLECTIONS.map(async ({ key, passCategory: cat }) => {
+                const res = await listFrontOfficeCollection(key)
+                return { cat, res }
+            }),
+        )
+        if (results.some(({ res }) => !res.success)) {
+            setRecords([])
+            return
+        }
+        setRecords(
+            results.flatMap(({ cat, res }) =>
+                (Array.isArray(res.data) ? res.data : []).map((row) => mapFoRow(row, cat)),
+            ),
+        )
+    }, [])
+
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            setRecords(getAllGatePasses())
+            return
+        }
+        loadLive()
+    }, [loadLive])
 
     const statusOptions = useMemo(() => getGatePassStatusOptions(records), [records])
 

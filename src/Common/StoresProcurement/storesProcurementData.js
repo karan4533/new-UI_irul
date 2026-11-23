@@ -12,6 +12,103 @@
 
 import { recordAuditLog, dispatchNotification } from '../AuditAndNotifications/centralAuditEngine.js'
 import { addAnnouncement } from '../Announcement/announcementData.js'
+import { createOpsLiveStore } from '../../services/api/opsLiveStore.js'
+import {
+    calculateTotalItems as calculateGrpTotalItems,
+    deriveOverallStatus as deriveGrpStatus,
+    normalizeSignatories as normalizeGrpSignatories,
+} from '../../Pages/FrontOffice/GoodsReceivedPass/goodsReceivedPassData.js'
+import {
+    calculateTotalItems as calculateMgpTotalItems,
+    deriveOverallStatus as deriveMgpStatus,
+    normalizeApprovals as normalizeMgpApprovals,
+} from '../../Pages/FrontOffice/MaterialGatePass/materialGatePassData.js'
+import { isLiveApiEnabled } from '../../services/api/tokenStore.js'
+
+// Live-mode stores (FastAPI /api/v1/ops/*). No mock data is read or seeded when VITE_USE_MOCK=false.
+const liveInventory = createOpsLiveStore({ collection: 'shared-inventory', idPrefix: 'PRD', idKeys: ['itemCode'] })
+const liveRequisitions = createOpsLiveStore({ collection: 'shared-inventory-requirements', idPrefix: 'MR' })
+const livePurchaseOrders = createOpsLiveStore({ collection: 'shared-procurement', kind: 'purchase-order', idPrefix: 'PO', idKeys: ['poNumber'] })
+const liveVendors = createOpsLiveStore({ collection: 'shared-procurement', kind: 'vendor', idPrefix: 'VEN' })
+const liveGrns = createOpsLiveStore({ collection: 'shared-inventory-movements', kind: 'goods-receipt', idPrefix: 'GRN' })
+const liveStockIssues = createOpsLiveStore({ collection: 'shared-inventory-movements', kind: 'stock-issue', idPrefix: 'ISS' })
+const liveAuditQuantities = createOpsLiveStore({ collection: 'shared-inventory-movements', kind: 'audit-quantity', idPrefix: 'AUD-QTY' })
+
+const liveGoodsReceivedPasses = createOpsLiveStore({ collection: 'goods-received-passes', api: 'front-office', idPrefix: 'GRP' })
+const liveMaterialGatePasses = createOpsLiveStore({ collection: 'material-gate-passes', api: 'front-office', idPrefix: 'MGP' })
+
+/** Collections the Stores & Procurement workspace needs hydrated in live mode. */
+export const STORES_LIVE_COLLECTIONS = [
+    'shared-inventory',
+    'shared-inventory-requirements',
+    'shared-procurement',
+    'shared-inventory-movements',
+    'front-office:goods-received-passes',
+    'front-office:material-gate-passes',
+]
+
+const hydrateLiveGrp = (record) => ({
+    ...record,
+    signatories: normalizeGrpSignatories(record.signatories),
+    totalItems: calculateGrpTotalItems(record.materials),
+    status: record.status ?? deriveGrpStatus(record.signatories),
+})
+
+const hydrateLiveMgp = (record) => ({
+    ...record,
+    passType: record.passType ?? 'Non-Returnable',
+    approvals: normalizeMgpApprovals(record.approvals),
+    totalItems: calculateMgpTotalItems(record.materials),
+    status: record.status ?? deriveMgpStatus(record.approvals),
+})
+
+/** Live-aware accessors for Front Office passes shown on Stores tabs (no mock seed in live mode). */
+export const readGoodsReceivedPassRows = (mockReader) =>
+    (isLiveApiEnabled() ? liveGoodsReceivedPasses.read().map(hydrateLiveGrp) : mockReader())
+export const readMaterialGatePassRows = (mockReader) =>
+    (isLiveApiEnabled() ? liveMaterialGatePasses.read().map(hydrateLiveMgp) : mockReader())
+
+export const updateLiveGoodsReceivedPass = (id, patch) => {
+    const rows = liveGoodsReceivedPasses.read()
+    const index = rows.findIndex((row) => row.id === id)
+    if (index === -1) return null
+    const updated = hydrateLiveGrp({
+        ...rows[index],
+        ...patch,
+        status: deriveGrpStatus(patch.signatories ?? rows[index].signatories),
+    })
+    rows[index] = updated
+    liveGoodsReceivedPasses.write(rows)
+    return updated
+}
+
+export const updateLiveMaterialGatePass = (id, patch) => {
+    const rows = liveMaterialGatePasses.read()
+    const index = rows.findIndex((row) => row.id === id)
+    if (index === -1) return null
+    const updated = hydrateLiveMgp({
+        ...rows[index],
+        ...patch,
+        status: deriveMgpStatus(patch.approvals ?? rows[index].approvals),
+    })
+    rows[index] = updated
+    liveMaterialGatePasses.write(rows)
+    return updated
+}
+
+const normalizeCatalogItem = (item) => ({
+    ...item,
+    name: item.name || item.itemName,
+    itemName: item.itemName || item.name,
+    unit: item.unit || item.uom || 'Units',
+    uom: item.uom || item.unit || 'Units',
+    unitPrice: Number(item.unitPrice ?? item.unitCost ?? 0),
+    unitCost: Number(item.unitCost ?? item.unitPrice ?? 0),
+    minStockLevel: Number(item.minStockLevel ?? item.reorderLevel ?? 0),
+    reorderLevel: Number(item.reorderLevel ?? item.minStockLevel ?? 0),
+    location: item.location || item.binLocation || 'Main Store Shelf',
+    binLocation: item.binLocation || item.location || 'Main Store Shelf'
+})
 
 export const INVENTORY_STORAGE_KEY = 'schoolerp-inventory-catalog-v1'
 export const REQUISITIONS_STORAGE_KEY = 'schoolerp-material-requisitions-v1'
@@ -417,6 +514,7 @@ export const INITIAL_STOCK_ISSUES = [
 
 // Storage Accessors
 export const getInventoryCatalog = () => {
+    if (isLiveApiEnabled()) return liveInventory.read().map(normalizeCatalogItem)
     let list = null
     try {
         if (typeof localStorage !== 'undefined') {
@@ -453,6 +551,10 @@ export const getInventoryCatalog = () => {
 }
 
 export const saveInventoryCatalog = (catalog) => {
+    if (isLiveApiEnabled()) {
+        liveInventory.write(catalog)
+        return
+    }
     _memoryInventory = catalog
     try {
         if (typeof localStorage !== 'undefined') {
@@ -464,6 +566,7 @@ export const saveInventoryCatalog = (catalog) => {
 }
 
 export const getMaterialRequisitions = () => {
+    if (isLiveApiEnabled()) return liveRequisitions.read()
     try {
         if (typeof localStorage !== 'undefined') {
             const raw = localStorage.getItem(REQUISITIONS_STORAGE_KEY)
@@ -484,6 +587,10 @@ export const getMaterialRequisitions = () => {
 }
 
 export const saveMaterialRequisitions = (reqs) => {
+    if (isLiveApiEnabled()) {
+        liveRequisitions.write(reqs)
+        return
+    }
     _memoryRequisitions = reqs
     try {
         if (typeof localStorage !== 'undefined') {
@@ -495,6 +602,7 @@ export const saveMaterialRequisitions = (reqs) => {
 }
 
 export const getPurchaseOrders = () => {
+    if (isLiveApiEnabled()) return livePurchaseOrders.read()
     try {
         if (typeof localStorage !== 'undefined') {
             const raw = localStorage.getItem(PO_STORAGE_KEY)
@@ -515,6 +623,10 @@ export const getPurchaseOrders = () => {
 }
 
 export const savePurchaseOrders = (pos) => {
+    if (isLiveApiEnabled()) {
+        livePurchaseOrders.write(pos)
+        return
+    }
     _memoryPOs = pos
     try {
         if (typeof localStorage !== 'undefined') {
@@ -526,6 +638,7 @@ export const savePurchaseOrders = (pos) => {
 }
 
 export const getGoodsReceiptNotes = () => {
+    if (isLiveApiEnabled()) return liveGrns.read()
     try {
         if (typeof localStorage !== 'undefined') {
             const raw = localStorage.getItem(GRN_STORAGE_KEY)
@@ -546,6 +659,10 @@ export const getGoodsReceiptNotes = () => {
 }
 
 export const saveGoodsReceiptNotes = (grns) => {
+    if (isLiveApiEnabled()) {
+        liveGrns.write(grns)
+        return
+    }
     _memoryGRNs = grns
     try {
         if (typeof localStorage !== 'undefined') {
@@ -557,6 +674,7 @@ export const saveGoodsReceiptNotes = (grns) => {
 }
 
 export const getStockIssues = () => {
+    if (isLiveApiEnabled()) return liveStockIssues.read()
     try {
         if (typeof localStorage !== 'undefined') {
             const raw = localStorage.getItem(STOCK_ISSUE_STORAGE_KEY)
@@ -577,6 +695,10 @@ export const getStockIssues = () => {
 }
 
 export const saveStockIssues = (issues) => {
+    if (isLiveApiEnabled()) {
+        liveStockIssues.write(issues)
+        return
+    }
     _memoryStockIssues = issues
     try {
         if (typeof localStorage !== 'undefined') {
@@ -588,6 +710,7 @@ export const saveStockIssues = (issues) => {
 }
 
 export const getVendors = () => {
+    if (isLiveApiEnabled()) return liveVendors.read()
     try {
         if (typeof localStorage !== 'undefined') {
             const raw = localStorage.getItem(VENDORS_STORAGE_KEY)
@@ -608,6 +731,10 @@ export const getVendors = () => {
 }
 
 export const saveVendors = (vendors) => {
+    if (isLiveApiEnabled()) {
+        liveVendors.write(vendors)
+        return
+    }
     _memoryVendors = vendors
     try {
         if (typeof localStorage !== 'undefined') {
@@ -1389,6 +1516,7 @@ const DEFAULT_AUDIT_QUANTITIES = [
 let _memoryAuditQuantities = null
 
 export const getAuditQuantities = () => {
+    if (isLiveApiEnabled()) return liveAuditQuantities.read()
     if (_memoryAuditQuantities) return _memoryAuditQuantities
     if (typeof localStorage === 'undefined') return DEFAULT_AUDIT_QUANTITIES
     try {
@@ -1406,6 +1534,10 @@ export const getAuditQuantities = () => {
 }
 
 export const saveAuditQuantities = (records) => {
+    if (isLiveApiEnabled()) {
+        liveAuditQuantities.write(records)
+        return
+    }
     _memoryAuditQuantities = records
     if (typeof localStorage !== 'undefined') {
         try {

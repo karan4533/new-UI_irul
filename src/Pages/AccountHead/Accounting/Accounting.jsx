@@ -1,8 +1,9 @@
 import { useMemo, useRef, useState } from 'react'
 import { ArrowRightLeft, BookOpen, Check, Download, FileText, Plus, RefreshCw, Upload } from 'lucide-react'
-import { Navigate, useNavigate, useParams } from 'react-router-dom'
+import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { ConfirmAction, IntegrationNotice, PageHeader } from '../../../Common/ui'
 import { useFinance } from '../financeDomain/FinanceContext'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 import AddOfflineEntryModal from './Components/AddOfflineEntryModal'
 import AddAccountModal from './Components/AddAccountModal'
 import BankBookTab, { buildBankBookSummary } from './Components/BankBookTab'
@@ -40,39 +41,59 @@ import {
 
 const SECTION_SUBTITLES = {
     'day-book': 'Maintain the chronological record of offline and manual transactions.',
-    'online-book': 'Review digital transactions already available in this browser workspace.',
+    'online-book': 'Review digital transactions already available in this workspace.',
     'general-ledger': 'Inspect the master ledger of posted accounting entries.',
     'cash-book': 'Review transactions that affect cash in hand.',
     'bank-book': 'Review transactions recorded against school bank accounts.',
     'chart-of-accounts': 'Maintain the accounting heads used throughout the ERP.',
     'journal-vouchers': 'Prepare and post balanced manual accounting adjustments.',
     'bank-reconciliation': 'Compare statement entries with ERP records before confirming a match.',
-    'financial-statements': 'Generate an on-screen preview from the current browser-stored registers.',
+    'financial-statements': 'Generate an on-screen preview from the current finance registers.',
+}
+
+const LIVE_SECTION_SUBTITLES = {
+    ...SECTION_SUBTITLES,
+    'day-book': 'Chronological day-book entries from the campus finance API.',
+    'online-book': 'Digital / gateway transactions from the campus finance API.',
+    'general-ledger': 'Posted general-ledger lines from the campus finance API.',
+    'cash-book': 'Cash-in-hand movements from the campus finance API.',
+    'bank-book': 'Bank-account movements from the campus finance API.',
+    'financial-statements': 'On-screen preview built from live finance registers.',
 }
 
 const primaryButton = 'inline-flex min-h-10 items-center gap-2 rounded-lg bg-[var(--erp-indigo)] px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50'
 const secondaryButton = 'inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-indigo)] bg-white px-4 text-sm font-semibold text-[var(--erp-indigo)] disabled:cursor-not-allowed disabled:border-[var(--erp-line-strong)] disabled:text-[var(--erp-muted)] disabled:opacity-60'
 const unavailableButton = 'inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] bg-white px-4 text-sm font-semibold text-[var(--erp-muted)] opacity-60'
 
+const LIVE_ACCOUNTING = isLiveApiEnabled()
+const seedRows = (rows) => (LIVE_ACCOUNTING ? [] : rows)
+const openingBalance = (value) => (LIVE_ACCOUNTING ? 0 : value)
+
 const Accounting = () => {
     const { section } = useParams()
+    const location = useLocation()
     const navigate = useNavigate()
     const finance = useFinance()
+    const accountingBase = location.pathname.includes('/admin/expenses/accounting')
+        ? '/admin/expenses/accounting'
+        : location.pathname.includes('/super-admin/')
+            ? '/super-admin/expenses/accounting'
+            : '/account-head/accounting'
     const [academicYear, setAcademicYear] = useState(ACCOUNTING_YEARS[0])
     const [addAccountModal, setAddAccountModal] = useState(false)
     const [newVoucherModal, setNewVoucherModal] = useState(false)
     const [addOfflineModal, setAddOfflineModal] = useState(false)
     const [postConfirmationOpen, setPostConfirmationOpen] = useState(false)
-    const [dayBookEntries, setDayBookEntries] = useState(DAY_BOOK_REGISTER)
-    const [onlineBookEntries] = useState(ONLINE_BOOK_REGISTER)
+    const [dayBookEntries, setDayBookEntries] = useState(seedRows(DAY_BOOK_REGISTER))
+    const [onlineBookEntries] = useState(seedRows(ONLINE_BOOK_REGISTER))
     const [selectedOnlineTransaction, setSelectedOnlineTransaction] = useState(null)
-    const [generalLedgerEntries] = useState(GENERAL_LEDGER_REGISTER)
-    const [cashBookEntries] = useState(CASH_BOOK_REGISTER)
-    const [bankBookEntries] = useState(BANK_BOOK_REGISTER)
-    const [coaAccounts, setCoaAccounts] = useState(COA_ACCOUNTS)
-    const [journalVouchers, setJournalVouchers] = useState(JOURNAL_VOUCHERS_REGISTER)
+    const [generalLedgerEntries] = useState(seedRows(GENERAL_LEDGER_REGISTER))
+    const [cashBookEntries] = useState(seedRows(CASH_BOOK_REGISTER))
+    const [bankBookEntries] = useState(seedRows(BANK_BOOK_REGISTER))
+    const [coaAccounts, setCoaAccounts] = useState(seedRows(COA_ACCOUNTS))
+    const [journalVouchers, setJournalVouchers] = useState(seedRows(JOURNAL_VOUCHERS_REGISTER))
     const [selectedVoucherId, setSelectedVoucherId] = useState(null)
-    const [reconciliationEntries, setReconciliationEntries] = useState(BANK_RECONCILIATION_REGISTER)
+    const [reconciliationEntries, setReconciliationEntries] = useState(seedRows(BANK_RECONCILIATION_REGISTER))
     const [selectedReconciliationId, setSelectedReconciliationId] = useState(null)
     const [reconciliationDrawerOpen, setReconciliationDrawerOpen] = useState(false)
     const [selectedSuggestionId, setSelectedSuggestionId] = useState(null)
@@ -101,17 +122,17 @@ const Accounting = () => {
     const mergedCashBook = useMemo(() => [...finance.cashBookEntries, ...cashBookEntries], [finance.cashBookEntries, cashBookEntries])
     const mergedBankBook = useMemo(() => [...finance.bankBookEntries, ...bankBookEntries], [finance.bankBookEntries, bankBookEntries])
 
-    const dayBookSummary = useMemo(() => buildDayBookSummary(mergedDayBook, DAY_BOOK_OPENING_BALANCE), [mergedDayBook])
+    const dayBookSummary = useMemo(() => buildDayBookSummary(mergedDayBook, openingBalance(DAY_BOOK_OPENING_BALANCE)), [mergedDayBook])
     const onlineBookSummary = useMemo(() => buildOnlineBookSummary(mergedOnlineBook), [mergedOnlineBook])
     const generalLedgerSummary = useMemo(() => buildGeneralLedgerSummary(mergedGeneralLedger), [mergedGeneralLedger])
-    const cashBookSummary = useMemo(() => buildCashBookSummary(mergedCashBook, CASH_BOOK_OPENING_BALANCE), [mergedCashBook])
-    const bankBookSummary = useMemo(() => buildBankBookSummary(mergedBankBook, BANK_BOOK_OPENING_BALANCE), [mergedBankBook])
+    const cashBookSummary = useMemo(() => buildCashBookSummary(mergedCashBook, openingBalance(CASH_BOOK_OPENING_BALANCE)), [mergedCashBook])
+    const bankBookSummary = useMemo(() => buildBankBookSummary(mergedBankBook, openingBalance(BANK_BOOK_OPENING_BALANCE)), [mergedBankBook])
     const coaSummary = useMemo(() => buildCoaSummary(coaAccounts), [coaAccounts])
     const journalVoucherSummary = useMemo(() => buildJournalVoucherSummary(journalVouchers), [journalVouchers])
     const bankReconciliationSummary = useMemo(() => buildBankReconciliationSummary(reconciliationEntries), [reconciliationEntries])
 
     const handleAddOfflineEntry = (entry) => {
-        setDayBookEntries((previous) => appendDayBookEntry(previous, DAY_BOOK_OPENING_BALANCE, entry))
+        setDayBookEntries((previous) => appendDayBookEntry(previous, openingBalance(DAY_BOOK_OPENING_BALANCE), entry))
         finance.addManualEntry({
             date: entry.date,
             amount: entry.debit !== '—' ? entry.debit : entry.credit,
@@ -183,7 +204,7 @@ const Accounting = () => {
         )
         if (activeSection === 'bank-book') return (
             <>
-                <button type='button' onClick={() => navigate('/account-head/accounting/bank-reconciliation')} className={primaryButton}><ArrowRightLeft aria-hidden='true' size={16} /> Reconcile</button>
+                <button type='button' onClick={() => navigate(`${accountingBase}/bank-reconciliation`)} className={primaryButton}><ArrowRightLeft aria-hidden='true' size={16} /> Reconcile</button>
                 {exportUnavailable}
             </>
         )
@@ -217,14 +238,16 @@ const Accounting = () => {
         return exportUnavailable
     }
 
-    if (!activeSection) return <Navigate to={`/account-head/accounting/${DEFAULT_ACCOUNTING_SECTION}`} replace />
+    if (!activeSection) return <Navigate to={`${accountingBase}/${DEFAULT_ACCOUNTING_SECTION}`} replace />
 
     return (
         <section className='space-y-5'>
             <PageHeader
                 title={activeLabel}
-                description={SECTION_SUBTITLES[activeSection]}
-                context={`Academic year ${academicYear} · browser-stored workspace`}
+                description={(LIVE_ACCOUNTING ? LIVE_SECTION_SUBTITLES : SECTION_SUBTITLES)[activeSection]}
+                context={LIVE_ACCOUNTING
+                    ? `Academic year ${academicYear} · live finance API`
+                    : `Academic year ${academicYear} · browser-stored workspace`}
                 actions={renderActions()}
             />
 
@@ -236,11 +259,13 @@ const Accounting = () => {
                 </label>
             </div>
 
-            <IntegrationNotice
-                state='demo'
-                title='Browser-stored accounting workspace'
-                description='Entries, posting decisions and reconciliation changes remain in this browser. No banking, accounting, reporting or document-storage API is connected.'
-            />
+            {!LIVE_ACCOUNTING ? (
+                <IntegrationNotice
+                    state='demo'
+                    title='Browser-stored accounting workspace'
+                    description='Entries, posting decisions and reconciliation changes remain in this browser. No banking, accounting, reporting or document-storage API is connected.'
+                />
+            ) : null}
 
             {activeSection === 'day-book' && <DayBookTab entries={mergedDayBook} summary={dayBookSummary} onEditNarration={finance.editNarration} />}
             {activeSection === 'online-book' && <OnlineBookTab entries={mergedOnlineBook} summary={onlineBookSummary} selectedTransaction={selectedOnlineTransaction} onSelectTransaction={setSelectedOnlineTransaction} onCloseDetails={() => setSelectedOnlineTransaction(null)} />}

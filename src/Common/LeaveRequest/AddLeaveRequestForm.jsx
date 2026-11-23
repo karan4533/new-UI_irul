@@ -11,6 +11,8 @@ import IntegrationNotice from '../ui/IntegrationNotice'
 import PageHeader from '../ui/PageHeader'
 import Surface from '../ui/Surface'
 import WorkflowContextBar from '../ui/WorkflowContextBar'
+import { createLeaveRequest as createLeaveRequestApi } from '../../services/api/leaveApiService'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
 
 const inputClass = 'text-sm font-normal text-[#1E1E1E] border border-[#D9D9D9] rounded-md px-2 py-3 w-full'
 const readOnlyInputClass = `${inputClass} bg-[#F9FAFB] cursor-not-allowed`
@@ -31,7 +33,10 @@ export default function AddLeaveRequestForm({ roleKey: roleKeyProp }) {
 
     const totalDays = useMemo(() => calculateTotalDays(fromDate, toDate), [fromDate, toDate])
 
-    const handleSubmit = () => {
+    const live = isLiveApiEnabled()
+    const [submitting, setSubmitting] = useState(false)
+
+    const handleSubmit = async () => {
         if (!leaveType) {
             toast.error('Please select a leave type.')
             return
@@ -54,21 +59,46 @@ export default function AddLeaveRequestForm({ roleKey: roleKeyProp }) {
             }
         }
 
-        createLeaveRequest(
-            {
-                employeeId: submitterProfile.employeeId,
-                requestedBy: submitterProfile.requestedBy,
-                role: submitterProfile.role,
-                department: submitterProfile.department,
-                leaveType,
-                fromDate,
-                toDate,
-                totalDays,
-                reason: reason.trim(),
-            },
-            roleKey,
-        )
+        const payload = {
+            employeeId: submitterProfile.employeeId,
+            requestedBy: submitterProfile.requestedBy,
+            role: submitterProfile.role,
+            department: submitterProfile.department,
+            leaveType,
+            fromDate,
+            toDate,
+            totalDays,
+            reason: reason.trim(),
+            requestedTo: approverConfig.requestedToLabel,
+        }
 
+        if (live) {
+            setSubmitting(true)
+            const res = await createLeaveRequestApi({
+                leaveType: payload.leaveType,
+                fromDate: fromDate instanceof Date ? fromDate.toISOString().slice(0, 10) : payload.fromDate,
+                toDate: toDate instanceof Date ? toDate.toISOString().slice(0, 10) : payload.toDate,
+                reason: payload.reason,
+                totalDays: payload.totalDays,
+                department: payload.department,
+                requestedTo: payload.requestedTo,
+            })
+            setSubmitting(false)
+            if (!res.success) {
+                toast.error(typeof res.error === 'string' ? res.error : 'Leave request could not be submitted.')
+                return
+            }
+            toast.success(`Leave request submitted to ${approverConfig.requestedToLabel}.`)
+            navigate(routes.myList)
+            return
+        }
+
+        createLeaveRequest(payload, roleKey)
+        try {
+            window.dispatchEvent(new CustomEvent(LEAVE_REQUESTS_UPDATED_EVENT))
+        } catch {
+            /* ignore */
+        }
         toast.success(`Leave request submitted to ${approverConfig.requestedToLabel}.`)
         navigate(routes.myList)
     }
@@ -76,7 +106,9 @@ export default function AddLeaveRequestForm({ roleKey: roleKeyProp }) {
     return (
         <section className='space-y-5'>
             <PageHeader title='Apply for leave' description={approverConfig.submitHint} />
-            <IntegrationNotice state='demo' title='Local leave submission' description='This request is stored in this browser. Leave balances, document evidence and staff notifications are not connected.' />
+            {!live ? (
+                <IntegrationNotice state='demo' title='Local leave submission' description='This request is stored in this browser. Leave balances, document evidence and staff notifications are not connected.' />
+            ) : null}
             <WorkflowContextBar owner={approverConfig.requestedToLabel} due={fromDate && toDate ? `${fromDate.toLocaleDateString('en-GB')} to ${toDate.toLocaleDateString('en-GB')}` : 'Select dates'} nextAction='Complete and submit the request' />
             <Surface title='Request information' description='Dates and leave type determine the request sent to the decision owner.' contentClassName='p-4 sm:p-5'>
                 <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 lg:mt-8 mt-2'>
@@ -139,7 +171,7 @@ export default function AddLeaveRequestForm({ roleKey: roleKeyProp }) {
 
             <div className='flex flex-col-reverse gap-2 sm:flex-row sm:justify-end'>
                 <button type='button' onClick={() => navigate(routes.myList)} className='bg-white text-[#515DEF] text-sm px-12 py-2 rounded-md border border-[#515DEF] hover:bg-[#515DEF] hover:text-white transition-all duration-200 cursor-pointer md:w-auto w-full'>Cancel</button>
-                <button type='button' onClick={handleSubmit} className='bg-[#515DEF] text-white text-sm px-12 py-2 rounded-md border border-[#515DEF] hover:opacity-90 transition-all duration-200 cursor-pointer md:w-auto w-full'>Submit Request</button>
+                <button type='button' disabled={submitting} onClick={handleSubmit} className='bg-[#515DEF] text-white text-sm px-12 py-2 rounded-md border border-[#515DEF] hover:opacity-90 transition-all duration-200 cursor-pointer md:w-auto w-full disabled:opacity-50'>{submitting ? 'Submitting…' : 'Submit Request'}</button>
             </div>
         </section>
     )

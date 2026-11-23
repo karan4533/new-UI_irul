@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
     CalendarDays,
     Calendar,
@@ -28,7 +28,8 @@ import {
 } from './academicCalendarData'
 import { CALENDAR_UPDATED_EVENT } from '../Activities/activitiesData'
 import FeedbackState from '../ui/FeedbackState'
-import IntegrationNotice from '../ui/IntegrationNotice'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
+import { createCalendarEvent, listCalendarEvents } from '../../services/api/calendarApiService'
 import {
     format,
     formatRangeLabel,
@@ -67,6 +68,30 @@ const AcademicCalendarPage = ({ roleKey }) => {
     const [viewMode, setViewMode] = useState('month') // 'month', 'agenda'
     const [searchQuery, setSearchQuery] = useState('')
     const [showAddEventModal, setShowAddEventModal] = useState(false)
+    const live = isLiveApiEnabled()
+    const [liveItems, setLiveItems] = useState([])
+    const [liveLoading, setLiveLoading] = useState(live)
+    const [liveError, setLiveError] = useState('')
+    const [saving, setSaving] = useState(false)
+
+    const loadLive = useCallback(async () => {
+        setLiveLoading(true)
+        setLiveError('')
+        const res = await listCalendarEvents()
+        setLiveLoading(false)
+        if (!res.success) {
+            setLiveItems([])
+            setLiveError(typeof res.error === 'string' ? res.error : 'Failed to load the calendar.')
+            return
+        }
+        setLiveItems(res.data)
+    }, [])
+
+    useEffect(() => {
+        if (!live) return undefined
+        const timer = setTimeout(() => { loadLive() }, 0)
+        return () => clearTimeout(timer)
+    }, [live, loadLive])
 
     // Form state for new custom event
     const [newEventForm, setNewEventForm] = useState({
@@ -78,18 +103,21 @@ const AcademicCalendarPage = ({ roleKey }) => {
     })
 
     useEffect(() => {
-        const refresh = () => setCalendarRefresh((value) => value + 1)
+        const refresh = () => {
+            setCalendarRefresh((value) => value + 1)
+            if (live) loadLive()
+        }
         window.addEventListener(CALENDAR_UPDATED_EVENT, refresh)
         window.addEventListener('focus', refresh)
         return () => {
             window.removeEventListener(CALENDAR_UPDATED_EVENT, refresh)
             window.removeEventListener('focus', refresh)
         }
-    }, [])
+    }, [live, loadLive])
 
     const filteredItems = useMemo(() => {
         void calendarRefresh
-        return getAllCalendarItems()
+        return (live ? liveItems : getAllCalendarItems())
             .filter((item) => activeTypes.has(item.type))
             .filter((item) => {
                 if (!searchQuery.trim()) return true
@@ -99,7 +127,7 @@ const AcademicCalendarPage = ({ roleKey }) => {
                     (item.description && item.description.toLowerCase().includes(q))
                 )
             })
-    }, [activeTypes, calendarRefresh, searchQuery])
+    }, [activeTypes, calendarRefresh, searchQuery, live, liveItems])
 
     const cells = useMemo(() => getMonthCells(currentDate), [currentDate])
     const monthItems = useMemo(
@@ -135,10 +163,30 @@ const AcademicCalendarPage = ({ roleKey }) => {
         setSelectedDate(toDateKey(today))
     }
 
-    const handleCreateEvent = (e) => {
+    const handleCreateEvent = async (e) => {
         e.preventDefault()
         if (!newEventForm.title.trim()) {
             toast.error('Event title is required.')
+            return
+        }
+        if (live) {
+            setSaving(true)
+            const res = await createCalendarEvent(newEventForm)
+            setSaving(false)
+            if (!res.success) {
+                toast.error(typeof res.error === 'string' ? res.error : 'The event could not be saved.')
+                return
+            }
+            setLiveItems((prev) => [...prev, res.data])
+            setShowAddEventModal(false)
+            setNewEventForm({
+                title: '',
+                type: 'event',
+                startDate: new Date().toISOString().split('T')[0],
+                endDate: new Date().toISOString().split('T')[0],
+                description: ''
+            })
+            toast.success('Calendar event saved.')
             return
         }
         addCustomCalendarItem({
@@ -252,7 +300,7 @@ const AcademicCalendarPage = ({ roleKey }) => {
                     </div>
 
                     {/* Add Event Button for Authorized Roles */}
-                    {['superAdmin', 'admin', 'principal', 'coordinator'].includes(roleKey) && (
+                    {['Super Admin', 'Admin', 'Principal', 'Coordinator'].includes(roleConfig.roleLabel) && (
                         <button
                             type="button"
                             onClick={() => setShowAddEventModal(true)}
@@ -263,6 +311,19 @@ const AcademicCalendarPage = ({ roleKey }) => {
                     )}
                 </div>
             </div>
+
+            {live && liveLoading && (
+                <FeedbackState kind='loading' compact title='Loading calendar' description='Fetching holidays, exams and events…' />
+            )}
+            {live && !liveLoading && liveError && (
+                <FeedbackState
+                    kind='error'
+                    compact
+                    title='Calendar API unavailable'
+                    description={liveError}
+                    action={<button type='button' onClick={loadLive} className='rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700'>Retry</button>}
+                />
+            )}
 
             {/* Filter and Search Bar */}
             <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -628,6 +689,7 @@ const AcademicCalendarPage = ({ roleKey }) => {
                                 </button>
                                 <button
                                     type="submit"
+                                    disabled={saving}
                                     className="rounded-xl bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 cursor-pointer"
                                 >
                                     Add to Calendar

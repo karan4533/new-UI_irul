@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
     User,
@@ -14,28 +14,23 @@ import {
     Camera,
     Check,
     Save,
-    Lock,
-    Eye,
-    EyeOff,
     FileCheck2,
     GraduationCap,
-    Clock,
-    CheckCircle2,
-    Download,
-    AlertCircle,
     ArrowRight,
-    Building2,
-    Laptop,
-    BookOpen,
-    DollarSign
+    Download,
 } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { useAuth } from '../../../context/AuthContext'
 import { ROLE_PREFIX } from '../../../constants/roles'
 import { getProfileLabel } from '../../Authentication/profileOptions'
-import { getExits, saveExits, nextId } from '../../HR/domain/hrStore'
-import { getAllTcRequests, createTcRequest } from '../../../Common/TcRequest/tcRequestData'
-import { ENTERPRISE_EMPLOYEES } from '../../../Common/AttendanceAndLeave/attendanceLeaveData'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import {
+    changeMyPassword,
+    getMyProfile,
+    updateMyProfile,
+} from '../../../services/api/profileApiService'
+import { listAuditLogs } from '../../../services/api/auditLogsApiService'
+import { listLeaveRequests } from '../../../services/api/leaveApiService'
 
 const TABS = [
     { id: 'personal', label: 'Personal Information', icon: User },
@@ -50,155 +45,291 @@ const TABS = [
     { id: 'security', label: 'Security & 2FA', icon: Shield },
 ]
 
+const emptyPersonal = {
+    fullName: '',
+    gender: '',
+    dob: '',
+    bloodGroup: '',
+    nationality: '',
+    languages: '',
+}
+
+const emptyContact = {
+    officialEmail: '',
+    personalEmail: '',
+    phone: '',
+    emergencyContact: '',
+}
+
+const emptyAddress = {
+    permanentAddress: '',
+    currentAddress: '',
+    street: '',
+    city: '',
+    state: '',
+    country: '',
+    pincode: '',
+}
+
+function formatJoined(value) {
+    if (!value) return '—'
+    const d = new Date(value)
+    if (Number.isNaN(d.getTime())) return String(value)
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
 const MyProfilePage = () => {
     const navigate = useNavigate()
+    const live = isLiveApiEnabled()
     const { role, name: authName, email } = useAuth()
     const roleLabel = getProfileLabel(role)
-    const displayName = authName || (roleLabel ?? 'Staff User')
+    const displayFallback = authName || (roleLabel ?? 'Staff User')
 
     const isStudentOrParent = role === 'student' || role === 'parent'
     const roleTabs = useMemo(() => {
         if (isStudentOrParent) {
-            return [
-                ...TABS,
-                { id: 'tc', label: 'Transfer Certificate (TC)', icon: GraduationCap }
-            ]
+            return [...TABS, { id: 'tc', label: 'Transfer Certificate (TC)', icon: GraduationCap }]
         }
-        return [
-            ...TABS,
-            { id: 'relieving', label: 'Relieving & NOC Clearance', icon: FileCheck2 }
-        ]
+        return [...TABS, { id: 'relieving', label: 'Relieving & NOC Clearance', icon: FileCheck2 }]
     }, [isStudentOrParent])
 
     const [activeTab, setActiveTab] = useState('personal')
     const [savedSuccess, setSavedSuccess] = useState(false)
-    const [twoFactorEnabled, setTwoFactorEnabled] = useState(true)
-
-    // Form states
+    const [loading, setLoading] = useState(live)
+    const [saving, setSaving] = useState(false)
+    const [loadError, setLoadError] = useState('')
+    const [profileMeta, setProfileMeta] = useState({
+        employeeId: '—',
+        department: '—',
+        manager: '—',
+        joined: '—',
+        designation: roleLabel || '—',
+        status: 'Active',
+        name: displayFallback,
+    })
     const [personalInfo, setPersonalInfo] = useState({
-        fullName: displayName,
-        gender: 'Female',
-        dob: '1985-06-14',
-        bloodGroup: 'O+',
-        nationality: 'Indian',
-        languages: 'English, Tamil, Hindi',
+        ...emptyPersonal,
+        fullName: displayFallback,
     })
-
     const [contactInfo, setContactInfo] = useState({
-        officialEmail: email || 'user@school.com',
-        personalEmail: 'personal.contact@gmail.com',
-        phone: '+91 98401 23456',
-        emergencyContact: '+91 94440 98765 (Spouse)',
+        ...emptyContact,
+        officialEmail: email || '',
     })
-
-    // Staff Relieving Quick State
-    const [exitsList, setExitsList] = useState(() => getExits())
-    const activeRole = (role || 'teacher').toLowerCase().replace(/[-_\s]/g, '')
-    const currentEmployee = useMemo(() => {
-        return (
-            ENTERPRISE_EMPLOYEES.find(
-                (e) => (email && e.email.toLowerCase() === email.toLowerCase()) ||
-                       e.roleKey?.toLowerCase().replace(/[-_\s]/g, '') === activeRole
-            ) || ENTERPRISE_EMPLOYEES[0]
-        )
-    }, [email, activeRole])
-    const employeeId = currentEmployee?.id || 'EMP-TCH-006'
-    const myExit = useMemo(() => exitsList.find((x) => x.employeeId === employeeId) || null, [exitsList, employeeId])
-    const [relievingDate, setRelievingDate] = useState(() => {
-        const d = new Date()
-        d.setDate(d.getDate() + 30)
-        return d.toISOString().split('T')[0]
+    const [addressInfo, setAddressInfo] = useState(emptyAddress)
+    const [professional, setProfessional] = useState({
+        designation: roleLabel || '',
+        department: '',
+        employmentType: '',
+        reportingManager: '',
+        joiningDate: '',
+        qualification: '',
+        yearsOfExperience: '',
+        previousSchool: '',
     })
-    const [relievingReason, setRelievingReason] = useState('')
-    const [isSubmittingRelieving, setIsSubmittingRelieving] = useState(false)
+    const [activityRows, setActivityRows] = useState([])
+    const [leaveRows, setLeaveRows] = useState([])
+    const [currentPassword, setCurrentPassword] = useState('')
+    const [newPassword, setNewPassword] = useState('')
+    const [passwordBusy, setPasswordBusy] = useState(false)
 
-    // Student TC Quick State
-    const [tcList, setTcList] = useState(() => getAllTcRequests())
-    const [tcReason, setTcReason] = useState('Family relocation to another city')
-    const [tcTransferTo, setTcTransferTo] = useState('Delhi Public School, Bangalore')
-    const [isSubmittingTc, setIsSubmittingTc] = useState(false)
+    const applyProfile = useCallback((data) => {
+        if (!data) return
+        setProfileMeta({
+            employeeId: data.employeeId || data.staffCode || '—',
+            department: data.department || '—',
+            manager: data.reportingManager || '—',
+            joined: formatJoined(data.joiningDate),
+            designation: data.designation || roleLabel || '—',
+            status: data.status || 'Active',
+            name: data.name || displayFallback,
+        })
+        setPersonalInfo({
+            fullName: data.name || '',
+            gender: data.gender || '',
+            dob: data.dateOfBirth || '',
+            bloodGroup: data.bloodGroup || '',
+            nationality: data.nationality || '',
+            languages: data.languages || '',
+        })
+        setContactInfo({
+            officialEmail: data.email || email || '',
+            personalEmail: data.personalEmail || '',
+            phone: data.mobileNumber || '',
+            emergencyContact: data.emergencyContact || '',
+        })
+        const permanent =
+            data.permanentAddress ||
+            [data.street, data.city, data.state, data.pincode, data.country].filter(Boolean).join(', ')
+        setAddressInfo({
+            permanentAddress: permanent,
+            currentAddress: data.currentAddress || permanent,
+            street: data.street || '',
+            city: data.city || '',
+            state: data.state || '',
+            country: data.country || '',
+            pincode: data.pincode || '',
+        })
+        setProfessional({
+            designation: data.designation || roleLabel || '',
+            department: data.department || '',
+            employmentType: data.employmentType || '',
+            reportingManager: data.reportingManager || '',
+            joiningDate: data.joiningDate || '',
+            qualification: data.qualification || '',
+            yearsOfExperience: data.yearsOfExperience || '',
+            previousSchool: data.previousSchool || '',
+        })
+    }, [displayFallback, email, roleLabel])
 
-    const handleApplyRelieving = (e) => {
-        e.preventDefault()
-        if (!relievingReason.trim()) {
-            toast.error('Please specify a reason for relieving.')
+    const loadProfile = useCallback(async () => {
+        if (!isLiveApiEnabled()) {
+            setLoading(false)
             return
         }
-        setIsSubmittingRelieving(true)
-        try {
-            const allExits = getExits()
-            const newExit = {
-                id: nextId('EXT-2026', allExits),
-                employeeId,
-                lastWorkingDate: relievingDate,
-                exitType: 'Resignation',
-                reason: relievingReason.trim(),
-                noticePeriod: '30 days',
-                noticeServed: false,
-                handover: false,
-                assets: false,
-                documents: false,
-                finance: false,
-                departmentClearance: false,
-                hrClearance: false,
-                exitInterview: false,
-                appliedDate: new Date().toISOString().split('T')[0],
-                status: 'Initiated'
-            }
-            saveExits([newExit, ...allExits])
-            setExitsList(getExits())
-            toast.success('Relieving & NOC request submitted directly from your profile!')
-        } catch (err) {
-            toast.error(err.message || 'Failed to submit relieving request.')
-        } finally {
-            setIsSubmittingRelieving(false)
+        setLoading(true)
+        setLoadError('')
+        const res = await getMyProfile()
+        if (!res.success) {
+            setLoadError(res.error || 'Unable to load profile.')
+            setLoading(false)
+            return
         }
-    }
+        applyProfile(res.data)
+        setLoading(false)
+    }, [applyProfile])
 
-    const handleApplyTc = (e) => {
-        e.preventDefault()
-        setIsSubmittingTc(true)
-        try {
-            const newReq = createTcRequest({
-                studentName: displayName,
-                admissionNumber: 'ADM-2026-104',
-                classSection: '10-A',
-                reason: tcReason.trim(),
-                transferTo: tcTransferTo.trim(),
-                lastDateOfAttendance: new Date().toISOString().split('T')[0],
-                requestedBy: role === 'parent' ? 'Parent' : 'Student'
-            })
-            setTcList(getAllTcRequests())
-            toast.success(`Transfer Certificate request ${newReq.requestId} submitted from your profile!`)
-        } catch (err) {
-            toast.error(err.message || 'Failed to submit TC request.')
-        } finally {
-            setIsSubmittingTc(false)
+    useEffect(() => {
+        loadProfile()
+    }, [loadProfile])
+
+    useEffect(() => {
+        if (!live || activeTab !== 'activity') return undefined
+        let cancelled = false
+        ;(async () => {
+            const res = await listAuditLogs('audit-logs')
+            if (cancelled || !res.success) return
+            const uid = String(profileMeta.employeeId || '')
+            const mine = (res.data || [])
+                .filter((row) => {
+                    if (email && (row.userEmail || '').toLowerCase() === email.toLowerCase()) return true
+                    if (row.userId && uid && String(row.userId) === uid) return true
+                    return false
+                })
+                .slice(0, 20)
+            setActivityRows(mine)
+        })()
+        return () => {
+            cancelled = true
         }
-    }
+    }, [live, activeTab, email, profileMeta.employeeId])
 
-    const handleSave = (e) => {
-        e.preventDefault()
+    useEffect(() => {
+        if (!live || activeTab !== 'leave') return undefined
+        let cancelled = false
+        ;(async () => {
+            const res = await listLeaveRequests({ box: 'mine' })
+            if (cancelled || !res.success) return
+            setLeaveRows(Array.isArray(res.data) ? res.data.slice(0, 12) : [])
+        })()
+        return () => {
+            cancelled = true
+        }
+    }, [live, activeTab])
+
+    const handleSave = async (e) => {
+        e?.preventDefault?.()
+        if (!live) {
+            setSavedSuccess(true)
+            setTimeout(() => setSavedSuccess(false), 3000)
+            toast.info('Live API is off — changes were not saved to the server.')
+            return
+        }
+        setSaving(true)
+        const nameParts = String(personalInfo.fullName || '').trim().split(/\s+/).filter(Boolean)
+        const firstName = nameParts[0] || ''
+        const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : ''
+        const middleName = nameParts.length > 2 ? nameParts.slice(1, -1).join(' ') : ''
+        const res = await updateMyProfile({
+            firstName,
+            middleName,
+            lastName,
+            gender: personalInfo.gender,
+            mobileNumber: contactInfo.phone,
+            dateOfBirth: personalInfo.dob,
+            bloodGroup: personalInfo.bloodGroup,
+            nationality: personalInfo.nationality,
+            languages: personalInfo.languages,
+            personalEmail: contactInfo.personalEmail,
+            emergencyContact: contactInfo.emergencyContact,
+            permanentAddress: addressInfo.permanentAddress,
+            currentAddress: addressInfo.currentAddress,
+            street: addressInfo.street,
+            city: addressInfo.city,
+            state: addressInfo.state,
+            country: addressInfo.country,
+            pincode: addressInfo.pincode,
+            joiningDate: professional.joiningDate,
+            reportingManager: professional.reportingManager,
+            employmentType: professional.employmentType,
+            department: professional.department,
+            qualification: professional.qualification,
+            yearsOfExperience: professional.yearsOfExperience,
+            previousSchool: professional.previousSchool,
+        })
+        setSaving(false)
+        if (!res.success) {
+            toast.error(res.error || 'Could not save profile.')
+            return
+        }
+        applyProfile(res.data)
         setSavedSuccess(true)
         setTimeout(() => setSavedSuccess(false), 3000)
+        toast.success('Profile saved.')
     }
+
+    const handlePasswordUpdate = async () => {
+        if (!live) {
+            toast.info('Live API is off — password was not changed.')
+            return
+        }
+        if (!currentPassword || !newPassword) {
+            toast.error('Enter current and new password.')
+            return
+        }
+        setPasswordBusy(true)
+        const res = await changeMyPassword(currentPassword, newPassword)
+        setPasswordBusy(false)
+        if (!res.success) {
+            toast.error(res.error || 'Password update failed.')
+            return
+        }
+        setCurrentPassword('')
+        setNewPassword('')
+        toast.success('Password updated.')
+    }
+
+    const displayName = profileMeta.name || displayFallback
 
     return (
         <div className='space-y-6 pb-8 font-inter'>
-            {/* Profile Overview Card (Reference Design Aesthetic) */}
             <div className='rounded-[1.25rem] border border-slate-200/80 bg-white p-6 shadow-xs'>
                 <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-6'>
                     <div className='flex items-center gap-5'>
                         <div className='relative'>
-                            <img
-                                src='https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop&crop=faces'
-                                alt={displayName}
-                                className='size-20 rounded-full object-cover ring-4 ring-blue-50'
-                            />
+                            <div className='size-20 rounded-full bg-blue-600 text-white flex items-center justify-center text-2xl font-bold ring-4 ring-blue-50'>
+                                {String(displayName)
+                                    .split(/\s+/)
+                                    .filter(Boolean)
+                                    .map((p) => p[0])
+                                    .slice(0, 2)
+                                    .join('')
+                                    .toUpperCase() || '?'}
+                            </div>
                             <button
                                 type='button'
                                 aria-label='Update photo'
                                 className='absolute bottom-0 right-0 flex size-6.5 items-center justify-center rounded-full bg-blue-600 text-white shadow-xs hover:bg-blue-700 transition-colors'
+                                onClick={() => toast.info('Profile photo upload is not available yet.')}
                             >
                                 <Camera size={13} />
                             </button>
@@ -206,25 +337,31 @@ const MyProfilePage = () => {
 
                         <div>
                             <div className='flex items-center gap-2.5 flex-wrap'>
-                                <h1 className='text-xl font-bold tracking-tight text-slate-900'>
-                                    {displayName}
-                                </h1>
+                                <h1 className='text-xl font-bold tracking-tight text-slate-900'>{displayName}</h1>
                                 <span className='rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-semibold text-blue-700 border border-blue-100'>
                                     {roleLabel}
                                 </span>
                                 <span className='flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 border border-emerald-100'>
                                     <span className='size-1.5 rounded-full bg-emerald-500' />
-                                    Active Employment
+                                    {profileMeta.status === 'Active' ? 'Active Employment' : profileMeta.status}
                                 </span>
                             </div>
                             <div className='mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500'>
-                                <span>Employee ID: <strong className='text-slate-700'>EMP-2026-042</strong></span>
+                                <span>
+                                    Employee ID: <strong className='text-slate-700'>{profileMeta.employeeId}</strong>
+                                </span>
                                 <span>·</span>
-                                <span>Dept: <strong className='text-slate-700'>Academic Administration</strong></span>
+                                <span>
+                                    Dept: <strong className='text-slate-700'>{profileMeta.department}</strong>
+                                </span>
                                 <span>·</span>
-                                <span>Manager: <strong className='text-slate-700'>Director of Academics</strong></span>
+                                <span>
+                                    Manager: <strong className='text-slate-700'>{profileMeta.manager}</strong>
+                                </span>
                                 <span>·</span>
-                                <span>Joined: <strong className='text-slate-700'>01 Jun 2021</strong></span>
+                                <span>
+                                    Joined: <strong className='text-slate-700'>{profileMeta.joined}</strong>
+                                </span>
                             </div>
                         </div>
                     </div>
@@ -252,23 +389,34 @@ const MyProfilePage = () => {
                         <button
                             type='button'
                             onClick={handleSave}
-                            className='inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-blue-700 transition-colors cursor-pointer'
+                            disabled={saving || loading}
+                            className='inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-blue-700 transition-colors cursor-pointer disabled:opacity-60'
                         >
                             <Save size={14} />
-                            Save Changes
+                            {saving ? 'Saving…' : 'Save Changes'}
                         </button>
                     </div>
                 </div>
 
+                {loading && (
+                    <p className='mt-4 text-xs text-slate-500'>Loading profile from server…</p>
+                )}
+                {loadError && (
+                    <div className='mt-4 flex items-center justify-between gap-2 rounded-xl bg-rose-50 p-3 text-xs font-semibold text-rose-700 border border-rose-200'>
+                        <span>{loadError}</span>
+                        <button type='button' onClick={loadProfile} className='underline cursor-pointer'>
+                            Retry
+                        </button>
+                    </div>
+                )}
                 {savedSuccess && (
                     <div className='mt-4 flex items-center gap-2 rounded-xl bg-emerald-50 p-3 text-xs font-semibold text-emerald-700 border border-emerald-200'>
                         <Check size={16} />
-                        Profile updates have been recorded and synced to the administrative ledger.
+                        Profile updates saved.
                     </div>
                 )}
             </div>
 
-            {/* Navigation Tabs Bar */}
             <div className='flex items-center gap-1.5 overflow-x-auto border-b border-slate-200 bg-white px-2 py-1.5 rounded-2xl shadow-2xs sidebar-scroll-hide'>
                 {roleTabs.map((tab) => {
                     const Icon = tab.icon
@@ -291,9 +439,7 @@ const MyProfilePage = () => {
                 })}
             </div>
 
-            {/* Tab Contents Area */}
             <div className='rounded-[1.25rem] border border-slate-200/80 bg-white p-6 shadow-xs'>
-                {/* 1. Personal Information */}
                 {activeTab === 'personal' && (
                     <form onSubmit={handleSave} className='space-y-5'>
                         <h2 className='text-sm font-semibold tracking-tight text-slate-900 border-b border-slate-100 pb-2.5'>
@@ -325,6 +471,7 @@ const MyProfilePage = () => {
                                     onChange={(e) => setPersonalInfo({ ...personalInfo, gender: e.target.value })}
                                     className='w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:border-blue-500 focus:outline-none'
                                 >
+                                    <option value=''>Select</option>
                                     <option>Female</option>
                                     <option>Male</option>
                                     <option>Other</option>
@@ -361,42 +508,65 @@ const MyProfilePage = () => {
                     </form>
                 )}
 
-                {/* 2. Professional Details */}
                 {activeTab === 'professional' && (
-                    <div className='space-y-4 text-xs'>
+                    <form onSubmit={handleSave} className='space-y-4 text-xs'>
                         <h2 className='text-sm font-semibold tracking-tight text-slate-900 border-b border-slate-100 pb-2.5'>
                             Institutional Appointment & Position
                         </h2>
                         <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4'>
                             <div className='rounded-xl bg-slate-50 p-3.5'>
                                 <p className='text-slate-400 font-medium'>Designation</p>
-                                <p className='font-bold text-slate-900 mt-1 text-sm'>{roleLabel}</p>
+                                <p className='font-bold text-slate-900 mt-1 text-sm'>{professional.designation || '—'}</p>
                             </div>
-                            <div className='rounded-xl bg-slate-50 p-3.5'>
-                                <p className='text-slate-400 font-medium'>Department</p>
-                                <p className='font-bold text-slate-900 mt-1 text-sm'>Academic Wing</p>
+                            <div>
+                                <label className='block text-slate-400 font-medium mb-1'>Department</label>
+                                <input
+                                    type='text'
+                                    value={professional.department}
+                                    onChange={(e) => setProfessional({ ...professional, department: e.target.value })}
+                                    className='w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:border-blue-500 focus:outline-none'
+                                />
                             </div>
-                            <div className='rounded-xl bg-slate-50 p-3.5'>
-                                <p className='text-slate-400 font-medium'>Employment Status</p>
-                                <p className='font-bold text-emerald-700 mt-1 text-sm'>Permanent / Confirmed</p>
+                            <div>
+                                <label className='block text-slate-400 font-medium mb-1'>Employment Type</label>
+                                <input
+                                    type='text'
+                                    value={professional.employmentType}
+                                    onChange={(e) => setProfessional({ ...professional, employmentType: e.target.value })}
+                                    className='w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:border-blue-500 focus:outline-none'
+                                />
                             </div>
-                            <div className='rounded-xl bg-slate-50 p-3.5'>
-                                <p className='text-slate-400 font-medium'>Reporting Authority</p>
-                                <p className='font-bold text-slate-900 mt-1 text-sm'>Principal / DA</p>
+                            <div>
+                                <label className='block text-slate-400 font-medium mb-1'>Reporting Authority</label>
+                                <input
+                                    type='text'
+                                    value={professional.reportingManager}
+                                    onChange={(e) => setProfessional({ ...professional, reportingManager: e.target.value })}
+                                    className='w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:border-blue-500 focus:outline-none'
+                                />
                             </div>
-                            <div className='rounded-xl bg-slate-50 p-3.5'>
-                                <p className='text-slate-400 font-medium'>Date of Joining</p>
-                                <p className='font-bold text-slate-900 mt-1 text-sm'>01 June 2021 (5 Years)</p>
+                            <div>
+                                <label className='block text-slate-400 font-medium mb-1'>Date of Joining</label>
+                                <input
+                                    type='date'
+                                    value={professional.joiningDate}
+                                    onChange={(e) => setProfessional({ ...professional, joiningDate: e.target.value })}
+                                    className='w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:border-blue-500 focus:outline-none'
+                                />
                             </div>
-                            <div className='rounded-xl bg-slate-50 p-3.5'>
-                                <p className='text-slate-400 font-medium'>Work Schedule</p>
-                                <p className='font-bold text-slate-900 mt-1 text-sm'>Mon–Fri: 08:15 – 16:30 IST</p>
+                            <div>
+                                <label className='block text-slate-400 font-medium mb-1'>Qualification</label>
+                                <input
+                                    type='text'
+                                    value={professional.qualification}
+                                    onChange={(e) => setProfessional({ ...professional, qualification: e.target.value })}
+                                    className='w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:border-blue-500 focus:outline-none'
+                                />
                             </div>
                         </div>
-                    </div>
+                    </form>
                 )}
 
-                {/* 3. Contact Details */}
                 {activeTab === 'contact' && (
                     <form onSubmit={handleSave} className='space-y-5'>
                         <h2 className='text-sm font-semibold tracking-tight text-slate-900 border-b border-slate-100 pb-2.5'>
@@ -443,185 +613,158 @@ const MyProfilePage = () => {
                     </form>
                 )}
 
-                {/* 4. Address Details */}
                 {activeTab === 'address' && (
-                    <div className='space-y-4 text-xs'>
+                    <form onSubmit={handleSave} className='space-y-4 text-xs'>
                         <h2 className='text-sm font-semibold tracking-tight text-slate-900 border-b border-slate-100 pb-2.5'>
                             Residential Address Information
                         </h2>
                         <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
-                            <div className='rounded-xl border border-slate-200 bg-slate-50/50 p-4'>
-                                <p className='font-bold text-slate-900 mb-1'>Permanent Address</p>
-                                <p className='text-slate-600 leading-relaxed'>
-                                    Plot No. 42, Green Avenue, Alagarkovil Main Road,<br />
-                                    Madurai, Tamil Nadu – 625002<br />
-                                    Country: India
-                                </p>
+                            <div>
+                                <label className='block font-bold text-slate-900 mb-1'>Permanent Address</label>
+                                <textarea
+                                    rows={4}
+                                    value={addressInfo.permanentAddress}
+                                    onChange={(e) => setAddressInfo({ ...addressInfo, permanentAddress: e.target.value })}
+                                    className='w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:border-blue-500 focus:outline-none'
+                                />
                             </div>
-                            <div className='rounded-xl border border-slate-200 bg-slate-50/50 p-4'>
-                                <p className='font-bold text-slate-900 mb-1'>Current Residence Address</p>
-                                <p className='text-slate-600 leading-relaxed'>
-                                    Apartment 3B, Staff Quarters Wing A, Queen Mira Campus,<br />
-                                    Madurai, Tamil Nadu – 625014<br />
-                                    Country: India
-                                </p>
+                            <div>
+                                <label className='block font-bold text-slate-900 mb-1'>Current Residence Address</label>
+                                <textarea
+                                    rows={4}
+                                    value={addressInfo.currentAddress}
+                                    onChange={(e) => setAddressInfo({ ...addressInfo, currentAddress: e.target.value })}
+                                    className='w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:border-blue-500 focus:outline-none'
+                                />
                             </div>
                         </div>
-                    </div>
+                        <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3'>
+                            {['city', 'state', 'country', 'pincode'].map((key) => (
+                                <div key={key}>
+                                    <label className='block font-medium text-slate-700 mb-1 capitalize'>{key}</label>
+                                    <input
+                                        type='text'
+                                        value={addressInfo[key]}
+                                        onChange={(e) => setAddressInfo({ ...addressInfo, [key]: e.target.value })}
+                                        className='w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:border-blue-500 focus:outline-none'
+                                    />
+                                </div>
+                            ))}
+                        </div>
+                    </form>
                 )}
 
-                {/* 5. Employment History */}
                 {activeTab === 'employment' && (
-                    <div className='space-y-4 text-xs'>
+                    <form onSubmit={handleSave} className='space-y-4 text-xs'>
                         <h2 className='text-sm font-semibold tracking-tight text-slate-900 border-b border-slate-100 pb-2.5'>
                             Prior Experience & Academic Qualifications
                         </h2>
-                        <div className='space-y-3'>
-                            <div className='rounded-xl border border-slate-200 p-3.5'>
-                                <p className='font-bold text-slate-800'>Queen Mira International School</p>
-                                <p className='text-blue-600 font-semibold'>{roleLabel} (2021 – Present)</p>
-                                <p className='text-slate-500 mt-1'>Leading curriculum design, teacher evaluations, Bloom's Taxonomy implementation, and institutional accreditation.</p>
+                        <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
+                            <div>
+                                <label className='block font-medium text-slate-700 mb-1'>Years of Experience</label>
+                                <input
+                                    type='text'
+                                    value={professional.yearsOfExperience}
+                                    onChange={(e) => setProfessional({ ...professional, yearsOfExperience: e.target.value })}
+                                    className='w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:border-blue-500 focus:outline-none'
+                                />
                             </div>
-                            <div className='rounded-xl border border-slate-200 p-3.5'>
-                                <p className='font-bold text-slate-800'>Delhi Public School, Coimbatore</p>
-                                <p className='text-slate-600 font-semibold'>Senior Subject Coordinator (2016 – 2021)</p>
-                                <p className='text-slate-500 mt-1'>Managed secondary school examination suites and student pastoral care initiatives.</p>
+                            <div>
+                                <label className='block font-medium text-slate-700 mb-1'>Previous School / Employer</label>
+                                <input
+                                    type='text'
+                                    value={professional.previousSchool}
+                                    onChange={(e) => setProfessional({ ...professional, previousSchool: e.target.value })}
+                                    className='w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:border-blue-500 focus:outline-none'
+                                />
                             </div>
                         </div>
-                    </div>
+                    </form>
                 )}
 
-                {/* 6. Documents Vault */}
                 {activeTab === 'documents' && (
                     <div className='space-y-4 text-xs'>
                         <h2 className='text-sm font-semibold tracking-tight text-slate-900 border-b border-slate-100 pb-2.5'>
                             Verified Statutory & Verification Documents
                         </h2>
-                        <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3'>
-                            {[
-                                { title: 'Aadhaar Card (Verified)', file: 'aadhaar_doc_signed.pdf', date: '01 Jun 2021' },
-                                { title: 'PAN Card Verification', file: 'pan_card_qmis.pdf', date: '01 Jun 2021' },
-                                { title: 'Master of Education Degree', file: 'm_ed_degree_cert.pdf', date: '15 May 2015' },
-                                { title: 'Staff Appointment Letter', file: 'qmis_appointment_letter.pdf', date: '01 Jun 2021' },
-                                { title: 'Biometric Access Clearance', file: 'essl_security_pass.pdf', date: '10 Aug 2026' },
-                            ].map((doc) => (
-                                <div key={doc.title} className='flex items-center justify-between rounded-xl border border-slate-200 p-3 hover:bg-slate-50 transition-colors'>
-                                    <div>
-                                        <p className='font-semibold text-slate-800'>{doc.title}</p>
-                                        <p className='text-slate-400 mt-0.5'>{doc.file}</p>
-                                    </div>
-                                    <button type='button' className='text-blue-600 font-semibold hover:underline'>
-                                        View
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
+                        <p className='text-slate-500'>
+                            Document vault uploads are managed through HR / File Room. No documents are listed on your profile yet.
+                        </p>
                     </div>
                 )}
 
-                {/* 7. Attendance Summary */}
                 {activeTab === 'attendance' && (
                     <div className='space-y-4 text-xs'>
                         <h2 className='text-sm font-semibold tracking-tight text-slate-900 border-b border-slate-100 pb-2.5'>
                             Biometric Punch Records & Attendance Scorecard
                         </h2>
-                        <div className='grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4'>
-                            <div className='rounded-xl bg-blue-50 p-4 border border-blue-100'>
-                                <p className='text-slate-500 font-medium'>Current Month Rate</p>
-                                <p className='text-2xl font-bold text-blue-700 mt-1'>98.2%</p>
-                                <p className='text-slate-400 mt-1'>22/22 Working Days</p>
-                            </div>
-                            <div className='rounded-xl bg-slate-50 p-4 border border-slate-200'>
-                                <p className='text-slate-500 font-medium'>Average In-Time</p>
-                                <p className='text-2xl font-bold text-slate-800 mt-1'>08:12 AM</p>
-                                <p className='text-slate-400 mt-1'>Gate 1 SilkBio punch</p>
-                            </div>
-                            <div className='rounded-xl bg-slate-50 p-4 border border-slate-200'>
-                                <p className='text-slate-500 font-medium'>Late Exceptions</p>
-                                <p className='text-2xl font-bold text-slate-800 mt-1'>0</p>
-                                <p className='text-emerald-600 font-semibold mt-1'>Zero violations</p>
-                            </div>
-                        </div>
+                        <p className='text-slate-500'>
+                            Staff attendance punch summaries will appear here when biometric attendance is linked to your login.
+                        </p>
                     </div>
                 )}
 
-                {/* 8. Leave Summary */}
                 {activeTab === 'leave' && (
                     <div className='space-y-4 text-xs'>
                         <h2 className='text-sm font-semibold tracking-tight text-slate-900 border-b border-slate-100 pb-2.5'>
-                            Statutory Leave Entitlements & Balances
+                            Leave Requests
                         </h2>
-                        <div className='grid grid-cols-1 sm:grid-cols-4 gap-3'>
-                            {[
-                                { type: 'Casual Leave (CL)', available: 8, total: 12 },
-                                { type: 'Medical Leave (ML)', available: 10, total: 12 },
-                                { type: 'Earned Leave (EL)', available: 18, total: 20 },
-                                { type: 'On Duty (OD)', available: 5, total: 8 },
-                            ].map((l) => (
-                                <div key={l.type} className='rounded-xl border border-slate-200 p-3.5 bg-slate-50/50'>
-                                    <p className='font-semibold text-slate-700'>{l.type}</p>
-                                    <p className='text-xl font-bold text-slate-900 mt-1.5'>{l.available} <span className='text-xs text-slate-400 font-normal'>/ {l.total} days</span></p>
-                                </div>
-                            ))}
-                        </div>
+                        {leaveRows.length === 0 ? (
+                            <p className='text-slate-500'>No leave requests found for your account.</p>
+                        ) : (
+                            <div className='space-y-2'>
+                                {leaveRows.map((row) => (
+                                    <div key={row.id || row.leaveRequestId} className='rounded-xl border border-slate-200 p-3.5 flex items-center justify-between gap-3'>
+                                        <div>
+                                            <p className='font-semibold text-slate-800'>{row.leaveType || 'Leave'}</p>
+                                            <p className='text-slate-500 mt-0.5'>
+                                                {row.fromDate} – {row.toDate} · {row.status}
+                                            </p>
+                                        </div>
+                                        <span className='font-mono text-[10px] text-slate-400'>{row.leaveRequestId || row.id}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 )}
 
-                {/* 9. Activity History */}
                 {activeTab === 'activity' && (
                     <div className='space-y-4 text-xs'>
                         <h2 className='text-sm font-semibold tracking-tight text-slate-900 border-b border-slate-100 pb-2.5'>
                             User Session Audit & Transaction Log
                         </h2>
-                        <div className='space-y-2.5'>
-                            {[
-                                { action: 'Logged in from Chrome on Windows', time: 'Today, 08:14 AM', ip: '192.168.1.104' },
-                                { action: 'Approved Grade 10 Lesson Plan (Mathematics)', time: 'Yesterday, 03:45 PM', ip: '192.168.1.104' },
-                                { action: 'Generated Annual Exam Marks Consolidation', time: '28 Oct 2026, 11:20 AM', ip: '192.168.1.104' },
-                                { action: 'Updated Password & Security credentials', time: '15 Oct 2026, 09:12 AM', ip: '192.168.1.104' },
-                            ].map((act, i) => (
-                                <div key={i} className='flex items-center justify-between rounded-xl bg-slate-50 p-3'>
-                                    <div>
-                                        <p className='font-medium text-slate-800'>{act.action}</p>
-                                        <p className='text-slate-400 text-[11px] mt-0.5'>{act.time}</p>
+                        {activityRows.length === 0 ? (
+                            <p className='text-slate-500'>No recent activity recorded for your account.</p>
+                        ) : (
+                            <div className='space-y-2.5'>
+                                {activityRows.map((act) => (
+                                    <div key={act.id} className='flex items-center justify-between rounded-xl bg-slate-50 p-3'>
+                                        <div>
+                                            <p className='font-medium text-slate-800'>{act.action}</p>
+                                            <p className='text-slate-400 text-[11px] mt-0.5'>{act.timestamp}</p>
+                                        </div>
+                                        <span className='font-mono text-[10px] text-slate-400'>{act.ipAddress || '—'}</span>
                                     </div>
-                                    <span className='font-mono text-[10px] text-slate-400'>{act.ip}</span>
-                                </div>
-                            ))}
-                        </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 )}
 
-                {/* 10. Security Settings */}
                 {activeTab === 'security' && (
                     <div className='space-y-5 text-xs max-w-xl'>
                         <h2 className='text-sm font-semibold tracking-tight text-slate-900 border-b border-slate-100 pb-2.5'>
-                            Password & Two-Factor Authentication (2FA)
+                            Password & Account Security
                         </h2>
-                        <div className='flex items-center justify-between rounded-xl border border-slate-200 p-4 bg-slate-50/50'>
-                            <div>
-                                <p className='font-bold text-slate-900'>Two-Factor Authentication (2FA)</p>
-                                <p className='text-slate-500 mt-0.5'>Secure OTP authentication required on new device sign-ins.</p>
-                            </div>
-                            <button
-                                type='button'
-                                onClick={() => setTwoFactorEnabled(!twoFactorEnabled)}
-                                className={`rounded-full px-3 py-1 font-semibold text-xs transition-colors cursor-pointer ${
-                                    twoFactorEnabled
-                                        ? 'bg-emerald-100 text-emerald-800'
-                                        : 'bg-slate-200 text-slate-600'
-                                }`}
-                            >
-                                {twoFactorEnabled ? 'Enabled' : 'Disabled'}
-                            </button>
-                        </div>
-
                         <div className='space-y-3 pt-2'>
                             <p className='font-bold text-slate-900'>Change Workspace Password</p>
                             <div>
                                 <label className='block font-medium text-slate-700 mb-1'>Current Password</label>
                                 <input
                                     type='password'
+                                    value={currentPassword}
+                                    onChange={(e) => setCurrentPassword(e.target.value)}
                                     placeholder='••••••••••••'
                                     className='w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:border-blue-500 focus:outline-none'
                                 />
@@ -630,22 +773,24 @@ const MyProfilePage = () => {
                                 <label className='block font-medium text-slate-700 mb-1'>New Password</label>
                                 <input
                                     type='password'
+                                    value={newPassword}
+                                    onChange={(e) => setNewPassword(e.target.value)}
                                     placeholder='••••••••••••'
                                     className='w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:border-blue-500 focus:outline-none'
                                 />
                             </div>
                             <button
                                 type='button'
-                                onClick={handleSave}
-                                className='rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white hover:bg-black transition-colors cursor-pointer'
+                                onClick={handlePasswordUpdate}
+                                disabled={passwordBusy}
+                                className='rounded-xl bg-slate-900 px-4 py-2 font-semibold text-white hover:bg-black transition-colors cursor-pointer disabled:opacity-60'
                             >
-                                Update Password
+                                {passwordBusy ? 'Updating…' : 'Update Password'}
                             </button>
                         </div>
                     </div>
                 )}
 
-                {/* 11. Relieving & NOC Clearance (Staff) */}
                 {activeTab === 'relieving' && (
                     <div className='space-y-5 text-xs'>
                         <div className='flex items-center justify-between border-b border-slate-100 pb-3'>
@@ -655,101 +800,20 @@ const MyProfilePage = () => {
                                     Staff Relieving & Multi-Department NOC
                                 </h2>
                                 <p className='text-slate-500 mt-0.5'>
-                                    Submit a formal resignation or view the status of your department sign-offs.
+                                    Use the relieving workspace to submit and track department clearances.
                                 </p>
                             </div>
                             <button
                                 type='button'
-                                onClick={() => navigate(`${ROLE_PREFIX[role] || ''}/staff-relieving`)}
+                                onClick={() => navigate(`${ROLE_PREFIX[role] || '/super-admin'}/relieving-request`)}
                                 className='inline-flex items-center gap-1.5 rounded-xl bg-indigo-50 px-3 py-1.5 font-bold text-indigo-700 hover:bg-indigo-100 transition cursor-pointer'
                             >
                                 Open Full Relieving Workspace <ArrowRight size={13} />
                             </button>
                         </div>
-
-                        {myExit ? (
-                            <div className='rounded-2xl border border-indigo-100 bg-indigo-50/40 p-5 space-y-4'>
-                                <div className='flex flex-wrap items-center justify-between gap-2 border-b border-indigo-100 pb-3'>
-                                    <div>
-                                        <span className='font-mono font-bold text-indigo-700'>{myExit.id}</span>
-                                        <p className='text-slate-900 font-bold mt-0.5'>
-                                            Status: <span className='text-indigo-600'>{myExit.status}</span>
-                                        </p>
-                                    </div>
-                                    <div className='text-right'>
-                                        <span className='text-slate-400 text-[11px] block'>Proposed Last Working Day</span>
-                                        <span className='font-bold text-slate-800'>{myExit.lastWorkingDate}</span>
-                                    </div>
-                                </div>
-
-                                <div className='grid grid-cols-1 sm:grid-cols-3 gap-3 text-slate-700'>
-                                    <div className='p-3 rounded-xl bg-white border border-slate-200'>
-                                        <span className='text-[10px] text-slate-400 font-semibold block'>Handover</span>
-                                        <span className='font-bold text-slate-800'>{myExit.handover ? '✓ Completed' : '⏳ In Progress'}</span>
-                                    </div>
-                                    <div className='p-3 rounded-xl bg-white border border-slate-200'>
-                                        <span className='text-[10px] text-slate-400 font-semibold block'>Assets & IT Return</span>
-                                        <span className='font-bold text-slate-800'>{myExit.assets ? '✓ Surrendered' : '⏳ Pending'}</span>
-                                    </div>
-                                    <div className='p-3 rounded-xl bg-white border border-slate-200'>
-                                        <span className='text-[10px] text-slate-400 font-semibold block'>Finance Settlement</span>
-                                        <span className='font-bold text-slate-800'>{myExit.finance ? '✓ Settled' : '⏳ Pending'}</span>
-                                    </div>
-                                </div>
-
-                                {myExit.hrClearance ? (
-                                    <div className='p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold flex items-center justify-between'>
-                                        <span>✓ Final HR NOC Approved. Relieving Certificate is available.</span>
-                                        <button
-                                            type='button'
-                                            onClick={() => toast.success('Downloaded Relieving Certificate (PDF)')}
-                                            className='px-3 py-1 bg-emerald-600 text-white rounded-lg text-xs font-bold'
-                                        >
-                                            Download
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <p className='text-amber-700 bg-amber-50 border border-amber-200 p-2.5 rounded-xl font-medium'>
-                                        Clearance is underway across IT, Library, Finance and HOD.
-                                    </p>
-                                )}
-                            </div>
-                        ) : (
-                            <form onSubmit={handleApplyRelieving} className='space-y-3.5 max-w-lg'>
-                                <div>
-                                    <label className='block font-semibold text-slate-700 mb-1'>Proposed Last Working Date</label>
-                                    <input
-                                        type='date'
-                                        value={relievingDate}
-                                        onChange={(e) => setRelievingDate(e.target.value)}
-                                        className='w-full rounded-xl border border-slate-200 px-3 py-2 text-xs focus:outline-none focus:border-indigo-500'
-                                        required
-                                    />
-                                </div>
-                                <div>
-                                    <label className='block font-semibold text-slate-700 mb-1'>Reason for Departure</label>
-                                    <textarea
-                                        rows={3}
-                                        value={relievingReason}
-                                        onChange={(e) => setRelievingReason(e.target.value)}
-                                        placeholder='Please mention reason for resigning / relieving (e.g. higher studies, relocation)...'
-                                        className='w-full rounded-xl border border-slate-200 px-3 py-2 text-xs focus:outline-none focus:border-indigo-500'
-                                        required
-                                    />
-                                </div>
-                                <button
-                                    type='submit'
-                                    disabled={isSubmittingRelieving}
-                                    className='rounded-xl bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 transition cursor-pointer'
-                                >
-                                    {isSubmittingRelieving ? 'Submitting...' : 'Submit Relieving Application'}
-                                </button>
-                            </form>
-                        )}
                     </div>
                 )}
 
-                {/* 12. Student TC Request (Student / Parent) */}
                 {activeTab === 'tc' && (
                     <div className='space-y-5 text-xs'>
                         <div className='flex items-center justify-between border-b border-slate-100 pb-3'>
@@ -758,82 +822,15 @@ const MyProfilePage = () => {
                                     <GraduationCap size={16} className='text-indigo-600' />
                                     Student Transfer Certificate (TC) Requests
                                 </h2>
-                                <p className='text-slate-500 mt-0.5'>
-                                    Submit and track your Transfer Certificate and 5-department NOC clearances.
-                                </p>
+                                <p className='text-slate-500 mt-0.5'>Submit and track TC requests from the student portal.</p>
                             </div>
                             <button
                                 type='button'
                                 onClick={() => navigate('/student/tc-request')}
                                 className='inline-flex items-center gap-1.5 rounded-xl bg-indigo-50 px-3 py-1.5 font-bold text-indigo-700 hover:bg-indigo-100 transition cursor-pointer'
                             >
-                                View All Requests <ArrowRight size={13} />
+                                View All Requests <ArrowRight size={13} /> <Download size={12} className='opacity-0' />
                             </button>
-                        </div>
-
-                        {tcList.length > 0 && (
-                            <div className='space-y-3'>
-                                <h3 className='font-bold text-slate-900'>Existing TC Applications</h3>
-                                {tcList.map((req) => (
-                                    <div key={req.id} className='rounded-xl border border-slate-200 p-4 bg-slate-50/50 flex items-center justify-between gap-4'>
-                                        <div>
-                                            <div className='flex items-center gap-2'>
-                                                <span className='font-mono font-bold text-indigo-700'>{req.requestId}</span>
-                                                <span className='font-semibold text-slate-900'>· {req.studentName}</span>
-                                                <span className='text-slate-400'>({req.classSection})</span>
-                                            </div>
-                                            <p className='text-slate-500 mt-1'>Destination: {req.transferTo} · Date: {req.requestedOn}</p>
-                                        </div>
-                                        <div className='flex items-center gap-2'>
-                                            <span className='px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200'>
-                                                {req.status}
-                                            </span>
-                                            {req.status === 'Approved' && (
-                                                <button
-                                                    type='button'
-                                                    onClick={() => toast.success(`Downloaded Transfer Certificate: ${req.tcDocumentName || 'TC.pdf'}`)}
-                                                    className='px-2.5 py-1 bg-emerald-600 text-white rounded-lg font-bold'
-                                                >
-                                                    <Download size={12} className='inline mr-1' /> PDF
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-
-                        <div className='pt-2 border-t border-slate-100 max-w-lg'>
-                            <h3 className='font-bold text-slate-900 mb-2'>Submit New TC Request</h3>
-                            <form onSubmit={handleApplyTc} className='space-y-3'>
-                                <div>
-                                    <label className='block font-semibold text-slate-700 mb-1'>New School / College Name</label>
-                                    <input
-                                        type='text'
-                                        value={tcTransferTo}
-                                        onChange={(e) => setTcTransferTo(e.target.value)}
-                                        className='w-full rounded-xl border border-slate-200 px-3 py-2 text-xs focus:outline-none focus:border-indigo-500'
-                                        required
-                                    />
-                                </div>
-                                <div>
-                                    <label className='block font-semibold text-slate-700 mb-1'>Reason for Transfer</label>
-                                    <textarea
-                                        rows={2}
-                                        value={tcReason}
-                                        onChange={(e) => setTcReason(e.target.value)}
-                                        className='w-full rounded-xl border border-slate-200 px-3 py-2 text-xs focus:outline-none focus:border-indigo-500'
-                                        required
-                                    />
-                                </div>
-                                <button
-                                    type='submit'
-                                    disabled={isSubmittingTc}
-                                    className='rounded-xl bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 transition cursor-pointer'
-                                >
-                                    {isSubmittingTc ? 'Submitting...' : 'Submit TC Request & Initiate Clearances'}
-                                </button>
-                            </form>
                         </div>
                     </div>
                 )}
@@ -843,4 +840,3 @@ const MyProfilePage = () => {
 }
 
 export default MyProfilePage
-

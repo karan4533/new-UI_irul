@@ -1,4 +1,12 @@
 import { applyWorkflowDecision, WORKFLOW_TYPES } from '../approvals/approvalEngine.js'
+import { isLiveApiEnabled } from '../../services/api/tokenStore.js'
+import {
+    createActivityApi,
+    decideActivityApprovalApi,
+    deleteActivityApi,
+    listActivitiesApi,
+    patchActivityApi,
+} from '../../services/api/activitiesApiService.js'
 const STORAGE_KEY = 'school-erp-activities'
 
 export const MD_APPROVAL_STATUS = {
@@ -190,7 +198,152 @@ const mergeDefaultActivities = (records) => {
 
 let _memoryActivities = null
 
+/* ------------------------------------------------------------------ */
+/* Live mode (VITE_USE_MOCK=false): rows come only from FastAPI.       */
+/* Nothing is seeded from DEFAULT_ACTIVITIES / localStorage.           */
+/* ------------------------------------------------------------------ */
+
+export const ACTIVITIES_LIVE_UPDATED_EVENT = 'qmis:activities-updated'
+export const ACTIVITIES_LIVE_SYNC_FAILED_EVENT = 'qmis:activities-sync-failed'
+
+let _liveRows = []
+let _liveHydrated = false
+let _liveError = ''
+let _liveInflight = null
+let _liveQueue = Promise.resolve()
+/** activity code -> signature of the server copy (diffed against on save). */
+let _liveServer = new Map()
+
+const emitLive = (name, detail) => {
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(name, { detail }))
+}
+
+const isoToUiDate = (iso) => {
+    const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''))
+    return match ? `${match[3]}-${match[2]}-${match[1]}` : String(iso || '')
+}
+
+const mapApiActivity = (row = {}) => ({
+    id: row.id,
+    uuid: row.uuid,
+    type: row.type,
+    eventName: row.eventName || '',
+    eventType: row.eventType || '',
+    className: row.className || '',
+    eventDate: isoToUiDate(row.eventDate),
+    startTime: row.startTime || '',
+    endTime: row.endTime || '',
+    venue: row.venue || '',
+    coordinator: row.coordinator || '',
+    coach: row.coach || '',
+    description: row.description || '',
+    submittedBy: row.submittedBy || '',
+    submittedDate: isoToUiDate(row.submittedDate),
+    mdApprovalStatus: row.mdApprovalStatus || 'Pending',
+    players: Array.isArray(row.players) ? row.players : [],
+})
+
+const toApiBody = (activity) => ({
+    type: activity.type,
+    eventName: String(activity.eventName || '').trim(),
+    eventType: activity.eventType || '',
+    className: activity.className || '',
+    eventDate: parseActivityDateToIso(activity.eventDate),
+    startTime: activity.startTime || '',
+    endTime: activity.endTime || '',
+    venue: activity.venue || '',
+    coordinator: activity.coordinator || '',
+    coach: activity.coach || '',
+    description: activity.description || '',
+    players: (Array.isArray(activity.players) ? activity.players : []).map((player) => ({
+        rank: player.rank ?? null,
+        name: player.name || '',
+        category: player.category || '',
+        className: player.className || '',
+        school: player.school || '',
+        rating: player.rating || '',
+        score: player.score || '',
+        tieBreak: player.tieBreak || '',
+        result: player.result || 'Completed',
+    })),
+})
+
+const signatureOf = (activity) => {
+    const { type, ...rest } = toApiBody(activity)
+    void type
+    return JSON.stringify(rest)
+}
+
+export const getActivitiesLiveState = () => ({
+    hydrated: _liveHydrated,
+    loading: Boolean(_liveInflight),
+    error: _liveError,
+})
+
+export const hydrateActivities = async ({ force = false } = {}) => {
+    if (!isLiveApiEnabled()) return { success: true, data: [] }
+    if (_liveHydrated && !force) return { success: true, data: _liveRows }
+    if (_liveInflight) return _liveInflight
+    _liveInflight = (async () => {
+        const res = await listActivitiesApi()
+        if (!res.success) {
+            _liveError = typeof res.error === 'string' ? res.error : 'Activities could not be loaded.'
+            _liveRows = []
+            _liveServer = new Map()
+            _liveHydrated = false
+        } else {
+            _liveError = ''
+            _liveRows = res.data.map(mapApiActivity)
+            _liveServer = new Map(_liveRows.map((row) => [row.id, { sig: signatureOf(row), status: row.mdApprovalStatus }]))
+            _liveHydrated = true
+        }
+        _liveInflight = null
+        emitLive(ACTIVITIES_LIVE_UPDATED_EVENT)
+        return res
+    })()
+    return _liveInflight
+}
+
+const failMessage = (res, fallback) => (res && typeof res.error === 'string' && res.error ? res.error : fallback)
+
+const syncLiveRows = (rows) => {
+    const snapshot = rows.map((row) => ({ ...row }))
+    _liveQueue = _liveQueue
+        .then(async () => {
+            const nextIds = new Set(snapshot.map((row) => row.id))
+            for (const [id] of _liveServer) {
+                if (nextIds.has(id)) continue
+                const res = await deleteActivityApi(id)
+                if (!res.success) throw new Error(failMessage(res, `Could not delete ${id}.`))
+            }
+            for (const row of snapshot) {
+                const server = _liveServer.get(row.id)
+                if (!server) {
+                    const res = await createActivityApi(toApiBody(row))
+                    if (!res.success) throw new Error(failMessage(res, `Could not save ${row.eventName || 'activity'}.`))
+                    continue
+                }
+                if (server.sig !== signatureOf(row)) {
+                    const { type, ...patch } = toApiBody(row)
+                    void type
+                    const res = await patchActivityApi(row.id, patch)
+                    if (!res.success) throw new Error(failMessage(res, `Could not update ${row.id}.`))
+                }
+                if (row.mdApprovalStatus && row.mdApprovalStatus !== server.status) {
+                    const res = await decideActivityApprovalApi(row.id, row.mdApprovalStatus)
+                    if (!res.success) throw new Error(failMessage(res, `Could not update approval for ${row.id}.`))
+                }
+            }
+        })
+        .then(() => hydrateActivities({ force: true }))
+        .catch(async (error) => {
+            emitLive(ACTIVITIES_LIVE_SYNC_FAILED_EVENT, { message: error?.message || 'Activities could not be saved.' })
+            await hydrateActivities({ force: true })
+        })
+}
+
 export const getActivities = () => {
+    if (isLiveApiEnabled()) return _liveRows
     if (_memoryActivities && Array.isArray(_memoryActivities) && _memoryActivities.length > 0) {
         return _memoryActivities
     }
@@ -217,6 +370,11 @@ export const getActivities = () => {
 }
 
 export const saveActivities = (records) => {
+    if (isLiveApiEnabled()) {
+        _liveRows = Array.isArray(records) ? records : []
+        syncLiveRows(_liveRows)
+        return
+    }
     _memoryActivities = records
     try {
         if (typeof localStorage !== 'undefined') {

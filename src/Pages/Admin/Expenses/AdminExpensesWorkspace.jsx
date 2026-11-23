@@ -4,9 +4,11 @@ import { CheckCircle2, ClipboardCheck, BookOpen, Receipt } from 'lucide-react'
 import Approvals from '../../AccountHead/Approvals/Approvals'
 import Accounting from '../../AccountHead/Accounting/Accounting'
 import PaymentVouchers from '../../AccountHead/PaymentVouchers/PaymentVouchers'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 
 export default function AdminExpensesWorkspace({ view = 'approvals' }) {
     const { section } = useParams()
+    const live = isLiveApiEnabled()
 
     const navTabs = [
         {
@@ -43,6 +45,7 @@ export default function AdminExpensesWorkspace({ view = 'approvals' }) {
                         </h2>
                         <p className='text-sm text-[#667085] leading-relaxed'>
                             Per Document 7 compliance, Admin and Super Admin govern administrative authorizations and institutional policies, while the centralized Finance Department (Account Head) maintains all master expense ledgers, salary disbursement records, vouchers, and cash registers.
+                            {live ? ' Approvals, day book and vouchers below load from the live finance API.' : ''}
                         </p>
                     </div>
                 </div>

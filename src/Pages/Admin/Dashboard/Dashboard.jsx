@@ -11,11 +11,47 @@ const fallbackMetrics = [
     { label: 'Documents incomplete', value: '22', context: 'Across active student records', icon: 'documents', to: '/admin/students/student-details' },
 ]
 
-const queues = [
+const demoQueues = [
     { title: 'Admission document verification', description: 'Review identity, guardian and prior-school evidence.', owner: 'Administration', sla: 'Today', status: 'Pending', to: '/admin/front-office/admission-list' },
     { title: 'Transfer certificate approvals', description: 'Validate clearance status before issuing certificates.', owner: 'Administrator', sla: '24 hours', status: 'In review', to: '/admin/tc-request-approval' },
     { title: 'Received leave decisions', description: 'Resolve requests waiting for an administrative decision.', owner: 'Administrator', sla: 'Today', status: 'Pending', to: '/admin/leave-request/received' },
 ]
+
+const queuesFromKpis = (kpis) => {
+    if (!kpis) return []
+    const items = []
+    if (Number(kpis.pendingTc) > 0) {
+        items.push({
+            title: 'Transfer certificate approvals',
+            description: `${kpis.pendingTc} TC request${kpis.pendingTc === 1 ? '' : 's'} awaiting clearance.`,
+            owner: 'Administrator',
+            sla: '24 hours',
+            status: 'In review',
+            to: '/admin/tc-request-approval',
+        })
+    }
+    if (Number(kpis.leaveRequests) > 0) {
+        items.push({
+            title: 'Received leave decisions',
+            description: `${kpis.leaveRequests} leave request${kpis.leaveRequests === 1 ? '' : 's'} waiting for a decision.`,
+            owner: 'Administrator',
+            sla: 'Today',
+            status: 'Pending',
+            to: '/admin/leave-request/received',
+        })
+    }
+    if (Number(kpis.openEscalations) > 0) {
+        items.push({
+            title: 'Open escalations',
+            description: `${kpis.openEscalations} escalation${kpis.openEscalations === 1 ? '' : 's'} in the admin inbox.`,
+            owner: 'Administrator',
+            sla: 'Today',
+            status: 'Pending',
+            to: '/admin/escalation-management',
+        })
+    }
+    return items
+}
 
 const quickActions = [
     { label: 'Review admission enquiries', to: '/admin/front-office/admission-enquiry' },
@@ -59,23 +95,19 @@ const Dashboard = () => {
             { label: 'Open escalations', value: String(liveKpis.openEscalations), context: 'Escalation inbox', icon: 'risk', to: '/admin/escalation-management' },
             { label: 'Unread notifications', value: String(liveKpis.unreadNotifications), context: `${liveKpis.announcementsThisMonth} announcements this month`, icon: 'documents', to: '/admin/notifications' },
         ]
-        : fallbackMetrics
+        : live
+            ? fallbackMetrics.map((metric) => ({ ...metric, value: '—', context: loading ? 'Loading…' : 'Unavailable' }))
+            : fallbackMetrics
+
+    const queues = live ? queuesFromKpis(liveKpis) : demoQueues
 
     return (
         <section className='space-y-4'>
-            {live ? (
-                <div className='rounded-2xl border border-emerald-200 bg-emerald-50/60 px-4 py-3'>
-                    <p className='text-xs font-semibold uppercase tracking-wide text-emerald-800'>
-                        Live campus KPIs · GET /api/v1/admin/dashboard
-                    </p>
-                    {loading ? (
-                        <div className='mt-2'><FeedbackState kind='loading' title='Loading KPIs' description='Fetching admin dashboard…' /></div>
-                    ) : error ? (
-                        <div className='mt-2'><FeedbackState kind='error' title='Dashboard API unavailable' description={error} /></div>
-                    ) : (
-                        <p className='mt-1 text-xs text-slate-600'>Queues below remain demo until those Admin workflows are wired.</p>
-                    )}
-                </div>
+            {live && loading ? (
+                <FeedbackState kind='loading' title='Loading KPIs' description='Fetching campus summary…' />
+            ) : null}
+            {live && error ? (
+                <FeedbackState kind='error' title='Dashboard unavailable' description={error} />
             ) : null}
             <OperationalBriefing
                 title='Administration briefing'

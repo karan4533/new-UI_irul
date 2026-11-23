@@ -9,6 +9,16 @@
  */
 
 import { recordAuditLog, dispatchNotification } from '../AuditAndNotifications/centralAuditEngine.js'
+import { createOpsLiveStore } from '../../services/api/opsLiveStore.js'
+import { isLiveApiEnabled } from '../../services/api/tokenStore.js'
+
+// Live-mode stores (FastAPI /api/v1/ops/*). No mock data is read or seeded when VITE_USE_MOCK=false.
+const liveFiles = createOpsLiveStore({ collection: 'fileroom-register', kind: 'file', idPrefix: 'FILE' })
+const liveInward = createOpsLiveStore({ collection: 'fileroom-register', kind: 'inward', idPrefix: 'INW' })
+const liveOutward = createOpsLiveStore({ collection: 'fileroom-issues', idPrefix: 'ISS-FILE' })
+
+/** Collections the File Room workspace needs hydrated in live mode. */
+export const FILE_ROOM_LIVE_COLLECTIONS = ['fileroom-register', 'fileroom-issues']
 
 export const FILE_MASTER_STORAGE_KEY = 'schoolerp-file-master-v1'
 export const FILE_INWARD_STORAGE_KEY = 'schoolerp-file-inward-v1'
@@ -171,6 +181,7 @@ export const INITIAL_OUTWARD_RECORDS = [
 
 // Storage Accessors
 export const getPhysicalFiles = () => {
+    if (isLiveApiEnabled()) return liveFiles.read()
     try {
         if (typeof localStorage !== 'undefined') {
             const raw = localStorage.getItem(FILE_MASTER_STORAGE_KEY)
@@ -191,6 +202,10 @@ export const getPhysicalFiles = () => {
 }
 
 export const savePhysicalFiles = (files) => {
+    if (isLiveApiEnabled()) {
+        liveFiles.write(files)
+        return
+    }
     _memoryFiles = files
     try {
         if (typeof localStorage !== 'undefined') {
@@ -202,6 +217,7 @@ export const savePhysicalFiles = (files) => {
 }
 
 export const getFileInwardRecords = () => {
+    if (isLiveApiEnabled()) return liveInward.read()
     try {
         if (typeof localStorage !== 'undefined') {
             const raw = localStorage.getItem(FILE_INWARD_STORAGE_KEY)
@@ -222,6 +238,10 @@ export const getFileInwardRecords = () => {
 }
 
 export const saveFileInwardRecords = (records) => {
+    if (isLiveApiEnabled()) {
+        liveInward.write(records)
+        return
+    }
     _memoryInward = records
     try {
         if (typeof localStorage !== 'undefined') {
@@ -233,6 +253,7 @@ export const saveFileInwardRecords = (records) => {
 }
 
 export const getFileOutwardRecords = () => {
+    if (isLiveApiEnabled()) return evaluateOverdueFiles(liveOutward.read())
     try {
         if (typeof localStorage !== 'undefined') {
             const raw = localStorage.getItem(FILE_OUTWARD_STORAGE_KEY)
@@ -289,6 +310,10 @@ const evaluateOverdueFiles = (records) => {
 }
 
 export const saveFileOutwardRecords = (records) => {
+    if (isLiveApiEnabled()) {
+        liveOutward.write(records)
+        return
+    }
     _memoryOutward = records
     try {
         if (typeof localStorage !== 'undefined') {

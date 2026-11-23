@@ -1,5 +1,17 @@
+import { createOpsLiveStore } from '../../../services/api/opsLiveStore.js'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore.js'
+
 const STORAGE_KEY = 'goods-received-pass-front-office'
 const GR_COUNTER_KEY = 'goods-received-pass-gr-counter'
+
+const goodsReceivedLiveStore = createOpsLiveStore({
+    collection: 'goods-received-passes',
+    api: 'front-office',
+    idPrefix: 'GRP',
+    idKeys: ['grNo'],
+})
+
+let _memoryGoodsReceivedPasses = null
 
 export const PAYMENT_TYPES = ['CASH', 'CREDIT']
 
@@ -204,7 +216,23 @@ const hydrateRecord = (record) => ({
     status: record.status ?? deriveOverallStatus(record.signatories),
 })
 
+export const hydrateGoodsReceivedPassesFromApi = async ({ force = true } = {}) => {
+    if (!isLiveApiEnabled()) return getGoodsReceivedPasses()
+    const res = await goodsReceivedLiveStore.hydrate({ force })
+    if (!res.success) {
+        _memoryGoodsReceivedPasses = []
+        throw new Error(typeof res.error === 'string' ? res.error : 'Could not load goods received passes.')
+    }
+    _memoryGoodsReceivedPasses = goodsReceivedLiveStore.read().map(hydrateRecord)
+    return _memoryGoodsReceivedPasses
+}
+
 export const getGoodsReceivedPasses = () => {
+    if (isLiveApiEnabled()) {
+        return Array.isArray(_memoryGoodsReceivedPasses)
+            ? _memoryGoodsReceivedPasses
+            : goodsReceivedLiveStore.read().map(hydrateRecord)
+    }
     const stored = localStorage.getItem(STORAGE_KEY)
     if (stored) {
         const records = JSON.parse(stored).map(hydrateRecord)
@@ -217,6 +245,11 @@ export const getGoodsReceivedPasses = () => {
 }
 
 export const saveGoodsReceivedPasses = (records) => {
+    _memoryGoodsReceivedPasses = records
+    if (isLiveApiEnabled()) {
+        goodsReceivedLiveStore.write(records)
+        return
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(records))
 }
 
@@ -225,9 +258,13 @@ export const getGoodsReceivedPassById = (id) =>
 
 export const addGoodsReceivedPass = (payload) => {
     const records = getGoodsReceivedPasses()
-    const grNo = generateGrNo()
+    const grNo = isLiveApiEnabled()
+        ? formatPassNumber(
+            records.reduce((max, row) => Math.max(max, parsePassNumber(row.grNo)), 0) + 1,
+        )
+        : generateGrNo()
     const record = hydrateRecord({
-        id: `grp-${grNo}`,
+        id: `GRP-${grNo}`,
         grNo,
         ...payload,
         status: deriveOverallStatus(payload.signatories),

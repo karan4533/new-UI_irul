@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowUpRight, Download, Plus } from 'lucide-react'
 import { NavLink, useLocation, useSearchParams } from 'react-router-dom'
 import DataTable from '../ui/DataTable'
 import DataToolbar from '../ui/DataToolbar'
 import FeedbackState from '../ui/FeedbackState'
-import IntegrationNotice from '../ui/IntegrationNotice'
 import PageHeader from '../ui/PageHeader'
 import Pagination from '../ui/Pagination'
 import StatusBadge from '../ui/StatusBadge'
@@ -20,6 +19,8 @@ import {
 } from './escalationData'
 import { formatEscalatedToDisplay } from './escalationUsersData'
 import { useEscalationContext } from './useEscalationContext'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
+import { listEscalations } from '../../services/api/escalationApiService'
 
 const EscalationListPage = ({ roleKey }) => {
     const { pathname } = useLocation()
@@ -37,14 +38,48 @@ const EscalationListPage = ({ roleKey }) => {
     const [page, setPage] = useState(initialTableState.page)
     const [pageSize, setPageSize] = useState(initialTableState.pageSize)
 
-    const sentEscalations = useMemo(
-        () => getSentEscalations(effectiveRoleKey || roleKey, currentUser),
-        [effectiveRoleKey, roleKey, currentUser],
+    const live = isLiveApiEnabled()
+    const seesAll = ['Super Admin', 'Admin'].includes(roleConfig?.roleLabel)
+    const [liveSent, setLiveSent] = useState([])
+    const [liveReceived, setLiveReceived] = useState([])
+    const [liveLoading, setLiveLoading] = useState(live)
+    const [liveError, setLiveError] = useState('')
+
+    const loadLive = useCallback(async () => {
+        setLiveLoading(true)
+        setLiveError('')
+        const [sent, received] = await Promise.all([
+            canAdd ? listEscalations('mine') : Promise.resolve({ success: true, data: [] }),
+            listEscalations(seesAll ? 'all' : 'received'),
+        ])
+        setLiveLoading(false)
+        const failure = [sent, received].find((res) => !res.success)
+        if (failure) {
+            setLiveSent([])
+            setLiveReceived([])
+            setLiveError(typeof failure.error === 'string' ? failure.error : 'Failed to load escalations.')
+            return
+        }
+        setLiveSent(sent.data)
+        setLiveReceived(received.data)
+    }, [canAdd, seesAll])
+
+    useEffect(() => {
+        if (!live) return undefined
+        const timer = setTimeout(() => { loadLive() }, 0)
+        return () => clearTimeout(timer)
+    }, [live, loadLive])
+
+    const mockSent = useMemo(
+        () => (live ? [] : getSentEscalations(effectiveRoleKey || roleKey, currentUser)),
+        [live, effectiveRoleKey, roleKey, currentUser],
     )
-    const receivedEscalations = useMemo(
-        () => getReceivedEscalations(effectiveRoleKey || roleKey, currentUser),
-        [effectiveRoleKey, roleKey, currentUser],
+    const mockReceived = useMemo(
+        () => (live ? [] : getReceivedEscalations(effectiveRoleKey || roleKey, currentUser)),
+        [live, effectiveRoleKey, roleKey, currentUser],
     )
+    const sentEscalations = live ? liveSent : mockSent
+    const receivedEscalations = live ? liveReceived : mockReceived
     const activeList = listView === 'received' ? receivedEscalations : sentEscalations
 
     const filtered = useMemo(() => {
@@ -57,7 +92,7 @@ const EscalationListPage = ({ roleKey }) => {
             if (from && itemDate < from) return false
             if (to && itemDate > to) return false
             if (!query) return true
-            return [item.id, item.escalatedBy, item.description, item.escalatedTo, item.escalatedToUserName]
+            return [item.id, item.displayId, item.escalatedBy, item.description, item.escalatedTo, item.escalatedToUserName]
                 .some((value) => String(value || '').toLowerCase().includes(query))
         })
     }, [activeList, fromDate, search, statusFilter, toDate])
@@ -89,7 +124,7 @@ const EscalationListPage = ({ roleKey }) => {
     }
 
     const columns = [
-        { key: 'id', label: 'Escalation ID', required: true, render: (item) => <span className='font-semibold text-[var(--erp-ink)]'>{item.id}</span> },
+        { key: 'id', label: 'Escalation ID', required: true, render: (item) => <span className='font-semibold text-[var(--erp-ink)]'>{item.displayId || item.id}</span> },
         { key: 'escalatedBy', label: 'Raised by', render: (item) => <span><span className='block font-medium text-[var(--erp-ink)]'>{item.escalatedBy}</span><span className='text-xs text-[var(--erp-muted)]'>{item.escalatedByRole}</span></span> },
         { key: 'escalatedTo', label: 'Owner', render: formatEscalatedToDisplay },
         { key: 'description', label: 'Issue', render: (item) => <span className='line-clamp-2 max-w-sm'>{item.description}</span> },
@@ -118,17 +153,23 @@ const EscalationListPage = ({ roleKey }) => {
                 ) : null}
             />
 
-            <IntegrationNotice
-                state='demo'
-                title='Browser-stored escalation queue'
-                description='Ownership and SLA are calculated in the UI. Notification delivery, evidence storage, audit retention and reopen routing require the backend service.'
-            />
-
             <div className='inline-flex rounded-lg border border-[var(--erp-line-strong)] bg-white p-1' role='tablist' aria-label='Escalation queue'>
                 {canAdd && <button type='button' role='tab' aria-selected={listView === 'sent'} onClick={() => switchView('sent')} className={`min-h-9 rounded-md px-3 text-sm font-semibold ${listView === 'sent' ? 'bg-[var(--erp-ink)] text-white' : 'text-[var(--erp-slate)]'}`}>Sent ({sentEscalations.length})</button>}
                 <button type='button' role='tab' aria-selected={listView === 'received'} onClick={() => switchView('received')} className={`min-h-9 rounded-md px-3 text-sm font-semibold ${listView === 'received' ? 'bg-[var(--erp-ink)] text-white' : 'text-[var(--erp-slate)]'}`}>Received ({receivedEscalations.length})</button>
             </div>
 
+            {live && liveLoading && (
+                <FeedbackState kind='loading' title='Loading escalations' description='Fetching your escalation queue…' />
+            )}
+            {live && !liveLoading && liveError && (
+                <FeedbackState
+                    kind='error'
+                    title='Escalations API unavailable'
+                    description={liveError}
+                    action={<button type='button' onClick={loadLive} className='min-h-10 rounded-lg border border-[var(--erp-line-strong)] px-4 text-sm font-semibold text-[var(--erp-ink)]'>Retry</button>}
+                />
+            )}
+            {!(live && (liveLoading || liveError)) && (
             <div className='overflow-hidden rounded-[var(--erp-radius-surface)] border border-[var(--erp-line)] bg-white'>
                 <DataToolbar
                     query={search}
@@ -173,6 +214,7 @@ const EscalationListPage = ({ roleKey }) => {
                 />
                 <Pagination {...pagination} onPageChange={setPage} onPageSizeChange={(value) => { setPageSize(value); setPage(1) }} />
             </div>
+            )}
         </section>
     )
 }

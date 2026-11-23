@@ -72,7 +72,7 @@ export const getEscalationStartTime = (escalation) =>
     escalation.escalatedAt ? new Date(escalation.escalatedAt) : parseEscalationDate(escalation.escalationDate)
 
 export const getResolveByDate = (escalation) =>
-    new Date(getEscalationStartTime(escalation).getTime() + RESOLUTION_SLA_HOURS * 60 * 60 * 1000)
+    escalation.resolveBy ? new Date(escalation.resolveBy) : new Date(getEscalationStartTime(escalation).getTime() + RESOLUTION_SLA_HOURS * 60 * 60 * 1000)
 
 export const formatDateTime = (date) => {
     const value = date instanceof Date ? date : new Date(date)

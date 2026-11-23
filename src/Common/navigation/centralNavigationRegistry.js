@@ -226,7 +226,14 @@ export const ensureEnterpriseAndWorkModules = (items = [], role = null) => {
     const basePath = ROLE_TO_BASE_PATH[safeRole] || `/${safeRole}`
     const result = [...items]
 
-    const hasItem = (predicate) => result.some(predicate)
+    // Nested subLinks (e.g. Admin "Activities & Monitoring") must count as present
+    // so enterprise inject does not add a duplicate top-level entry.
+    const itemMatches = (item, predicate) => {
+        if (predicate(item)) return true
+        if (Array.isArray(item.subLinks)) return item.subLinks.some((sub) => itemMatches(sub, predicate))
+        return false
+    }
+    const hasItem = (predicate) => result.some((item) => itemMatches(item, predicate))
 
     // 1. Department Helpdesk
     const hasHelpdesk = hasItem((item) => {

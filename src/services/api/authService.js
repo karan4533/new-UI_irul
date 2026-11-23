@@ -48,7 +48,9 @@ function mapBackendRole(roleCode) {
 
 function buildSessionUser(me, role) {
   const email = me?.email || ''
+  const profile = me?.profile || {}
   const name =
+    profile.name ||
     me?.full_name ||
     me?.name ||
     (email ? email.split('@')[0] : 'User')
@@ -58,13 +60,14 @@ function buildSessionUser(me, role) {
     name,
     role,
     roleLabel: me?.role_name || me?.role_label || role,
-    department: me?.campus?.name || me?.department || 'Queen Mira International School',
-    designation: me?.role_name || role,
-    employeeId: me?.employee_code || (me?.id != null ? String(me.id) : undefined),
-    status: me?.is_active === false ? 'Inactive' : 'Active',
+    department: profile.department || me?.department || me?.campus?.name || 'Queen Mira International School',
+    designation: profile.designation || me?.designation || me?.role_name || role,
+    employeeId: profile.staffCode || me?.employee_code || me?.staff_code || (me?.id != null ? String(me.id) : undefined),
+    status: profile.status || (me?.is_active === false ? 'Inactive' : 'Active'),
     permissions: me?.permissions || [],
     campus: me?.campus || null,
     mustChangePassword: Boolean(me?.must_change_password),
+    profile,
     source: 'backend',
   }
 }

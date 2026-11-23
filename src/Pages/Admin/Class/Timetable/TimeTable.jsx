@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useEffect, useState, useMemo } from 'react'
 import { NavLink } from 'react-router-dom'
 import { Plus, Download, Calendar, Users, Eye, Trash2 } from 'lucide-react'
 import { toast } from 'react-toastify'
@@ -8,10 +8,14 @@ import {
     SECTIONS,
     DAYS,
     getClassTimetables,
+    getClassTimetableHydrateStatus,
+    hydrateClassTimetablesFromApi,
     saveClassTimetables,
 } from '../../../Principal/ClassTimetable/classTimetableData'
+import { canUseAcademicsApi } from '../../../../services/api/academicsApiService'
 
 const TimeTable = () => {
+    const live = canUseAcademicsApi()
     const [timetables, setTimetables] = useState(() => getClassTimetables())
     const [selectedClass, setSelectedClass] = useState('')
     const [selectedSection, setSelectedSection] = useState('')
@@ -19,6 +23,26 @@ const TimeTable = () => {
     const [searchTerm, setSearchTerm] = useState('')
     const [exportModal, setExportModal] = useState(false)
     const [viewMode, setViewMode] = useState('periods') // 'periods' | 'summary'
+    const [hydrateStatus, setHydrateStatus] = useState(() => getClassTimetableHydrateStatus())
+
+    useEffect(() => {
+        if (!live) return undefined
+        let cancelled = false
+        hydrateClassTimetablesFromApi({ force: true }).then(() => {
+            if (cancelled) return
+            setTimetables(getClassTimetables())
+            setHydrateStatus(getClassTimetableHydrateStatus())
+        })
+        const onUpdated = () => {
+            setTimetables(getClassTimetables())
+            setHydrateStatus(getClassTimetableHydrateStatus())
+        }
+        window.addEventListener('schoolerp-class-timetables-updated', onUpdated)
+        return () => {
+            cancelled = true
+            window.removeEventListener('schoolerp-class-timetables-updated', onUpdated)
+        }
+    }, [live])
 
     const clearFilters = () => {
         setSelectedClass('')
@@ -76,7 +100,22 @@ const TimeTable = () => {
     }
 
     return (
-        <section>
+        <section className='space-y-3'>
+            {live && hydrateStatus.status === 'loading' ? (
+                <div className='rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600'>
+                    Loading class timetables from the academics API…
+                </div>
+            ) : null}
+            {live && hydrateStatus.status === 'error' ? (
+                <div className='rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800'>
+                    {hydrateStatus.error || 'Could not load class timetables.'}
+                </div>
+            ) : null}
+            {live && hydrateStatus.status === 'ready' ? (
+                <div className='rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600'>
+                    Live class timetables ({timetables.length} records) from /api/v1/academics/class-timetables.
+                </div>
+            ) : null}
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='flex justify-between md:items-center sm:items-stretch md:flex-row sm:flex-col flex-col gap-y-4 mb-4'>
                     <button

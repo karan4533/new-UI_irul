@@ -4,7 +4,7 @@ const MaterialGatePassList = () => (
     <FrontOfficeRecordsList
         collection='material-gate-passes'
         title='Material Gate Pass'
-        description='Material gate passes from the Front Office API. Add/edit remain local until field-mapped.'
+        description='Material gate passes for campus equipment and supplies movement.'
         addPath='/front-office/add-material-gate-pass'
         viewPathPrefix='/front-office/material-gate-pass/view'
         searchKeys={['id', 'requestedBy', 'purpose', 'status']}

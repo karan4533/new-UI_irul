@@ -104,14 +104,6 @@ const ViewTcRequestApproval = () => {
                 Back to list
             </button>
 
-            {live ? (
-                <div className='rounded-2xl border border-emerald-200 bg-emerald-50/60 px-4 py-3'>
-                    <p className='text-xs font-semibold uppercase tracking-wide text-emerald-800'>
-                        Live TC decision · GET/POST /api/v1/tc-requests/&#123;ref&#125;
-                    </p>
-                </div>
-            ) : null}
-
             {loading ? (
                 <FeedbackState kind='loading' title='Loading TC request' description='Fetching from the TC API…' />
             ) : !request ? (

@@ -1,3 +1,5 @@
+import LiveOpsGate from '../ui/LiveOpsGate'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
 import React, { useState, useMemo, useEffect } from 'react'
 import {
     Package,
@@ -62,6 +64,13 @@ import {
     giveAuditQuantities
 } from './storesProcurementData'
 import {
+    readGoodsReceivedPassRows,
+    readMaterialGatePassRows,
+    STORES_LIVE_COLLECTIONS,
+    updateLiveGoodsReceivedPass,
+    updateLiveMaterialGatePass
+} from './storesProcurementData'
+import {
     getGoodsReceivedPasses,
     updateGoodsReceivedPass
 } from '../../Pages/FrontOffice/GoodsReceivedPass/goodsReceivedPassData'
@@ -70,7 +79,7 @@ import {
     updateMaterialGatePass
 } from '../../Pages/FrontOffice/MaterialGatePass/materialGatePassData'
 
-export default function StoresProcurementWorkspace({ defaultTab = 'overview', roleOverride = null }) {
+function StoresProcurementWorkspaceInner({ defaultTab = 'overview', roleOverride = null }) {
     const { role: authRole, email: authEmail, name: authName } = useAuth()
     const activeRole = roleOverride || authRole || 'stationery-store-manager'
     const roleLabel = getProfileLabel(activeRole)
@@ -135,12 +144,12 @@ export default function StoresProcurementWorkspace({ defaultTab = 'overview', ro
 
     const goodsReceivedPasses = useMemo(() => {
         void refreshKey
-        return getGoodsReceivedPasses()
+        return readGoodsReceivedPassRows(getGoodsReceivedPasses)
     }, [refreshKey])
 
     const materialGatePasses = useMemo(() => {
         void refreshKey
-        return getMaterialGatePasses()
+        return readMaterialGatePassRows(getMaterialGatePasses)
     }, [refreshKey])
 
     const auditQuantities = useMemo(() => {
@@ -462,7 +471,7 @@ export default function StoresProcurementWorkspace({ defaultTab = 'overview', ro
         try {
             const pass = goodsReceivedPasses.find((p) => p.id === passId)
             if (!pass) return
-            const updated = updateGoodsReceivedPass(passId, {
+            const updated = (isLiveApiEnabled() ? updateLiveGoodsReceivedPass : updateGoodsReceivedPass)(passId, {
                 signatories: {
                     ...pass.signatories,
                     storeKeeper: { role: 'Store Keeper', name: authName || 'Selvam R.' },
@@ -479,7 +488,7 @@ export default function StoresProcurementWorkspace({ defaultTab = 'overview', ro
         try {
             const pass = materialGatePasses.find((p) => p.id === passId)
             if (!pass) return
-            const updated = updateMaterialGatePass(passId, {
+            const updated = (isLiveApiEnabled() ? updateLiveMaterialGatePass : updateMaterialGatePass)(passId, {
                 approvals: {
                     ...pass.approvals,
                     storeKeeper: { role: 'Store Keeper', name: authName || 'Selvam R.' }
@@ -3879,3 +3888,11 @@ export default function StoresProcurementWorkspace({ defaultTab = 'overview', ro
     )
 }
 
+
+export default function StoresProcurementWorkspace(props) {
+    return (
+        <LiveOpsGate collections={STORES_LIVE_COLLECTIONS} title='Stores & Procurement'>
+            <StoresProcurementWorkspaceInner {...props} />
+        </LiveOpsGate>
+    )
+}

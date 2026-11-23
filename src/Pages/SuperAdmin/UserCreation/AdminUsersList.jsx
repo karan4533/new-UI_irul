@@ -105,15 +105,13 @@ const AdminUsersList = () => {
                 )}
             />
 
-            <IntegrationNotice
-                state={listSource === 'backend' ? 'connected' : listSource === 'error' ? 'failed' : 'demo'}
-                title={listSource === 'backend' ? 'Live administrator directory' : listSource === 'error' ? 'Administrator API unavailable' : 'Browser-stored administrator directory'}
-                description={listSource === 'backend'
-                    ? 'GET /api/v1/admin/users?role=admin · create via POST /api/v1/admin/users. Per-module permission toggles are not writable on the server.'
-                    : listSource === 'error'
-                        ? listError
-                        : 'Profiles and module policies are local to this browser. Production provisioning, invitations, audit trails and API authorization are not connected.'}
-            />
+            {listSource === 'error' ? (
+                <IntegrationNotice
+                    state='failed'
+                    title='Administrator directory unavailable'
+                    description={listError || 'Could not load administrator accounts.'}
+                />
+            ) : null}
 
             {listLoading ? (
                 <FeedbackState kind='loading' title='Loading administrators' description='Fetching from the admin users API…' />

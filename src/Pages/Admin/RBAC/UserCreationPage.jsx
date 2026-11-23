@@ -153,15 +153,16 @@ const UserCreationPage = () => {
                 )}
             />
 
-            <IntegrationNotice
-                state={listSource === 'backend' ? 'connected' : listSource === 'error' ? 'failed' : 'demo'}
-                title={listSource === 'backend' ? 'Live staff directory' : listSource === 'error' ? 'Users API unavailable' : 'Local account directory'}
-                description={listSource === 'backend'
-                    ? 'GET/POST/PATCH /api/v1/admin/users. Hard delete is not available — deactivate only. Role permission matrix edits remain blocked.'
-                    : listSource === 'error'
-                        ? listError
-                        : 'Accounts and status changes are stored in this browser. Production identity provisioning requires the authentication backend.'}
-            />
+            {listSource === 'error' ? (
+                <FeedbackState kind='error' title='Unable to load users' description={listError} />
+            ) : null}
+            {listSource !== 'backend' && listSource !== 'error' ? (
+                <IntegrationNotice
+                    state='demo'
+                    title='Local account directory'
+                    description='Accounts and status changes are stored in this browser.'
+                />
+            ) : null}
 
             {listLoading ? (
                 <FeedbackState kind='loading' title='Loading users' description='Fetching from the admin users API…' />
@@ -226,7 +227,7 @@ const UserCreationPage = () => {
                 onConfirm={confirmPendingAction}
                 title={`${pendingAction?.user?.status === 'Active' ? 'Deactivate' : 'Activate'} this user?`}
                 description={live
-                    ? 'This sends PATCH /api/v1/admin/users/{id} with Active or Inactive status.'
+                    ? 'The user’s sign-in eligibility will change immediately.'
                     : 'The user’s sign-in eligibility will change in this browser dataset.'}
                 confirmLabel='Confirm status change'
                 tone={pendingAction?.user?.status === 'Active' ? 'danger' : 'primary'}

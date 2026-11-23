@@ -1,15 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowUpRight, Download, RefreshCw } from 'lucide-react'
 import { NavLink, useSearchParams } from 'react-router-dom'
 import {
     DataTable,
     DataToolbar,
-    IntegrationNotice,
     PageHeader,
     Pagination,
     StatusBadge,
 } from '../../../Common/ui'
 import { paginateRows, parseTableState, serializeTableState } from '../../../Common/ui/dataTableState'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { listApprovalsInbox } from '../../../services/api/approvalsApiService'
 import {
     APPROVAL_STATUSES,
     filterApprovalRequests,
@@ -21,14 +22,32 @@ import {
 } from './approvalsData'
 
 const ApprovalsList = () => {
+    const live = isLiveApiEnabled()
     const [urlParams, setUrlParams] = useSearchParams()
     const initialTableState = parseTableState(urlParams)
-    const [records, setRecords] = useState(() => getAllApprovalRequests())
+    const [records, setRecords] = useState(() => (live ? [] : getAllApprovalRequests()))
     const [search, setSearch] = useState(initialTableState.query)
     const [category, setCategory] = useState(initialTableState.filters.category || '')
     const [status, setStatus] = useState(initialTableState.filters.status || '')
     const [page, setPage] = useState(initialTableState.page)
     const [pageSize, setPageSize] = useState(urlParams.has('pageSize') ? initialTableState.pageSize : 5)
+
+    const loadLive = useCallback(async () => {
+        const res = await listApprovalsInbox()
+        if (!res.success) {
+            setRecords([])
+            return
+        }
+        setRecords(Array.isArray(res.data) ? res.data : [])
+    }, [])
+
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            setRecords(getAllApprovalRequests())
+            return
+        }
+        loadLive()
+    }, [loadLive])
 
     const summary = useMemo(() => getApprovalSummary(records), [records])
     const filteredRecords = useMemo(
@@ -62,12 +81,6 @@ const ApprovalsList = () => {
                 title='Approval inbox'
                 description='Finance, data, HR, procurement, budget and policy requests routed for final governance review.'
                 context={`${summary.pending} pending · ${summary.highPriority} high-priority pending`}
-            />
-
-            <IntegrationNotice
-                state='demo'
-                title='Browser-stored approval queue'
-                description='Requests and decisions are local demo records. Production routing, segregation-of-duties checks, notifications and immutable audit events require backend services.'
             />
 
             <div className='grid grid-cols-2 gap-3 lg:grid-cols-5'>

@@ -10,6 +10,22 @@
 
 import { recordAuditLog, dispatchNotification, getAuditLogs } from '../AuditAndNotifications/centralAuditEngine.js'
 import { ENTERPRISE_EMPLOYEES } from '../AttendanceAndLeave/attendanceLeaveData.js'
+import { createOpsLiveStore } from '../../services/api/opsLiveStore.js'
+import { isLiveApiEnabled } from '../../services/api/tokenStore.js'
+
+const visitorLiveStore = createOpsLiveStore({
+    collection: 'gate-visitors',
+    api: 'ops',
+    idPrefix: 'VIS',
+    idKeys: ['badgeNumber'],
+})
+
+const studentGatePassLiveStore = createOpsLiveStore({
+    collection: 'student-gate-passes',
+    api: 'front-office',
+    idPrefix: 'SGP',
+    idKeys: ['passId', 'gatePassId'],
+})
 
 export const GATE_PASS_STORAGE_KEY = 'schoolerp-gate-passes-v1'
 export const VISITOR_LOG_STORAGE_KEY = 'schoolerp-visitor-gate-logs-v1'
@@ -652,7 +668,22 @@ export const calculateVisitDuration = (entryDate, entryTime, exitDate, exitTime,
 // VISITOR MANAGEMENT ENGINE
 // ============================================================================
 
+export const hydrateVisitorLogsFromApi = async ({ force = true } = {}) => {
+    if (!isLiveApiEnabled()) return getVisitorLogs()
+    const res = await visitorLiveStore.hydrate({ force })
+    if (!res.success) {
+        _memoryVisitorLogs = []
+        throw new Error(typeof res.error === 'string' ? res.error : 'Could not load visitors.')
+    }
+    _memoryVisitorLogs = visitorLiveStore.read()
+    notifyMovementSync({ type: 'VISITORS_HYDRATED' })
+    return _memoryVisitorLogs
+}
+
 export const getVisitorLogs = () => {
+    if (isLiveApiEnabled()) {
+        return Array.isArray(_memoryVisitorLogs) ? _memoryVisitorLogs : []
+    }
     try {
         if (typeof localStorage !== 'undefined') {
             const raw = localStorage.getItem(VISITOR_LOG_STORAGE_KEY)
@@ -673,10 +704,15 @@ export const getVisitorLogs = () => {
 }
 
 export const saveVisitorLogs = (logs) => {
-    _memoryVisitorLogs = logs
+    _memoryVisitorLogs = Array.isArray(logs) ? logs : []
+    if (isLiveApiEnabled()) {
+        visitorLiveStore.write(_memoryVisitorLogs)
+        notifyMovementSync({ type: 'VISITORS_SAVED' })
+        return
+    }
     try {
         if (typeof localStorage !== 'undefined') {
-            localStorage.setItem(VISITOR_LOG_STORAGE_KEY, JSON.stringify(logs))
+            localStorage.setItem(VISITOR_LOG_STORAGE_KEY, JSON.stringify(_memoryVisitorLogs))
         }
     } catch {
         /* ignore */
@@ -855,7 +891,22 @@ export const getVisitorById = (id) => {
 // STUDENT GATE PASS MANAGEMENT ENGINE
 // ============================================================================
 
+export const hydrateStudentGatePassesFromApi = async ({ force = true } = {}) => {
+    if (!isLiveApiEnabled()) return getStudentGatePasses()
+    const res = await studentGatePassLiveStore.hydrate({ force })
+    if (!res.success) {
+        _memoryStudentGatePasses = []
+        throw new Error(typeof res.error === 'string' ? res.error : 'Could not load student gate passes.')
+    }
+    _memoryStudentGatePasses = studentGatePassLiveStore.read()
+    notifyMovementSync({ type: 'GATE_PASSES_HYDRATED' })
+    return evaluateStudentGatePassOverdue(_memoryStudentGatePasses)
+}
+
 export const getStudentGatePasses = () => {
+    if (isLiveApiEnabled()) {
+        return evaluateStudentGatePassOverdue(Array.isArray(_memoryStudentGatePasses) ? _memoryStudentGatePasses : [])
+    }
     try {
         if (typeof localStorage !== 'undefined') {
             const raw = localStorage.getItem(STUDENT_GATE_PASS_STORAGE_KEY)
@@ -945,12 +996,17 @@ const evaluateStudentGatePassOverdue = (passes) => {
 }
 
 export const saveStudentGatePasses = (passes) => {
-    _memoryStudentGatePasses = passes
+    _memoryStudentGatePasses = Array.isArray(passes) ? passes : []
+    if (isLiveApiEnabled()) {
+        studentGatePassLiveStore.write(_memoryStudentGatePasses)
+        notifyMovementSync({ type: 'GATE_PASSES_SAVED' })
+        return
+    }
     try {
         if (typeof localStorage !== 'undefined') {
-            localStorage.setItem(STUDENT_GATE_PASS_STORAGE_KEY, JSON.stringify(passes))
+            localStorage.setItem(STUDENT_GATE_PASS_STORAGE_KEY, JSON.stringify(_memoryStudentGatePasses))
             // Also keep legacy store in sync for any unmodified subviews
-            localStorage.setItem(LEGACY_STUDENT_GATE_PASS_KEY, JSON.stringify(passes))
+            localStorage.setItem(LEGACY_STUDENT_GATE_PASS_KEY, JSON.stringify(_memoryStudentGatePasses))
         }
     } catch {
         /* ignore */

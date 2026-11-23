@@ -81,11 +81,6 @@ const FrontOfficeRecordsList = ({
                 ) : null}
             </div>
 
-            {source === 'backend' ? (
-                <p className='text-xs font-medium text-[#027A48]'>
-                    Live · GET /api/v1/front-office/{collection}
-                </p>
-            ) : null}
             {source === 'error' ? (
                 <FeedbackState kind='error' title='Front Office API unavailable' description={error} />
             ) : null}

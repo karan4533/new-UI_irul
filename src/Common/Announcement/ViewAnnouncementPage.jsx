@@ -199,13 +199,7 @@ export default function ViewAnnouncementPage({ roleKey }) {
                 )}
             />
 
-            {live ? (
-                <IntegrationNotice
-                    state='connected'
-                    title='Live announcement'
-                    description='Details, acknowledgements and replies use /api/v1/announcements.'
-                />
-            ) : (
+            {live ? null : (
                 <IntegrationNotice
                     state='demo'
                     title='Acknowledgements and replies are local'

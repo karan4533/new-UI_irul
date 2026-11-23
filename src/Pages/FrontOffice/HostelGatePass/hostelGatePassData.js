@@ -1,4 +1,6 @@
 import noProfile from '../../../assets/images/no-profile.png'
+import { createOpsLiveStore } from '../../../services/api/opsLiveStore.js'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore.js'
 import {
     formatGatePassDate,
     formatOutTimeForDisplay,
@@ -54,6 +56,15 @@ export const DEFAULT_HOSTEL_GATE_PASS_FORM = {
 const STORAGE_KEY = 'hostel-gate-pass-front-office'
 const COUNTER_KEY = 'hostel-gate-pass-hgp-counter'
 
+const hostelLiveStore = createOpsLiveStore({
+    collection: 'hostel-gate-passes',
+    api: 'front-office',
+    idPrefix: 'HGP',
+    idKeys: ['gatePassId'],
+})
+
+let _memoryHostelGatePasses = null
+
 const readRecords = () => {
     try {
         const stored = localStorage.getItem(STORAGE_KEY)
@@ -72,15 +83,40 @@ const writeRecords = (records) => {
 }
 
 const nextGatePassId = () => {
+    if (isLiveApiEnabled()) {
+        const rows = Array.isArray(_memoryHostelGatePasses) ? _memoryHostelGatePasses : hostelLiveStore.read()
+        const max = rows.reduce((acc, row) => {
+            const tail = String(row.id || row.gatePassId || '').split('-').pop()
+            const num = Number(tail)
+            return Number.isFinite(num) ? Math.max(acc, num) : acc
+        }, 0)
+        return `HGP-${String(max + 1).padStart(4, '0')}`
+    }
     const current = Number(localStorage.getItem(COUNTER_KEY) || 0) + 1
     localStorage.setItem(COUNTER_KEY, String(current))
     return `HGP-${String(current).padStart(3, '0')}`
 }
 
-export const getHostelGatePasses = () => readRecords()
+export const hydrateHostelGatePassesFromApi = async ({ force = true } = {}) => {
+    if (!isLiveApiEnabled()) return getHostelGatePasses()
+    const res = await hostelLiveStore.hydrate({ force })
+    if (!res.success) {
+        _memoryHostelGatePasses = []
+        throw new Error(typeof res.error === 'string' ? res.error : 'Could not load hostel gate passes.')
+    }
+    _memoryHostelGatePasses = hostelLiveStore.read()
+    return _memoryHostelGatePasses
+}
+
+export const getHostelGatePasses = () => {
+    if (isLiveApiEnabled()) {
+        return Array.isArray(_memoryHostelGatePasses) ? _memoryHostelGatePasses : hostelLiveStore.read()
+    }
+    return readRecords()
+}
 
 export const getHostelGatePassById = (id) =>
-    readRecords().find((record) => record.id === id) ?? null
+    getHostelGatePasses().find((record) => record.id === id || record.gatePassId === id) ?? null
 
 const buildRecordPayload = (payload, existing = null) => {
     const studentId = String(payload.studentId || '').trim()
@@ -113,17 +149,28 @@ const buildRecordPayload = (payload, existing = null) => {
             city: payload.city || '',
             profile: payload.profileImage || noProfile,
             hostel: payload.hostel,
+            hostelName: payload.hostel,
             leaveType: payload.leaveType,
             reason,
             outDate,
             outTime,
             returnDate,
             returnTime,
+            date: outDate,
             status: payload.status,
             parentApproval: existing?.parentApproval || 'Pending',
             principalApproval: existing?.principalApproval || 'Pending',
         },
     }
+}
+
+const persistRows = (rows) => {
+    _memoryHostelGatePasses = rows
+    if (isLiveApiEnabled()) {
+        hostelLiveStore.write(rows)
+        return
+    }
+    writeRecords(rows)
 }
 
 export const addHostelGatePass = (payload) => {
@@ -138,13 +185,13 @@ export const addHostelGatePass = (payload) => {
         createdAt: new Date().toISOString(),
     }
 
-    writeRecords([record, ...readRecords()])
+    persistRows([record, ...getHostelGatePasses()])
     return { success: true, record }
 }
 
 export const updateHostelGatePass = (id, payload) => {
-    const records = readRecords()
-    const index = records.findIndex((record) => record.id === id)
+    const records = [...getHostelGatePasses()]
+    const index = records.findIndex((record) => record.id === id || record.gatePassId === id)
     if (index < 0) return { success: false, message: 'Gate pass not found.' }
 
     const built = buildRecordPayload(payload, records[index])
@@ -155,12 +202,12 @@ export const updateHostelGatePass = (id, payload) => {
         ...built.data,
         updatedAt: new Date().toISOString(),
     }
-    writeRecords(records)
+    persistRows(records)
     return { success: true, record: records[index] }
 }
 
 export const deleteHostelGatePass = (id) => {
-    writeRecords(readRecords().filter((record) => record.id !== id))
+    persistRows(getHostelGatePasses().filter((record) => record.id !== id && record.gatePassId !== id))
     return { success: true }
 }
 
@@ -177,6 +224,7 @@ export const filterHostelGatePasses = (records, { search = '', status = '' } = {
             record.studentName,
             record.classSection,
             record.hostel,
+            record.hostelName,
             record.leaveType,
             record.reason,
             record.status,
@@ -193,7 +241,7 @@ export const toHostelGatePassFormState = (record) => ({
     mobileNumber: record?.mobileNumber || '',
     city: record?.city || '',
     profileImage: record?.profile && record.profile !== noProfile ? record.profile : '',
-    hostel: record?.hostel || '',
+    hostel: record?.hostel || record?.hostelName || '',
     leaveType: record?.leaveType || '',
     reason: record?.reason || '',
     outDate: record?.outDate || '',

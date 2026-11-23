@@ -83,6 +83,31 @@ const syncClassAndSectionLists = (catalog) => {
     catalog.sections = [...sectionSet].sort()
 }
 
+/** Replace local class-details catalog with masters API rows (live hydrate). */
+export const mirrorApiClassDetails = (records = []) => {
+    const catalog = loadCatalog()
+    catalog.classDetails = (Array.isArray(records) ? records : []).map((record) => ({
+        id: record.id,
+        className: record.className,
+        displayName: record.displayName || record.className,
+        academicYearId: record.academicYearId || '',
+        academicYear: record.academicYear || '',
+        isActive: record.isActive !== false,
+        capacity: record.capacity ?? null,
+        sections: (record.sections || []).map((section) => ({
+            id: section.id,
+            name: section.name,
+            capacity: section.capacity ?? '',
+            classTeacherName: section.classTeacherName || '',
+            classTeacherUserId: section.classTeacherUserId || '',
+            roomNumber: section.roomNumber || '',
+            isActive: section.isActive !== false,
+        })),
+    }))
+    syncClassAndSectionLists(catalog)
+    saveCatalog(catalog)
+}
+
 export const saveClassDetails = (payload) => {
     const className = String(payload.className || '').trim()
     const displayName = String(payload.displayName || className).trim() || className

@@ -467,9 +467,6 @@ export default function UniversalReportsAnalyticsWorkspace({ roleOverride = null
                         <h2 className="text-sm font-bold text-slate-900">{activeReport.name}</h2>
                         <p className="text-xs text-slate-500 mt-0.5">{activeReport.desc}</p>
                     </div>
-                    <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        Live Data Certified
-                    </span>
                 </div>
 
                 <div className="overflow-x-auto">

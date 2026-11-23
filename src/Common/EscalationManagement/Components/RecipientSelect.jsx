@@ -45,10 +45,11 @@ const RecipientSelect = ({
     onChange,
     disabled = false,
     roleLabel,
+    options: optionsProp,
 }) => {
     const options = useMemo(
-        () => getEscalationRecipientSelectOptions(targetRoleKey),
-        [targetRoleKey],
+        () => optionsProp || getEscalationRecipientSelectOptions(targetRoleKey),
+        [optionsProp, targetRoleKey],
     )
 
     const selectedOption = useMemo(

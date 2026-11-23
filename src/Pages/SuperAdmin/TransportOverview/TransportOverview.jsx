@@ -1,5 +1,12 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Bus, Droplet, FileText, Route, Users, Wrench } from 'lucide-react'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import {
+    listTransportDrivers,
+    listTransportRoutes,
+    listTransportStudentAssignments,
+    listTransportVehicles,
+} from '../../../services/api/transportApiService'
 import {
     OVERVIEW_SECTIONS,
     docStatusBadgeColor,
@@ -34,9 +41,42 @@ const MiniStat = ({ label, value }) => (
 
 const TransportOverview = () => {
     const [activeSection, setActiveSection] = useState('routes')
-    const fleetSummary = useMemo(() => getFleetSummary(), [])
+    const mockSummary = useMemo(() => getFleetSummary(), [])
+    const [liveCounts, setLiveCounts] = useState(null)
     const sectionSummary = useMemo(() => getSectionSummary(activeSection), [activeSection])
     const { columns, rows } = useMemo(() => getSectionTable(activeSection), [activeSection])
+
+    useEffect(() => {
+        if (!isLiveApiEnabled()) return
+        let cancelled = false
+        ;(async () => {
+            const [d, v, r, s] = await Promise.all([
+                listTransportDrivers(),
+                listTransportVehicles(),
+                listTransportRoutes(),
+                listTransportStudentAssignments(),
+            ])
+            if (cancelled || !d.success || !v.success || !r.success || !s.success) return
+            setLiveCounts({
+                routes: (r.data || []).length,
+                vehicles: (v.data || []).length,
+                drivers: (d.data || []).length,
+                students: (s.data || []).filter((row) => String(row.status || '').toLowerCase() !== 'inactive').length,
+            })
+        })()
+        return () => { cancelled = true }
+    }, [])
+
+    const fleetSummary = liveCounts
+        ? {
+            ...mockSummary,
+            totalRoutes: liveCounts.routes,
+            totalVehicles: liveCounts.vehicles,
+            totalDrivers: liveCounts.drivers,
+            activeDrivers: liveCounts.drivers,
+            totalStops: liveCounts.students,
+        }
+        : mockSummary
 
     return (
         <section className='space-y-6'>
@@ -51,22 +91,22 @@ const TransportOverview = () => {
                 <SummaryCard
                     label='Active Routes'
                     value={fleetSummary.totalRoutes}
-                    description={`${fleetSummary.totalStops} stops across campus routes`}
+                    description={liveCounts ? 'Campus transit routes' : `${fleetSummary.totalStops} stops across campus routes`}
                 />
                 <SummaryCard
                     label='Fleet Vehicles'
                     value={fleetSummary.totalVehicles}
-                    description={`${fleetSummary.totalCapacity} total passenger capacity`}
+                    description={liveCounts ? 'Registered vehicles' : `${fleetSummary.totalCapacity} total passenger capacity`}
                 />
                 <SummaryCard
                     label='Active Drivers'
-                    value={`${fleetSummary.activeDrivers} / ${fleetSummary.totalDrivers}`}
+                    value={liveCounts ? fleetSummary.totalDrivers : `${fleetSummary.activeDrivers} / ${fleetSummary.totalDrivers}`}
                     description='Drivers currently on duty'
                 />
                 <SummaryCard
-                    label='Recent Fuel Spend'
-                    value={fleetSummary.fuelSpend}
-                    description={`${fleetSummary.scheduledMaintenance} services scheduled · ${fleetSummary.expiringDocs} docs expiring soon`}
+                    label={liveCounts ? 'Student Assignments' : 'Recent Fuel Spend'}
+                    value={liveCounts ? liveCounts.students : fleetSummary.fuelSpend}
+                    description={liveCounts ? 'Active student transport assignments' : `${fleetSummary.scheduledMaintenance} services scheduled · ${fleetSummary.expiringDocs} docs expiring soon`}
                 />
             </div>
 

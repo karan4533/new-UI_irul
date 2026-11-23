@@ -1,4 +1,17 @@
-export const STAFF_NOTIFICATION_TYPES = ['General', 'Exam', 'Event', 'Holiday', 'Announcement', 'Payment']
+export const STAFF_NOTIFICATION_TYPES = [
+    'General',
+    'Exam',
+    'Event',
+    'Holiday',
+    'Announcement',
+    'Payment',
+    'Leave',
+    'Approval',
+    'Escalation',
+    'Task',
+    'Ops',
+    'Duty',
+]
 
 export const staffTypeBadgeColor = {
     General: 'bg-[#515DEF33] text-[#515DEF]',
@@ -7,6 +20,12 @@ export const staffTypeBadgeColor = {
     Holiday: 'bg-[#4CAF5033] text-[#4CAF50]',
     Announcement: 'bg-[#2196F333] text-[#2196F3]',
     Payment: 'bg-[#FF572233] text-[#FF5722]',
+    Leave: 'bg-[#0EA5E933] text-[#0284C7]',
+    Approval: 'bg-[#6366F133] text-[#4F46E5]',
+    Escalation: 'bg-[#EF444433] text-[#DC2626]',
+    Task: 'bg-[#14B8A633] text-[#0F766E]',
+    Ops: 'bg-[#64748B33] text-[#475569]',
+    Duty: 'bg-[#66708533] text-[#667085]',
 }
 
 export const STAFF_NOTIFICATIONS = [

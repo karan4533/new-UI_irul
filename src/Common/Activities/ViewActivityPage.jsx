@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { NavLink, useParams } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import {
@@ -7,6 +8,8 @@ import {
 } from './activitiesData'
 import { getActivityConfig, getActivityRoutes } from './activityConfigs'
 import { getClassDisplayLabel } from '../RBAC/academicsCatalogData'
+import FeedbackState from '../ui/FeedbackState'
+import useActivitiesLive from './useActivitiesLive'
 
 const DetailRow = ({ label, value }) => (
     <div className='flex flex-col gap-1 sm:flex-row sm:gap-4 py-3 border-b border-[#F2F4F7] last:border-b-0'>
@@ -17,11 +20,19 @@ const DetailRow = ({ label, value }) => (
 
 export default function ViewActivityPage({ roleKey, activityType }) {
     const { id } = useParams()
+    const { live, version, loading, error: liveError } = useActivitiesLive()
     const config = getActivityConfig(activityType)
     const routes = getActivityRoutes(activityType, roleKey)
-    const activity = getActivityById(id)
+    const activity = useMemo(() => { void version; return getActivityById(id) }, [id, version])
     const approvalStatusHeader = roleKey === 'admin' ? 'Super Admin Approval Status' : 'MD Approval Status'
     const players = activity?.players || []
+
+    if (live && loading) {
+        return <FeedbackState kind='loading' title='Loading activity' description='Fetching activity…' />
+    }
+    if (live && liveError) {
+        return <FeedbackState kind='error' title='Unable to load activity' description={liveError} />
+    }
 
     if (!activity || activity.type !== activityType) {
         return (

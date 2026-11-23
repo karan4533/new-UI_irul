@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Award, CalendarDays, MapPin, Search, Trophy, UsersRound } from 'lucide-react'
 import { getChessResultActivities } from './activitiesData'
+import FeedbackState from '../ui/FeedbackState'
+import useActivitiesLive from './useActivitiesLive'
 
 const resultBadgeColor = {
     Winner: 'bg-[#4CAF5033] text-[#4CAF50]',
@@ -24,10 +26,11 @@ const StatTile = ({ icon: Icon, label, value, tone }) => (
 )
 
 export default function ChessResultPage() {
+    const { live, version, loading, error: liveError } = useActivitiesLive()
     const [search, setSearch] = useState('')
     const [selectedId, setSelectedId] = useState('')
 
-    const chessResults = useMemo(() => getChessResultActivities(), [])
+    const chessResults = useMemo(() => { void version; return getChessResultActivities() }, [version])
     const filteredResults = useMemo(() => {
         const query = search.trim().toLowerCase()
         if (!query) return chessResults
@@ -43,6 +46,13 @@ export default function ChessResultPage() {
         || null
     const players = selectedTournament?.players || []
     const categoryCount = new Set(players.map((player) => player.category).filter(Boolean)).size
+
+    if (live && loading) {
+        return <FeedbackState kind='loading' title='Loading chess results' description='Fetching tournaments…' />
+    }
+    if (live && liveError) {
+        return <FeedbackState kind='error' title='Unable to load chess results' description={liveError} />
+    }
 
     return (
         <section className='space-y-6'>

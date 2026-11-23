@@ -5,7 +5,6 @@ import { useAuth } from '../../context/AuthContext'
 import DataTable from '../ui/DataTable'
 import DataToolbar from '../ui/DataToolbar'
 import FeedbackState from '../ui/FeedbackState'
-import IntegrationNotice from '../ui/IntegrationNotice'
 import PageHeader from '../ui/PageHeader'
 import Pagination from '../ui/Pagination'
 import StatusBadge from '../ui/StatusBadge'
@@ -119,15 +118,9 @@ export default function ReceivedLeaveRequestsList({ roleKey: roleKeyProp, descri
                 context={`${pendingCount} awaiting decision · ${requests.length} total`}
             />
 
-            <IntegrationNotice
-                state={listSource === 'backend' ? 'connected' : listSource === 'error' ? 'failed' : 'demo'}
-                title={listSource === 'backend' ? 'Live leave approval queue' : listSource === 'error' ? 'Leave API unavailable' : 'Browser-stored approval queue'}
-                description={listSource === 'backend'
-                    ? 'GET /api/v1/leave-requests (box=all for Admin/HR/Super Admin; otherwise box=received). Decisions post to /decide and require leave.decide.'
-                    : listSource === 'error'
-                        ? listError
-                        : 'Decisions are stored locally. Balance checks, delegation, staff notifications and an authoritative audit trail require the backend leave service.'}
-            />
+            {listSource === 'error' ? (
+                <FeedbackState kind='error' title='Leave API unavailable' description={listError} />
+            ) : null}
 
             {listLoading ? (
                 <FeedbackState kind='loading' title='Loading leave requests' description='Fetching received leave requests…' />

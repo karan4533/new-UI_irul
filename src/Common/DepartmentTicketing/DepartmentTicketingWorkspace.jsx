@@ -37,9 +37,11 @@ import {
     updateTicketProgress,
     confirmTicketClosure
 } from './departmentTicketingData'
+import { TICKETING_LIVE_COLLECTIONS } from './departmentTicketingData'
+import LiveOpsGate from '../ui/LiveOpsGate'
 import { ENTERPRISE_EMPLOYEES } from '../AttendanceAndLeave/attendanceLeaveData'
 
-export default function DepartmentTicketingWorkspace({ defaultTab = 'overview', roleOverride = null }) {
+function DepartmentTicketingWorkspaceInner({ defaultTab = 'overview', roleOverride = null }) {
     const { role: authRole, email: authEmail, name: authName } = useAuth()
     const activeRole = roleOverride || authRole || 'employee'
     const roleLabel = getProfileLabel(activeRole)
@@ -1219,3 +1221,10 @@ export default function DepartmentTicketingWorkspace({ defaultTab = 'overview', 
     )
 }
 
+export default function DepartmentTicketingWorkspace(props) {
+    return (
+        <LiveOpsGate collections={TICKETING_LIVE_COLLECTIONS} title='Department Helpdesk'>
+            <DepartmentTicketingWorkspaceInner {...props} />
+        </LiveOpsGate>
+    )
+}

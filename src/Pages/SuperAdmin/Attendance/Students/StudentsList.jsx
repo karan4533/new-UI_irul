@@ -96,15 +96,13 @@ const StudentsList = () => {
 
     return (
         <section className='space-y-6'>
-            <IntegrationNotice
-                state={source === 'backend' ? 'connected' : source === 'error' ? 'failed' : 'demo'}
-                title={source === 'backend' ? 'Live student attendance' : source === 'error' ? 'Attendance API unavailable' : 'Demo attendance rows'}
-                description={source === 'backend'
-                    ? `GET /api/v1/attendance?date=${toIsoDate(selectedDate)} · Super Admin read path`
-                    : source === 'error'
-                        ? error
-                        : 'Showing local demo rows because live API is disabled. Export will still generate a valid PDF from the visible table.'}
-            />
+            {source === 'error' ? (
+                <IntegrationNotice
+                    state='failed'
+                    title='Attendance unavailable'
+                    description={error || 'Could not load attendance for the selected date.'}
+                />
+            ) : null}
 
             {source !== 'error' ? (
                 <AttendanceOverviewSection

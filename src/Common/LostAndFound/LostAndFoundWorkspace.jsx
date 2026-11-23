@@ -34,6 +34,7 @@ import { useAuth } from '../../context/AuthContext'
 import { getProfileLabel } from '../../Pages/Authentication/profileOptions'
 import { lostFoundService } from '../../services/modules/lostFoundService'
 import { DataTable, StatusBadge } from '../ui'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
 
 export const ITEM_CATEGORIES = [
     'Electronics & Watches',
@@ -65,6 +66,7 @@ export default function LostAndFoundWorkspace({ defaultTab = 'directory', roleOv
     // State
     const [items, setItems] = useState([])
     const [loading, setLoading] = useState(true)
+    const [loadError, setLoadError] = useState('')
     const [activeTab, setActiveTab] = useState(defaultTab)
     const [actionMessage, setActionMessage] = useState('')
     const [refreshKey, setRefreshKey] = useState(0)
@@ -132,10 +134,20 @@ export default function LostAndFoundWorkspace({ defaultTab = 'directory', roleOv
         try {
             const res = await lostFoundService.getItems()
             if (res.success && Array.isArray(res.data)) {
-                setItems(res.data)
+                setItems(res.data.map((item) => ({ ...item, status: item.status || '' })))
+                setLoadError('')
+            } else if (isLiveApiEnabled()) {
+                setItems([])
+                setLoadError(
+                    (typeof res.error === 'string' ? res.error : res.error?.message) || 'Lost & found items could not be loaded.',
+                )
             }
         } catch (err) {
             console.error('Failed to load lost & found items:', err)
+            if (isLiveApiEnabled()) {
+                setItems([])
+                setLoadError('Lost & found items could not be loaded.')
+            }
         } finally {
             setLoading(false)
         }
@@ -354,6 +366,18 @@ export default function LostAndFoundWorkspace({ defaultTab = 'directory', roleOv
 
     return (
         <div className='space-y-6 p-4 md:p-6 bg-slate-50/50 min-h-screen'>
+            {loadError && (
+                <div className='flex items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-semibold text-rose-800'>
+                    <span>{loadError}</span>
+                    <button
+                        type='button'
+                        onClick={() => setRefreshKey((k) => k + 1)}
+                        className='rounded-lg border border-rose-300 px-3 py-1 text-rose-800 hover:bg-rose-100'
+                    >
+                        Retry
+                    </button>
+                </div>
+            )}
             {/* Action Feedback Notification */}
             {actionMessage && (
                 <div className='flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-xs font-semibold text-emerald-800 shadow-2xs'>

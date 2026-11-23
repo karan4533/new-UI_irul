@@ -15,9 +15,12 @@ import {
 } from './activitiesData'
 import { getActivityConfig, getActivityRoutes, getActivityEditPath, getActivityViewPath } from './activityConfigs'
 import { getClassDisplayLabel, getClassSelectOptions } from '../RBAC/academicsCatalogData'
+import FeedbackState from '../ui/FeedbackState'
+import useActivitiesLive from './useActivitiesLive'
 
 export default function ActivityListView({ roleKey, activityType }) {
     const location = useLocation()
+    const { live, version, loading, error: liveError } = useActivitiesLive()
     const config = getActivityConfig(activityType)
     const routes = getActivityRoutes(activityType, roleKey)
     const [fromDate, setFromDate] = useState(new Date())
@@ -32,7 +35,7 @@ export default function ActivityListView({ roleKey, activityType }) {
     const activities = useMemo(() => {
         void refreshKey
         return getActivitiesByType(activityType)
-    }, [activityType, refreshKey, location.key])
+    }, [activityType, refreshKey, location.key, version])
 
     useEffect(() => {
         setRefreshKey((value) => value + 1)
@@ -54,6 +57,13 @@ export default function ActivityListView({ roleKey, activityType }) {
         deleteActivity(activity.id)
         setRefreshKey((value) => value + 1)
         toast.success('Activity deleted.')
+    }
+
+    if (live && loading) {
+        return <FeedbackState kind='loading' title='Loading activities' description='Fetching activities…' />
+    }
+    if (live && liveError) {
+        return <FeedbackState kind='error' title='Unable to load activities' description={liveError} />
     }
 
     const personLabel = config.personLabel

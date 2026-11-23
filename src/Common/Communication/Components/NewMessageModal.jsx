@@ -4,12 +4,12 @@ import { DIRECTORY_CONTACTS } from '../communicationData'
 import UserAvatar from './UserAvatar'
 import Dialog from '../../ui/Dialog'
 
-const NewMessageModal = ({ open, onClose, currentUserId, existingParticipantIds = [], onSelect }) => {
+const NewMessageModal = ({ open, onClose, currentUserId, existingParticipantIds = [], onSelect, contacts: contactsProp }) => {
     const [query, setQuery] = useState('')
 
     const contacts = useMemo(() => {
         const q = query.trim().toLowerCase()
-        return DIRECTORY_CONTACTS.filter((contact) => {
+        return (contactsProp || DIRECTORY_CONTACTS).filter((contact) => {
             if (contact.id === currentUserId) return false
             if (!q) return true
             return (
@@ -19,7 +19,7 @@ const NewMessageModal = ({ open, onClose, currentUserId, existingParticipantIds 
                 contact.department.toLowerCase().includes(q)
             )
         })
-    }, [currentUserId, query])
+    }, [contactsProp, currentUserId, query])
 
     return (
         <Dialog open={open} onClose={onClose} title='New message' description='Select an authorized ERP user.' size='md' contentClassName='!px-2 !pb-2 !pt-4'>

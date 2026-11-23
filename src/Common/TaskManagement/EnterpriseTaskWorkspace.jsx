@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react'
+import React, { useState, useMemo, useEffect, useCallback } from 'react'
+import { toast } from 'react-toastify'
 import {
     ClipboardList,
     CheckCircle2,
@@ -55,6 +56,17 @@ import {
     parseTaskDate
 } from './taskManagementData'
 import { ENTERPRISE_EMPLOYEES } from '../AttendanceAndLeave/attendanceLeaveData'
+import FeedbackState from '../ui/FeedbackState'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
+import {
+    createTask as createLiveTask,
+    getTask as getLiveTask,
+    listTaskAssignees,
+    listTasks as listLiveTasks,
+    setTaskStatus as setLiveTaskStatus,
+} from '../../services/api/taskApiService'
+
+const liveErrorMessage = (res, fallback) => (typeof res?.error === 'string' && res.error ? res.error : fallback)
 
 // Status badge styling helper
 const getStatusBadge = (status) => {
@@ -101,10 +113,11 @@ const getPriorityBadge = (priority) => {
 }
 
 export default function EnterpriseTaskWorkspace({ defaultTab = 'received', initialCreateOpen = false, roleOverride = null }) {
-    const { role: authRole, email: authEmail, name: authName } = useAuth()
+    const { role: authRole, email: authEmail, name: authName, user: authUser } = useAuth()
+    const live = isLiveApiEnabled()
     const activeRole = roleOverride || authRole || 'teacher'
     const roleLabel = getProfileLabel(activeRole)
-    const currentUserId = getDemoUserId(activeRole)
+    const currentUserId = live ? String(authUser?.id || '') : getDemoUserId(activeRole)
     const currentUserName = authName || roleLabel || 'Current User'
 
     // Tab state: 'received' | 'created'
@@ -139,22 +152,61 @@ export default function EnterpriseTaskWorkspace({ defaultTab = 'received', initi
         setRefreshKey((k) => k + 1)
     }
 
+    // Live (FastAPI) task queues — no mock fallback when the API fails.
+    const [liveReceived, setLiveReceived] = useState([])
+    const [liveCreated, setLiveCreated] = useState([])
+    const [liveLoading, setLiveLoading] = useState(live)
+    const [liveError, setLiveError] = useState('')
+
+    const loadLiveTasks = useCallback(async () => {
+        setLiveLoading(true)
+        setLiveError('')
+        const [mine, assigned] = await Promise.all([listLiveTasks('mine'), listLiveTasks('assigned')])
+        setLiveLoading(false)
+        const failure = [mine, assigned].find((res) => !res.success)
+        if (failure) {
+            setLiveReceived([])
+            setLiveCreated([])
+            setLiveError(liveErrorMessage(failure, 'Failed to load tasks.'))
+            return
+        }
+        setLiveReceived(mine.data)
+        setLiveCreated(assigned.data)
+    }, [])
+
+    useEffect(() => {
+        if (!live) return undefined
+        const timer = setTimeout(() => { loadLiveTasks() }, 0)
+        return () => clearTimeout(timer)
+    }, [live, loadLiveTasks, refreshKey])
+
     // Dynamic KPI calculation
     const kpis = useMemo(() => {
         void refreshKey
+        if (live) {
+            const union = new Map([...liveReceived, ...liveCreated].map((task) => [task.uuid, task]))
+            return {
+                totalTasks: union.size,
+                receivedTasks: liveReceived.length,
+                createdTasks: liveCreated.length,
+                overdueTasks: [...union.values()].filter((task) => isTaskOverdue(task)).length,
+            }
+        }
         return getTaskKpis(activeRole, currentUserId)
-    }, [activeRole, currentUserId, refreshKey])
+    }, [activeRole, currentUserId, refreshKey, live, liveReceived, liveCreated])
 
     // Tasks queries
     const receivedTasks = useMemo(() => {
         void refreshKey
+        if (live) return liveReceived
         return getMyTasks(activeRole, currentUserId)
-    }, [activeRole, currentUserId, refreshKey])
+    }, [activeRole, currentUserId, refreshKey, live, liveReceived])
 
     const createdTasks = useMemo(() => {
         void refreshKey
+        if (live) return liveCreated
         return getTasksAssignedByMe(activeRole, currentUserId)
-    }, [activeRole, currentUserId, refreshKey])
+    }, [activeRole, currentUserId, refreshKey, live, liveCreated])
 
     // Current tab tasks
     const activeTaskList = activeTab === 'created' ? createdTasks : receivedTasks
@@ -237,6 +289,11 @@ export default function EnterpriseTaskWorkspace({ defaultTab = 'received', initi
         setSelectedTask(task)
         setDetailsSubTab('overview')
         setIsDetailsOpen(true)
+        if (live && task.uuid) {
+            getLiveTask(task.uuid).then((res) => {
+                if (res.success) setSelectedTask((current) => (current && current.uuid === task.uuid ? res.data : current))
+            })
+        }
     }
 
     // Open quick update status modal
@@ -447,14 +504,14 @@ export default function EnterpriseTaskWorkspace({ defaultTab = 'received', initi
                             className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700"
                         >
                             <option value="">All Statuses</option>
-                            <option value="Draft">Draft</option>
+                            {!live && <option value="Draft">Draft</option>}
                             <option value="Assigned">Assigned</option>
-                            <option value="Acknowledged">Acknowledged</option>
+                            {!live && <option value="Acknowledged">Acknowledged</option>}
                             <option value="In Progress">In Progress</option>
-                            <option value="Submitted">Submitted</option>
+                            {!live && <option value="Submitted">Submitted</option>}
                             <option value="Completed">Completed</option>
-                            <option value="Rejected">Rejected</option>
-                            <option value="Cancelled">Cancelled</option>
+                            {!live && <option value="Rejected">Rejected</option>}
+                            {!live && <option value="Cancelled">Cancelled</option>}
                         </select>
                     </div>
 
@@ -511,7 +568,25 @@ export default function EnterpriseTaskWorkspace({ defaultTab = 'received', initi
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 text-xs">
-                            {filteredTasks.length === 0 ? (
+                            {live && liveLoading ? (
+                                <tr>
+                                    <td colSpan={8} className="py-6">
+                                        <FeedbackState kind="loading" compact title="Loading tasks" description="Fetching your task queues…" />
+                                    </td>
+                                </tr>
+                            ) : live && liveError ? (
+                                <tr>
+                                    <td colSpan={8} className="py-6">
+                                        <FeedbackState
+                                            kind="error"
+                                            compact
+                                            title="Tasks API unavailable"
+                                            description={liveError}
+                                            action={<button type="button" onClick={refreshData} className="px-4 py-2 text-xs font-semibold border border-slate-200 rounded-lg text-slate-700">Retry</button>}
+                                        />
+                                    </td>
+                                </tr>
+                            ) : filteredTasks.length === 0 ? (
                                 <tr>
                                     <td colSpan={8} className="py-12 text-center text-slate-400">
                                         <ClipboardList className="w-10 h-10 mx-auto text-slate-300 mb-2" />
@@ -650,7 +725,7 @@ export default function EnterpriseTaskWorkspace({ defaultTab = 'received', initi
                                                         Status
                                                     </button>
 
-                                                    {activeTab === 'created' && (
+                                                    {activeTab === 'created' && !live && (
                                                         <button
                                                             onClick={(e) => handleOpenEditModal(task, e)}
                                                             title="Edit Task"
@@ -682,6 +757,7 @@ export default function EnterpriseTaskWorkspace({ defaultTab = 'received', initi
                     activeRole={activeRole}
                     currentUserId={currentUserId}
                     currentUserName={currentUserName}
+                    live={live}
                 />
             )}
 
@@ -703,6 +779,8 @@ export default function EnterpriseTaskWorkspace({ defaultTab = 'received', initi
                     currentUserName={currentUserName}
                     subTab={detailsSubTab}
                     setSubTab={setDetailsSubTab}
+                    live={live}
+                    currentUserEmail={authEmail}
                 />
             )}
 
@@ -721,6 +799,7 @@ export default function EnterpriseTaskWorkspace({ defaultTab = 'received', initi
                         notify(`Status updated to ${updated.status}`)
                     }}
                     currentUserName={currentUserName}
+                    live={live}
                 />
             )}
 
@@ -748,7 +827,7 @@ export default function EnterpriseTaskWorkspace({ defaultTab = 'received', initi
 // -------------------------------------------------------------
 // CREATE TASK MODAL
 // -------------------------------------------------------------
-function CreateTaskModal({ onClose, onSuccess, activeRole, currentUserId, currentUserName }) {
+function CreateTaskModal({ onClose, onSuccess, activeRole, currentUserId, currentUserName, live = false }) {
     // Form fields
     const [title, setTitle] = useState('')
     const [department, setDepartment] = useState('Academics & Teaching')
@@ -769,10 +848,31 @@ function CreateTaskModal({ onClose, onSuccess, activeRole, currentUserId, curren
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [errorMsg, setErrorMsg] = useState('')
 
+    // Live: assignable staff come from the backend hierarchy (roles directly below the caller).
+    const [liveStaff, setLiveStaff] = useState([])
+    const [liveStaffError, setLiveStaffError] = useState('')
+    const [liveStaffLoading, setLiveStaffLoading] = useState(live)
+    useEffect(() => {
+        if (!live) return undefined
+        let cancelled = false
+        listTaskAssignees().then((res) => {
+            if (cancelled) return
+            setLiveStaffLoading(false)
+            if (!res.success) {
+                setLiveStaff([])
+                setLiveStaffError(liveErrorMessage(res, 'Could not load assignable staff.'))
+                return
+            }
+            setLiveStaff(res.data)
+        })
+        return () => { cancelled = true }
+    }, [live])
+
     // Employees in selected department
     const departmentStaff = useMemo(() => {
+        if (live) return liveStaff
         return getEmployeesByDepartment(department)
-    }, [department])
+    }, [department, live, liveStaff])
 
     // Filtered staff for individual search
     const filteredStaff = useMemo(() => {
@@ -789,7 +889,7 @@ function CreateTaskModal({ onClose, onSuccess, activeRole, currentUserId, curren
         )
     }
 
-    const handleSubmit = (saveAsDraft = false) => {
+    const handleSubmit = async (saveAsDraft = false) => {
         setErrorMsg('')
         if (!title.trim()) {
             setErrorMsg('Task Title is required.')
@@ -810,6 +910,36 @@ function CreateTaskModal({ onClose, onSuccess, activeRole, currentUserId, curren
 
         if (selectedStaffIds.length === 0) {
             setErrorMsg('Please select at least one staff member for individual assignment.')
+            return
+        }
+
+        if (live) {
+            if (saveAsDraft) {
+                setErrorMsg('Drafts are not supported by the task service. Use Create Task to assign.')
+                return
+            }
+            setIsSubmitting(true)
+            const batch = Date.now().toString(36)
+            const results = []
+            for (const assigneeId of selectedStaffIds) {
+                const res = await createLiveTask({
+                    assigneeId,
+                    title,
+                    description: instructions,
+                    priority,
+                    dueDate,
+                    clientRef: `ui-${batch}-${assigneeId.slice(0, 8)}`,
+                })
+                if (!res.success) {
+                    setErrorMsg(liveErrorMessage(res, 'Failed to create task.'))
+                    setIsSubmitting(false)
+                    if (results.length) onSuccess(results[0])
+                    return
+                }
+                results.push(res.data)
+            }
+            setIsSubmitting(false)
+            onSuccess(results[0])
             return
         }
 
@@ -904,6 +1034,8 @@ function CreateTaskModal({ onClose, onSuccess, activeRole, currentUserId, curren
                                 </label>
                                 <select
                                     value={department}
+                                    disabled={live}
+                                    title={live ? 'Assignees are limited by your role hierarchy' : undefined}
                                     onChange={(e) => {
                                         setDepartment(e.target.value)
                                         setSelectedStaffIds([])
@@ -944,7 +1076,7 @@ function CreateTaskModal({ onClose, onSuccess, activeRole, currentUserId, curren
                                     <option value="Low">Low</option>
                                     <option value="Medium">Medium</option>
                                     <option value="High">High</option>
-                                    <option value="Critical">Critical</option>
+                                    {!live && <option value="Critical">Critical</option>}
                                 </select>
                             </div>
                         </div>
@@ -960,7 +1092,7 @@ function CreateTaskModal({ onClose, onSuccess, activeRole, currentUserId, curren
                         <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
                             <div className="flex items-center justify-between">
                                 <span className="font-semibold text-slate-800">
-                                    Select Staff Member ({departmentStaff.length} available in {department})
+                                    Select Staff Member ({departmentStaff.length} available{live ? ' to you' : ` in ${department}`})
                                 </span>
                                 <span className="text-[11px] text-blue-600 font-semibold">
                                     Individual assignment only
@@ -982,7 +1114,11 @@ function CreateTaskModal({ onClose, onSuccess, activeRole, currentUserId, curren
                             {/* Staff list with checkboxes */}
                             <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
                                 {filteredStaff.length === 0 ? (
-                                    <p className="text-slate-400 text-center py-3">No matching staff found.</p>
+                                    <p className="text-slate-400 text-center py-3">
+                                        {live
+                                            ? (liveStaffLoading ? 'Loading assignable staff…' : (liveStaffError || 'No assignable staff for your role.'))
+                                            : 'No matching staff found.'}
+                                    </p>
                                 ) : (
                                     filteredStaff.map((emp) => {
                                         const isChecked = selectedStaffIds.includes(emp.id)
@@ -1085,16 +1221,32 @@ function TaskDetailsModal({
     currentUserId,
     currentUserName,
     subTab,
-    setSubTab
+    setSubTab,
+    live = false,
+    currentUserEmail = ''
 }) {
-    const isCreator =
-        task.assignedByRole === activeRole ||
+    const sameEmail = (a, b) => Boolean(a) && Boolean(b) && String(a).toLowerCase() === String(b).toLowerCase()
+    const isCreator = live
+        ? sameEmail(task.assignedByEmail, currentUserEmail) || ['super-admin', 'superadmin', 'admin'].includes(activeRole)
+        : task.assignedByRole === activeRole ||
         (currentUserId && task.assignedById === currentUserId) ||
         ['super-admin', 'admin', 'director', 'principal'].includes(activeRole)
 
-    const isAssignee =
-        task.assigneeRole === activeRole ||
+    const isAssignee = live
+        ? Boolean(currentUserId) && Boolean(task.assigneeUserIds?.includes(currentUserId))
+        : task.assigneeRole === activeRole ||
         (currentUserId && task.assigneeUserIds?.includes(currentUserId))
+
+    const runLiveStatus = async (nextStatus, remark) => {
+        setIsSubmittingAction(true)
+        const res = await setLiveTaskStatus(task.uuid, nextStatus, remark)
+        setIsSubmittingAction(false)
+        if (!res.success) {
+            toast.error(liveErrorMessage(res, 'Task status could not be updated.'))
+            return null
+        }
+        return res.data
+    }
 
     const [commentText, setCommentText] = useState('')
     const [actionRemark, setActionRemark] = useState('')
@@ -1109,6 +1261,7 @@ function TaskDetailsModal({
     // Handle posting a comment
     const handlePostComment = (e) => {
         e.preventDefault()
+        if (live) return
         if (!commentText.trim()) return
         const updated = addTaskComment(task.id, {
             text: commentText.trim(),
@@ -1123,21 +1276,34 @@ function TaskDetailsModal({
 
     // Lifecycle Actions
     const handleAcknowledge = () => {
+        if (live) return
         setIsSubmittingAction(true)
         const updated = acknowledgeTask(task.id, currentUserName, 'Task acknowledged by assignee.')
         setIsSubmittingAction(false)
         if (updated) onUpdated(updated)
     }
 
-    const handleStart = () => {
+    const handleStart = async () => {
+        if (live) {
+            const updated = await runLiveStatus('In Progress', 'Assignee began execution of the task.')
+            if (updated) onUpdated(updated)
+            return
+        }
         setIsSubmittingAction(true)
         const updated = startTask(task.id, currentUserName, 'Assignee began execution of the task.')
         setIsSubmittingAction(false)
         if (updated) onUpdated(updated)
     }
 
-    const handleSubmitEvidence = () => {
+    const handleSubmitEvidence = async () => {
         if (!evidenceNote.trim()) return
+        if (live) {
+            const updated = await runLiveStatus('Completed', evidenceNote.trim())
+            setActionPrompt(null)
+            setEvidenceNote('')
+            if (updated) onUpdated(updated)
+            return
+        }
         setIsSubmittingAction(true)
         const updated = submitTaskForVerification({
             taskId: task.id,
@@ -1150,7 +1316,13 @@ function TaskDetailsModal({
         if (updated) onUpdated(updated)
     }
 
-    const handleComplete = () => {
+    const handleComplete = async () => {
+        if (live) {
+            const updated = await runLiveStatus('Completed', actionRemark)
+            setActionRemark('')
+            if (updated) onUpdated(updated)
+            return
+        }
         setIsSubmittingAction(true)
         const updated = closeTask({
             taskId: task.id,
@@ -1522,6 +1694,11 @@ function TaskDetailsModal({
                             </div>
 
                             {/* Add Comment Input */}
+                            {live ? (
+                                <p className="text-slate-400 text-center text-[11px]">
+                                    Discussion threads are not stored by the task service. Add a remark when you update the status instead.
+                                </p>
+                            ) : (
                             <form onSubmit={handlePostComment} className="flex gap-2">
                                 <input
                                     type="text"
@@ -1539,6 +1716,7 @@ function TaskDetailsModal({
                                     <span>Send</span>
                                 </button>
                             </form>
+                            )}
                         </div>
                     )}
                 </div>
@@ -1551,7 +1729,7 @@ function TaskDetailsModal({
 
                     <div className="flex flex-wrap items-center gap-2">
                         {/* Recipient Actions */}
-                        {isAssignee && task.status === 'Assigned' && (
+                        {!live && isAssignee && task.status === 'Assigned' && (
                             <button
                                 onClick={handleAcknowledge}
                                 disabled={isSubmittingAction}
@@ -1591,7 +1769,7 @@ function TaskDetailsModal({
                         )}
 
                         {/* Creator Actions */}
-                        {isCreator && (task.status === 'Submitted' || task.status === 'Submitted for Verification') && (
+                        {!live && isCreator && (task.status === 'Submitted' || task.status === 'Submitted for Verification') && (
                             <>
                                 <button
                                     onClick={() => setActionPrompt('reject')}
@@ -1610,7 +1788,7 @@ function TaskDetailsModal({
                             </>
                         )}
 
-                        {isCreator && task.status !== 'Completed' && task.status !== 'Cancelled' && (
+                        {!live && isCreator && task.status !== 'Completed' && task.status !== 'Cancelled' && (
                             <button
                                 onClick={() => setActionPrompt('cancel')}
                                 disabled={isSubmittingAction}
@@ -1636,13 +1814,24 @@ function TaskDetailsModal({
 // -------------------------------------------------------------
 // QUICK STATUS UPDATE MODAL
 // -------------------------------------------------------------
-function UpdateStatusModal({ task, onClose, onUpdated, currentUserName }) {
+function UpdateStatusModal({ task, onClose, onUpdated, currentUserName, live = false }) {
     const [status, setStatus] = useState(task.status || 'In Progress')
     const [remark, setRemark] = useState('')
     const [progress, setProgress] = useState(task.progressPercentage || 0)
     const [isSaving, setIsSaving] = useState(false)
 
-    const handleSave = () => {
+    const handleSave = async () => {
+        if (live) {
+            setIsSaving(true)
+            const res = await setLiveTaskStatus(task.uuid, status, remark)
+            setIsSaving(false)
+            if (!res.success) {
+                toast.error(liveErrorMessage(res, 'Task status could not be updated.'))
+                return
+            }
+            onUpdated(res.data)
+            return
+        }
         setIsSaving(true)
         const updated = updateTaskStatus(
             task.id,
@@ -1692,6 +1881,7 @@ function UpdateStatusModal({ task, onClose, onUpdated, currentUserName }) {
                         </select>
                     </div>
 
+                    {!live && (
                     <div>
                         <div className="flex justify-between text-slate-700 font-semibold mb-1">
                             <span>Execution Progress</span>
@@ -1707,6 +1897,7 @@ function UpdateStatusModal({ task, onClose, onUpdated, currentUserName }) {
                             className="w-full"
                         />
                     </div>
+                    )}
 
                     <div>
                         <label className="block text-slate-700 font-semibold mb-1">Status Note / Remarks</label>

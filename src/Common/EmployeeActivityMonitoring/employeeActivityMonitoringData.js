@@ -6,10 +6,185 @@ import { applyWorkflowDecision, WORKFLOW_TYPES } from '../approvals/approvalEngi
  */
 
 import { ENTERPRISE_EMPLOYEES } from '../AttendanceAndLeave/attendanceLeaveData.js'
+import { listAuditLogs, parseDeviceFromUserAgent } from '../../services/api/auditLogsApiService.js'
+import { isLiveApiEnabled } from '../../services/api/tokenStore.js'
 
 export const ACTIVITY_STORAGE_KEY = 'schoolerp-employee-activities-v1'
 
 let _memoryActivities = null
+/** Live audit-backed feed (Admin / SA activity monitoring). */
+let _liveActivities = null
+let _liveHydratePromise = null
+let _liveHydrateError = ''
+
+const departmentForRole = (roleKey = '') => {
+    const clean = String(roleKey || '').toLowerCase().replace(/[-_\s]/g, '')
+    const map = {
+        teacher: 'Academics & Teaching',
+        coordinator: 'Academics & Teaching',
+        principal: 'Academics & Teaching',
+        librarian: 'Academics & Teaching',
+        admin: 'Administration',
+        superadmin: 'Administration',
+        hr: 'Human Resources (HR)',
+        accounthead: 'Finance & Accounts',
+        stationerystoremanager: 'Stores & Procurement',
+        transportmanager: 'Transport & Fleet Logistics',
+        itsupportmanager: 'IT Support & Systems',
+        gatekeepermanager: 'Campus Security & Access Control',
+        gatekeeper: 'Campus Security & Access Control',
+        housekeepingmanager: 'Facilities & Campus Sanitation',
+        maintenancemanager: 'Facilities & Campus Sanitation',
+        canteenmanager: 'Dining & Nutrition (Café)',
+        qualityauditor: 'Internal Audit',
+        processauditor: 'Internal Audit',
+        jointdirectoraudit: 'Internal Audit',
+        jointdirector: 'Campus Operations',
+        jointdirectorassistant: 'Campus Operations',
+        director: 'Campus Operations',
+    }
+    return map[clean] || 'Campus Operations'
+}
+
+const activityTypeForAction = (action = '') => {
+    const a = String(action || '').toUpperCase()
+    if (/LOGIN|LOGOUT|OTP/.test(a)) return 'Login / Logout'
+    if (/APPROV|DECIDE|DENY/.test(a)) return 'Form Submit'
+    if (/DELETE|REMOVE/.test(a)) return 'Upload Action'
+    if (/EXPORT|DOWNLOAD/.test(a)) return 'Download / Export'
+    if (/CREATE|POST|SUBMIT/.test(a)) return 'Form Submit'
+    if (/UPDATE|PATCH|PUT/.test(a)) return 'Form Submit'
+    return 'Page Visit'
+}
+
+const statusForAction = (action = '') => {
+    const a = String(action || '').toUpperCase()
+    if (/LOCK|BLOCK|FAIL|UNKNOWN|DENY/.test(a)) return 'Failed'
+    if (/LOGOUT/.test(a)) return 'Logout'
+    if (/LOGIN|OTP_OK|OTP_VERIFY/.test(a)) return 'Success'
+    return 'Recorded'
+}
+
+export const mapAuditLogToEmployeeActivity = (row = {}) => {
+    const created = row.createdAtRaw || row.created_at || null
+    const when = created ? new Date(created) : null
+    const dateStr = when && !Number.isNaN(when.getTime())
+        ? when.toLocaleDateString('en-GB')
+        : (String(row.timestamp || '').split(',')[0] || '—')
+    const roleKey = String(row.role || 'staff').toLowerCase().replace(/\s+/g, '-')
+    const moduleRef = row.module && row.module !== '—' ? String(row.module) : 'system'
+    const action = row.action || 'Activity'
+    const title = `${action} · ${moduleRef}`
+    const device = row.device || parseDeviceFromUserAgent(row.userAgent)
+    const ip = row.ipAddress && row.ipAddress !== '—' ? row.ipAddress : ''
+    const statusAfter = statusForAction(action)
+    return {
+        id: String(row.id || `AUD-${Date.now()}`),
+        timestamp: row.timestamp || dateStr,
+        date: dateStr,
+        employeeId: row.userId && row.userId !== '—' ? String(row.userId) : 'SYSTEM',
+        employeeName: row.user || 'System',
+        roleKey,
+        department: departmentForRole(roleKey),
+        reportingManagerId: '',
+        activityType: activityTypeForAction(action),
+        title,
+        description: [row.description, ip ? `IP ${ip}` : '', device && device !== '—' ? `Device ${device}` : '']
+            .filter(Boolean)
+            .join(' · '),
+        moduleRef,
+        referenceId: row.referenceId && row.referenceId !== '—' ? String(row.referenceId) : String(row.id || ''),
+        statusBefore: '—',
+        statusAfter,
+        delayFlag: false,
+        evidence: null,
+        reviewStatus: 'Approved',
+        source: 'audit-logs',
+        auditAction: action,
+        ipAddress: row.ipAddress || '—',
+        device,
+    }
+}
+
+/** Honest live KPIs derived from audit-mapped activities (not demo task/CSAT copy). */
+export const summarizeLiveAuditActivities = (activities = []) => {
+    const list = Array.isArray(activities) ? activities : []
+    const todayStr = new Date().toLocaleDateString('en-GB')
+    const isAuth = (a) => /login|logout|otp/i.test(a.auditAction || a.activityType || '')
+    const isFailed = (a) => a.statusAfter === 'Failed' || /fail|lock|block|deny/i.test(a.auditAction || '')
+    const authEvents = list.filter(isAuth)
+    const failedEvents = list.filter(isFailed)
+    const todayEvents = list.filter((a) => a.date === todayStr)
+    const actors = new Set(list.map((a) => a.employeeId).filter((id) => id && id !== 'SYSTEM'))
+
+    const moduleBreakdown = {}
+    list.forEach((a) => {
+        const key = a.moduleRef || 'system'
+        if (!moduleBreakdown[key]) {
+            moduleBreakdown[key] = { department: key, total: 0, count: 0, completed: 0, delayed: 0, failed: 0 }
+        }
+        moduleBreakdown[key].total += 1
+        moduleBreakdown[key].count += 1
+        if (isFailed(a)) moduleBreakdown[key].failed += 1
+        else moduleBreakdown[key].completed += 1
+    })
+
+    const employees = []
+    const byEmp = new Map()
+    list.forEach((a) => {
+        if (!a.employeeId || a.employeeId === 'SYSTEM') return
+        if (!byEmp.has(a.employeeId)) {
+            byEmp.set(a.employeeId, {
+                employeeId: a.employeeId,
+                name: a.employeeName,
+                employeeName: a.employeeName,
+                department: a.department,
+                designation: a.roleKey || 'staff',
+                roleKey: a.roleKey,
+            })
+        }
+    })
+    byEmp.forEach((row) => employees.push(row))
+
+    return {
+        totalEvents: list.length,
+        todayEvents: todayEvents.length,
+        authEvents: authEvents.length,
+        failedEvents: failedEvents.length,
+        uniqueActors: actors.size,
+        moduleBreakdown,
+        employees: employees.sort((a, b) => String(a.name).localeCompare(String(b.name))),
+        departments: [...new Set(list.map((a) => a.department).filter(Boolean))].sort(),
+    }
+}
+
+/**
+ * Hydrate Admin activity monitoring from FastAPI audit-logs.
+ * Returns the mapped rows (empty array when none). Throws on hard API failure.
+ */
+export const hydrateEmployeeActivitiesFromAudit = async ({ force = false } = {}) => {
+    if (!isLiveApiEnabled()) return getAllEmployeeActivities()
+    if (!force && Array.isArray(_liveActivities)) return _liveActivities
+    if (!force && _liveHydratePromise) return _liveHydratePromise
+
+    _liveHydratePromise = (async () => {
+        _liveHydrateError = ''
+        const res = await listAuditLogs('audit-logs')
+        if (!res.success) {
+            _liveHydrateError = typeof res.error === 'string' ? res.error : 'Could not load activity feed.'
+            _liveActivities = []
+            throw new Error(_liveHydrateError)
+        }
+        _liveActivities = (Array.isArray(res.data) ? res.data : []).map(mapAuditLogToEmployeeActivity)
+        return _liveActivities
+    })().finally(() => {
+        _liveHydratePromise = null
+    })
+
+    return _liveHydratePromise
+}
+
+export const getEmployeeActivityHydrateError = () => _liveHydrateError
 
 export const INITIAL_EMPLOYEE_ACTIVITIES = [
     {
@@ -263,6 +438,8 @@ export const INITIAL_EMPLOYEE_ACTIVITIES = [
 
 // Storage Accessors
 export const getAllEmployeeActivities = () => {
+    // Live mode: prefer audit-hydrated rows (never fall back to demo seed).
+    if (isLiveApiEnabled()) return Array.isArray(_liveActivities) ? _liveActivities : []
     try {
         if (typeof localStorage !== 'undefined') {
             const raw = localStorage.getItem(ACTIVITY_STORAGE_KEY)
@@ -283,6 +460,7 @@ export const getAllEmployeeActivities = () => {
 }
 
 export const saveEmployeeActivities = (activities) => {
+    if (isLiveApiEnabled()) return
     _memoryActivities = activities
     try {
         if (typeof localStorage !== 'undefined') {

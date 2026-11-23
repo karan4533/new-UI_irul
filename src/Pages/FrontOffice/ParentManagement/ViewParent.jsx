@@ -1,35 +1,8 @@
-import React from 'react'
-import { useNavigate } from 'react-router-dom'
+import React, { useMemo } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import mo_user from '../../../assets/images/no-profile.png'
-
-const MOCK_PARENT = {
-    profileImage: null,
-    parentId: 'PAR-1001',
-    parentName: 'Rajesh Sharma',
-    gender: 'Male',
-    relation: 'Father',
-    occupation: 'Software Engineer',
-    yearlyIncome: '₹12,00,000',
-    address: {
-        address: '42, Green Park Extension, Near Metro Station',
-        country: 'India',
-        state: 'Delhi',
-        city: 'New Delhi',
-        zipCode: '110016',
-    },
-    contact: {
-        mobileNumber: '+91 98123 45678',
-        alternativeNumber: '+91 98123 45679',
-        email: 'rajesh.sharma@example.com',
-    },
-    student: {
-        name: 'Arjun Sharma',
-        admissionNumber: 'ADM-2024-1042',
-        class: 'Class 10',
-        section: 'Section A',
-    },
-}
+import { FeedbackState } from '../../../Common/ui'
 
 const Section = ({ title, children }) => (
     <div className='bg-white rounded-2xl shadow-md p-4'>
@@ -41,13 +14,65 @@ const Section = ({ title, children }) => (
 const Field = ({ label, value }) => (
     <div className='flex flex-col gap-y-1'>
         <span className='text-base font-medium text-[#808080]'>{label}</span>
-        <span className='text-sm text-[#1E1E1E] whitespace-pre-wrap wrap-break-word'>{value}</span>
+        <span className='text-sm text-[#1E1E1E] whitespace-pre-wrap wrap-break-word'>{value || '—'}</span>
     </div>
 )
 
 const ViewParent = () => {
     const navigate = useNavigate()
-    const parent = MOCK_PARENT
+    const location = useLocation()
+    const parent = useMemo(() => {
+        const row = location.state?.parent
+        if (!row) return null
+        return {
+            profileImage: row.profileImage || mo_user,
+            parentId: row.parentId || row.id || '—',
+            parentName: row.parentName || '—',
+            gender: row.gender || '—',
+            relation: row.relation || 'Parent',
+            occupation: row.occupation || '—',
+            yearlyIncome: row.yearlyIncome || '—',
+            address: {
+                address: row.address?.address || row.address || '—',
+                country: row.address?.country || row.country || '—',
+                state: row.address?.state || row.state || '—',
+                city: row.address?.city || row.city || '—',
+                zipCode: row.address?.zipCode || row.zipCode || '—',
+            },
+            contact: {
+                mobileNumber: row.contact?.mobileNumber || row.mobileNumber || '—',
+                alternativeNumber: row.contact?.alternativeNumber || row.alternativeNumber || '—',
+                email: row.contact?.email || row.email || '—',
+            },
+            student: {
+                name: row.student?.name || row.studentName || '—',
+                admissionNumber: row.student?.admissionNumber || row.admissionNumber || '—',
+                class: row.student?.class || row.className || '—',
+                section: row.student?.section || row.section || '—',
+            },
+        }
+    }, [location.state])
+
+    if (!parent) {
+        return (
+            <section className='space-y-4'>
+                <FeedbackState
+                    kind='empty'
+                    title='Parent not selected'
+                    description='Open a parent from the Parent Management list.'
+                />
+                <button
+                    type='button'
+                    onClick={() => navigate('/front-office/parent-management')}
+                    className='inline-flex items-center gap-2 text-sm text-[#515DEF] border border-[#515DEF] rounded-md px-4 py-2 hover:bg-[#515DEF] hover:text-white transition-colors cursor-pointer'
+                >
+                    <ArrowLeft size={18} />
+                    Back to list
+                </button>
+            </section>
+        )
+    }
+
     const addr = parent.address
     const contact = parent.contact
     const student = parent.student

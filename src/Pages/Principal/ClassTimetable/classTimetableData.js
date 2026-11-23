@@ -1,5 +1,18 @@
+import {
+    canUseAcademicsApi,
+    listAcademicsCollectionApi,
+    replaceAcademicsCollectionApi,
+    stripAcademicsMeta,
+} from '../../../services/api/academicsApiService'
+
 const STORAGE_KEY = 'principal-class-timetables'
 const CHANGE_KEY = 'principal-class-timetable-change-requests'
+const CLASS_TIMETABLES_UPDATED_EVENT = 'schoolerp-class-timetables-updated'
+
+let apiMemoryTimetables = null
+let timetableHydrateStatus = 'idle'
+let timetableHydrateError = ''
+let hydratePromise = null
 
 export const ROUTE_BASE = '/principal/class-timetable'
 export const CREATE_ROUTE = '/principal/create-class-timetable'
@@ -69,7 +82,64 @@ const DEFAULT_CLASS_TIMETABLES = [
     },
 ]
 
+const emitUpdated = () => {
+    try {
+        window.dispatchEvent(new CustomEvent(CLASS_TIMETABLES_UPDATED_EVENT))
+    } catch {
+        /* ignore */
+    }
+}
+
+const cleanList = (rows) => (Array.isArray(rows) ? rows.map(stripAcademicsMeta) : [])
+
+export const hydrateClassTimetablesFromApi = async ({ force = false } = {}) => {
+    if (!canUseAcademicsApi()) {
+        timetableHydrateStatus = 'idle'
+        timetableHydrateError = ''
+        return false
+    }
+    if (!force && timetableHydrateStatus === 'ready' && Array.isArray(apiMemoryTimetables)) {
+        return true
+    }
+    if (!force && hydratePromise) return hydratePromise
+
+    timetableHydrateStatus = 'loading'
+    timetableHydrateError = ''
+    hydratePromise = (async () => {
+        try {
+            const tts = await listAcademicsCollectionApi('class-timetables')
+            apiMemoryTimetables = cleanList(Array.isArray(tts) ? tts : [])
+            timetableHydrateStatus = 'ready'
+            timetableHydrateError = ''
+            try {
+                localStorage.removeItem(STORAGE_KEY)
+            } catch {
+                /* ignore */
+            }
+            emitUpdated()
+            return true
+        } catch (error) {
+            apiMemoryTimetables = null
+            timetableHydrateStatus = 'error'
+            timetableHydrateError = error?.message || 'Could not load class timetables from the server.'
+            emitUpdated()
+            return false
+        } finally {
+            hydratePromise = null
+        }
+    })()
+    return hydratePromise
+}
+
+export const getClassTimetableHydrateStatus = () => ({
+    status: timetableHydrateStatus,
+    error: timetableHydrateError,
+})
+
 export const getClassTimetables = () => {
+    if (canUseAcademicsApi()) {
+        return Array.isArray(apiMemoryTimetables) ? [...apiMemoryTimetables] : []
+    }
     try {
         const stored = localStorage.getItem(STORAGE_KEY)
         if (stored) return JSON.parse(stored)
@@ -80,7 +150,17 @@ export const getClassTimetables = () => {
 }
 
 export const saveClassTimetables = (records) => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(records))
+    const list = Array.isArray(records) ? records : []
+    if (canUseAcademicsApi()) {
+        apiMemoryTimetables = list
+        emitUpdated()
+        // Fire-and-forget persist; callers that need confirmation should await replace separately.
+        replaceAcademicsCollectionApi('class-timetables', list).catch(() => {
+            /* keep memory; UI can retry */
+        })
+        return
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(list))
 }
 
 export const getClassTimetableById = (id) =>
