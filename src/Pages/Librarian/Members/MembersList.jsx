@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { FeedbackState } from '../../../Common/ui'
+import { FeedbackState, IntegrationNotice } from '../../../Common/ui'
 import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 import {
     listLibraryMembers,
@@ -105,10 +105,19 @@ const MembersList = () => {
 
     return (
         <section className='space-y-4'>
-            <p className='text-xs font-medium text-[#027A48]'>
-                Live library members · GET/PUT /api/v1/ops/library-members
-            </p>
-            {error ? <FeedbackState kind='error' title='Members API' description={error} /> : null}
+            {!error && !loading ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Library members are live'
+                    description='GET/PUT /api/v1/ops/library-members. Failures never fall back to localStorage.'
+                />
+            ) : null}
+            {error ? (
+                <>
+                    <IntegrationNotice state='failed' title='Members API failed' description={error} />
+                    <FeedbackState kind='error' title='Members API' description={error} />
+                </>
+            ) : null}
             {loading ? <FeedbackState kind='loading' title='Loading members' description='Fetching library members…' /> : null}
             {notice ? <p className='text-sm text-[#027A48] font-medium'>{notice}</p> : null}
 

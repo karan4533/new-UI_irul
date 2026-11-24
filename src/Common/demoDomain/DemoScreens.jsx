@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { NavLink } from 'react-router-dom'
 import { useActiveStudent } from '../../context/ActiveStudentContext'
 import { useFinance } from '../../Pages/AccountHead/financeDomain/FinanceContext'
 import ReactECharts from 'echarts-for-react'
@@ -32,7 +33,7 @@ export function DemoActivityPage() {
                 className='mb-4'
             />
             <table className='w-full text-sm'>
-                <thead className='text-xs bg-[#EDEEF5]'><tr>{['When', 'Actor', 'Action', 'Module', 'Record', 'Details'].map((label) => <th key={label} className='px-2 py-3 text-left'>{label}</th>)}</tr></thead>
+                <thead className='text-xs bg-[#EDEEF5]'><tr>{['When', 'Actor', 'Action', 'Module', 'Record', 'Details', 'Actions'].map((label) => <th key={label} className='px-2 py-3 text-left'>{label}</th>)}</tr></thead>
                 <tbody>
                     {rows.slice(0, 40).map((row) => (
                         <tr key={row.id} className='border-b border-[#f2f4f7]'>
@@ -42,6 +43,15 @@ export function DemoActivityPage() {
                             <td className='px-2 py-3'>{row.module}</td>
                             <td className='px-2 py-3'>{row.recordId || '—'}</td>
                             <td className='px-2 py-3'>{row.details || '—'}</td>
+                            <td className='px-2 py-3'>
+                                <NavLink
+                                    to={`/super-admin/activity-logs/demo-activity/view/${encodeURIComponent(row.id)}`}
+                                    state={{ fromLogType: 'demo-activity' }}
+                                    className='inline-flex items-center gap-1 text-xs font-semibold text-[#515DEF] hover:underline'
+                                >
+                                    Inspect
+                                </NavLink>
+                            </td>
                         </tr>
                     ))}
                 </tbody>
@@ -159,6 +169,12 @@ export function BookFeePage() {
     const total = rows.reduce((sum, row) => sum + row.total, 0)
     return (
         <div className='bg-white rounded-2xl shadow-md p-4 overflow-x-auto'>
+            <IntegrationNotice
+                state='mock'
+                title='Book Fee — MOCK / unavailable live'
+                description='No FastAPI book-fee domain is mounted. Rows below are browser demonstration data only — not campus ledger truth.'
+                className='mb-4'
+            />
             <h2 className='text-xl font-semibold mb-1'>Book fee breakup</h2>
             <p className='text-sm text-[#667085] mb-4'>Multiple vendor rows contribute to one assigned book fee. Line total ₹{total}. Assigned fee on the student record is ₹{rows[0]?.assignedFee}.</p>
             <table className='w-full text-sm'>
@@ -201,6 +217,11 @@ export function BudgetPage() {
     }
     return (
         <section className='space-y-4'>
+            <IntegrationNotice
+                state='mock'
+                title='Annual Budget — MOCK / not a dedicated finance API'
+                description='Budget rows may hydrate inside finance/state when present, but this workspace is not an approved budget domain. Edits here must not be treated as LIVE accounting without dedicated backend confirmation.'
+            />
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <h2 className='text-xl font-semibold'>Annual budget vs actual</h2>
                 <ReactECharts option={option} style={{ height: 280 }} />
@@ -250,11 +271,18 @@ export function FeeProjectionPanel() {
 
 export function MfpPlaceholder() {
     return (
-        <FeedbackState
-            kind='empty'
-            title='MFP report is awaiting specification'
-            description='The report template, measures, filters, approval rules, and export format must be approved before this workflow can be implemented.'
-        />
+        <div className='space-y-4'>
+            <IntegrationNotice
+                state='mock'
+                title='MFP — BLOCKED / unavailable'
+                description='No FastAPI MFP endpoints exist. This screen stays placeholder until a domain is approved.'
+            />
+            <FeedbackState
+                kind='empty'
+                title='MFP report is awaiting specification'
+                description='The report template, measures, filters, approval rules, and export format must be approved before this workflow can be implemented.'
+            />
+        </div>
     )
 }
 

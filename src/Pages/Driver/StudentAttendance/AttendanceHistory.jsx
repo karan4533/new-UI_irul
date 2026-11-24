@@ -1,10 +1,12 @@
-import React, { useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { Calendar, ChevronLeft, ChevronRight, Download, Moon, Sun } from 'lucide-react'
 import ExportModal from '../../../Common/CommonComponents/ExportModal'
+import { FeedbackState } from '../../../Common/ui'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { listTransportStudentAttendance } from '../../../services/api/transportApiService'
 import {
-    ATTENDANCE_HISTORY,
     MARKED_STATUSES,
     filterAttendanceHistory,
     markedStatusBadgeColor,
@@ -14,7 +16,44 @@ import { ATTENDANCE_PERIODS, ATTENDANCE_PHASES, SCHOOL_NAME } from './studentAtt
 const thClass = 'px-2 py-3.5 text-[#0C1E5B] font-medium uppercase'
 const tdClass = 'px-2 py-4 text-[#667085]'
 
+const flattenHistory = (rows) => {
+    const out = []
+    rows.forEach((row) => {
+        ;['Morning', 'Evening'].forEach((period) => {
+            const bucket = period.toLowerCase()
+            ;['Pickup', 'Drop'].forEach((phaseLabel) => {
+                const phaseKey = phaseLabel.toLowerCase()
+                const status = row?.[bucket]?.[phaseKey]
+                if (!status || status === 'Pending') return
+                const location = phaseKey === 'drop' && period === 'Morning'
+                    ? SCHOOL_NAME
+                    : phaseKey === 'pickup' && period === 'Evening'
+                        ? SCHOOL_NAME
+                        : (row.busStop || '—')
+                out.push({
+                    id: `${row.id}-${bucket}-${phaseKey}`,
+                    attendanceDate: row.attendanceDate || '',
+                    studentId: row.studentId || '',
+                    studentName: row.studentName || '',
+                    classSection: row.classSection || '',
+                    busStop: row.busStop || '',
+                    period,
+                    phase: phaseLabel,
+                    location,
+                    status,
+                    markedAt: '—',
+                })
+            })
+        })
+    })
+    return out
+}
+
 const AttendanceHistory = () => {
+    const live = isLiveApiEnabled()
+    const [history, setHistory] = useState([])
+    const [loading, setLoading] = useState(live)
+    const [error, setError] = useState('')
     const [period, setPeriod] = useState('Morning')
     const [phase, setPhase] = useState('pickup')
     const [search, setSearch] = useState('')
@@ -24,18 +63,41 @@ const AttendanceHistory = () => {
     const [toDate, setToDate] = useState(null)
     const [exportModal, setExportModal] = useState(false)
 
+    const load = useCallback(async () => {
+        if (!live) {
+            setLoading(false)
+            setError('Live API is disabled.')
+            return
+        }
+        setLoading(true)
+        const res = await listTransportStudentAttendance()
+        if (!res.success) {
+            setHistory([])
+            setError(res.error || 'Failed to load attendance history.')
+            setLoading(false)
+            return
+        }
+        setHistory(flattenHistory(res.data || []))
+        setError('')
+        setLoading(false)
+    }, [live])
+
+    useEffect(() => {
+        load()
+    }, [load])
+
     const phaseOptions = ATTENDANCE_PHASES[period]
     const activePhase = phaseOptions.find((item) => item.key === phase)
 
     const filteredRecords = useMemo(() => filterAttendanceHistory({
-        records: ATTENDANCE_HISTORY,
+        records: history,
         search,
         period,
         phase: phase.charAt(0).toUpperCase() + phase.slice(1),
         status,
         fromDate,
         toDate,
-    }), [search, period, phase, status, fromDate, toDate])
+    }), [history, search, period, phase, status, fromDate, toDate])
 
     const handlePeriodChange = (nextPeriod) => {
         setPeriod(nextPeriod)
@@ -48,6 +110,16 @@ const AttendanceHistory = () => {
         setTimeframe('')
         setFromDate(null)
         setToDate(null)
+    }
+
+    if (!live) {
+        return (
+            <FeedbackState
+                kind='error'
+                title='Live API required'
+                description='Attendance history is derived from GET /api/v1/ops/transport-student-attendance.'
+            />
+        )
     }
 
     return (
@@ -80,14 +152,13 @@ const AttendanceHistory = () => {
                             type='text'
                             value={search}
                             onChange={(event) => setSearch(event.target.value)}
-                            placeholder='Student ID, name, bus stop...'
+                            placeholder='Student ID, name…'
                             className='text-sm text-[#808080] border border-[#D9D9D9] rounded-md px-2 py-2 w-full'
                         />
                     </div>
                     <div className='flex flex-col gap-y-2'>
-                        <label htmlFor='status-filter' className='text-base font-medium text-[#808080]'>Status</label>
+                        <label className='text-base font-medium text-[#808080]'>Status</label>
                         <select
-                            id='status-filter'
                             value={status}
                             onChange={(event) => setStatus(event.target.value)}
                             className='text-sm text-[#808080] border border-[#D9D9D9] rounded-md px-2 py-2 w-full'
@@ -105,10 +176,8 @@ const AttendanceHistory = () => {
                                 selected={fromDate}
                                 onChange={(date) => setFromDate(date)}
                                 isClearable
-                                showMonthYearDropdown
-                                scrollableMonthYearDropdown
                                 dateFormat='dd-MM-yyyy'
-                                placeholderText='Select date'
+                                placeholderText='01-01-2024'
                                 className='w-full text-sm text-[#808080] border border-[#D9D9D9] rounded-md px-3 py-2 pr-10 focus:outline-none'
                             />
                             <Calendar size={16} className='absolute right-3 top-1/2 -translate-y-1/2 text-[#808080] pointer-events-none' />
@@ -121,160 +190,133 @@ const AttendanceHistory = () => {
                                 selected={toDate}
                                 onChange={(date) => setToDate(date)}
                                 isClearable
-                                showMonthYearDropdown
-                                scrollableMonthYearDropdown
                                 dateFormat='dd-MM-yyyy'
-                                placeholderText='Select date'
+                                placeholderText='01-01-2024'
                                 className='w-full text-sm text-[#808080] border border-[#D9D9D9] rounded-md px-3 py-2 pr-10 focus:outline-none'
                             />
                             <Calendar size={16} className='absolute right-3 top-1/2 -translate-y-1/2 text-[#808080] pointer-events-none' />
                         </div>
                     </div>
                 </div>
+
+                <div className='mt-5 flex flex-wrap gap-2'>
+                    {ATTENDANCE_PERIODS.map((item) => (
+                        <button
+                            key={item}
+                            type='button'
+                            onClick={() => handlePeriodChange(item)}
+                            className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold ${
+                                period === item ? 'bg-[#515DEF] text-white' : 'bg-[#EEF0FF] text-[#515DEF]'
+                            }`}
+                        >
+                            {item === 'Morning' ? <Sun size={14} /> : <Moon size={14} />}
+                            {item}
+                        </button>
+                    ))}
+                    {phaseOptions.map((item) => (
+                        <button
+                            key={item.key}
+                            type='button'
+                            onClick={() => setPhase(item.key)}
+                            className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+                                phase === item.key ? 'bg-[#2E3192] text-white' : 'border border-[#D9D9D9] text-[#667085]'
+                            }`}
+                        >
+                            {item.label}
+                        </button>
+                    ))}
+                </div>
             </div>
 
             <div className='bg-white rounded-2xl shadow-md p-4'>
-                <div className='flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-4'>
-                    <h2 className='text-xl font-semibold text-black'>Attendance History</h2>
-                    <button
-                        type='button'
-                        onClick={() => setExportModal(true)}
-                        className='inline-flex items-center gap-2 bg-[#515DEF] text-white text-sm px-4 py-2 rounded-md hover:opacity-90 transition-all cursor-pointer uppercase'
-                    >
-                        <Download size={16} />
-                        Export
-                    </button>
-                </div>
-
-                <div className='rounded-xl border border-[#EDEEF5] bg-[#FAFBFF] p-4 mb-4 space-y-4'>
-                    <div className='flex flex-wrap gap-2'>
-                        {ATTENDANCE_PERIODS.map((item) => (
-                            <button
-                                key={item}
-                                type='button'
-                                onClick={() => handlePeriodChange(item)}
-                                className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all cursor-pointer ${
-                                    period === item
-                                        ? 'bg-[#515DEF] text-white shadow-sm'
-                                        : 'bg-white text-[#515DEF] border border-[#515DEF33] hover:bg-[#515DEF0D]'
-                                }`}
-                            >
-                                {item === 'Morning' ? <Sun size={16} /> : <Moon size={16} />}
-                                {item}
-                                {' '}
-                                Attendance
-                            </button>
-                        ))}
+                <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4'>
+                    <h2 className='text-xl font-semibold text-black'>
+                        {period}
+                        {' '}
+                        {activePhase?.label}
+                        {' '}
+                        History
+                    </h2>
+                    <div className='flex gap-2'>
+                        <button type='button' onClick={load} className='text-sm border border-[#515DEF] text-[#515DEF] px-4 py-2 rounded-md'>Refresh</button>
+                        <button
+                            type='button'
+                            onClick={() => setExportModal(true)}
+                            className='inline-flex items-center gap-2 bg-[#515DEF] text-white text-sm px-4 py-2 rounded-md uppercase'
+                        >
+                            <Download size={16} />
+                            Export
+                        </button>
                     </div>
-
-                    <div className='grid grid-cols-1 sm:grid-cols-2 gap-3'>
-                        {phaseOptions.map((item) => (
-                            <button
-                                key={item.key}
-                                type='button'
-                                onClick={() => setPhase(item.key)}
-                                className={`text-left rounded-xl px-4 py-3 border transition-all cursor-pointer ${
-                                    phase === item.key
-                                        ? 'bg-[#515DEF] text-white border-[#515DEF] shadow-sm'
-                                        : 'bg-white text-[#1E1E1E] border-[#D9D9D9] hover:border-[#515DEF66]'
-                                }`}
-                            >
-                                <p className='font-semibold text-sm'>{item.label} Attendance</p>
-                                <p className={`text-xs mt-0.5 ${phase === item.key ? 'text-white/85' : 'text-[#667085]'}`}>
-                                    {item.subtitle}
-                                </p>
-                            </button>
-                        ))}
-                    </div>
-
-                    <p className='text-sm text-[#667085]'>
-                        Showing marked records for
-                        {' '}
-                        <span className='font-medium text-[#1E1E1E]'>{period}</span>
-                        {' '}
-                        ·
-                        {' '}
-                        <span className='font-medium text-[#1E1E1E]'>{activePhase?.label}</span>
-                        {period === 'Morning' && phase === 'pickup' && ' at each student\'s bus stop'}
-                        {period === 'Morning' && phase === 'drop' && ` at ${SCHOOL_NAME}`}
-                        {period === 'Evening' && phase === 'pickup' && ` at ${SCHOOL_NAME}`}
-                        {period === 'Evening' && phase === 'drop' && ' at each student\'s bus stop'}
-                        .
-                    </p>
                 </div>
 
-                <div className='flex gap-x-2 items-center mb-4'>
-                    <select className='px-2 py-1.5 bg-white text-[#515DEF] border border-[#515DEF] rounded-md text-sm'>
-                        <option value='10'>10</option>
-                        <option value='20'>20</option>
-                        <option value='30'>30</option>
-                    </select>
-                    <span className='text-sm text-[#515DEF]'>Entries Per Page</span>
-                </div>
-
-                <div className='relative overflow-x-auto'>
-                    <table className='w-full text-sm text-left min-w-[1100px]'>
-                        <thead className='text-xs bg-[#EDEEF5] whitespace-nowrap rounded-lg'>
-                            <tr>
-                                <th className={`${thClass} rounded-s-lg`}>Date</th>
-                                <th className={thClass}>Student ID</th>
-                                <th className={thClass}>Student Name</th>
-                                <th className={thClass}>Class & Section</th>
-                                <th className={thClass}>Bus Stop</th>
-                                <th className={thClass}>Location</th>
-                                <th className={thClass}>Status</th>
-                                <th className={`${thClass} rounded-e-lg`}>Marked At</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {filteredRecords.length === 0 ? (
-                                <tr>
-                                    <td colSpan={8} className='px-2 py-8 text-center text-[#667085]'>
-                                        No marked attendance records found for the selected filters.
-                                    </td>
-                                </tr>
-                            ) : (
-                                filteredRecords.map((record) => (
-                                    <tr key={record.id} className='border-b border-[#f2f4f7] hover:bg-[#f2f4f7]'>
-                                        <td className={`${tdClass} rounded-s-lg font-medium text-[#1E1E1E]`}>
-                                            {record.attendanceDate}
-                                        </td>
-                                        <td className={tdClass}>{record.studentId}</td>
-                                        <td className={`${tdClass} font-medium text-[#1E1E1E]`}>{record.studentName}</td>
-                                        <td className={tdClass}>{record.classSection}</td>
-                                        <td className={tdClass}>{record.busStop}</td>
-                                        <td className={`${tdClass} max-w-[220px] truncate`} title={record.location}>
-                                            {record.location}
-                                        </td>
-                                        <td className={tdClass}>
-                                            <span className={`px-2 py-1 rounded-lg text-xs font-semibold whitespace-nowrap ${markedStatusBadgeColor[record.status]}`}>
-                                                {record.status}
-                                            </span>
-                                        </td>
-                                        <td className={`${tdClass} rounded-e-lg`}>{record.markedAt}</td>
+                {loading ? (
+                    <p className='text-sm text-slate-500 py-8 text-center'>Loading live history…</p>
+                ) : error ? (
+                    <FeedbackState kind='error' title='Could not load history' description={error} />
+                ) : (
+                    <>
+                        <div className='relative overflow-x-auto'>
+                            <table className='w-full text-sm text-left min-w-[1000px]'>
+                                <thead className='text-xs bg-[#EDEEF5] whitespace-nowrap'>
+                                    <tr>
+                                        <th className={`${thClass} rounded-s-lg`}>Date</th>
+                                        <th className={thClass}>Student</th>
+                                        <th className={thClass}>Class</th>
+                                        <th className={thClass}>Location</th>
+                                        <th className={thClass}>Period / Phase</th>
+                                        <th className={`${thClass} rounded-e-lg`}>Status</th>
                                     </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-
-                <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-4 pt-2'>
-                    <p className='text-sm font-medium text-[#515DEF]'>
-                        Showing 1 to {filteredRecords.length} of {filteredRecords.length} entries
-                    </p>
-                    <div className='flex items-center gap-2'>
-                        <button type='button' className='size-8 flex items-center justify-center rounded-full border border-[#E2E8F0] text-[#515DEF] hover:bg-[#515DEF] hover:text-white transition-colors cursor-pointer'>
-                            <ChevronLeft size={16} />
-                        </button>
-                        <button type='button' className='size-8 flex items-center justify-center rounded-full bg-[#515DEF] text-white text-sm font-medium cursor-pointer'>
-                            1
-                        </button>
-                        <button type='button' className='size-8 flex items-center justify-center rounded-full border border-[#E2E8F0] text-[#515DEF] hover:bg-[#515DEF] hover:text-white transition-colors cursor-pointer'>
-                            <ChevronRight size={16} />
-                        </button>
-                    </div>
-                </div>
+                                </thead>
+                                <tbody>
+                                    {filteredRecords.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={6} className='px-2 py-8 text-center text-[#667085]'>
+                                                No marked attendance yet. Marks from Student Attendance appear here after save.
+                                            </td>
+                                        </tr>
+                                    ) : (
+                                        filteredRecords.map((record) => (
+                                            <tr key={record.id} className='border-b border-[#f2f4f7]'>
+                                                <td className={`${tdClass} rounded-s-lg`}>{record.attendanceDate || '—'}</td>
+                                                <td className={`${tdClass} font-medium text-[#1E1E1E]`}>
+                                                    {record.studentName}
+                                                    <span className='block text-xs text-[#808080]'>{record.studentId}</span>
+                                                </td>
+                                                <td className={tdClass}>{record.classSection || '—'}</td>
+                                                <td className={tdClass}>{record.location || '—'}</td>
+                                                <td className={tdClass}>
+                                                    {record.period}
+                                                    {' / '}
+                                                    {record.phase}
+                                                </td>
+                                                <td className={`${tdClass} rounded-e-lg`}>
+                                                    <span className={`inline-flex px-2.5 py-1 rounded-lg text-xs font-semibold ${markedStatusBadgeColor[record.status] || ''}`}>
+                                                        {record.status}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-4 pt-2'>
+                            <p className='text-sm font-medium text-[#515DEF]'>
+                                Showing 1 to {filteredRecords.length} of {filteredRecords.length} entries
+                            </p>
+                            <div className='flex items-center gap-2'>
+                                <button type='button' className='size-8 flex items-center justify-center rounded-full border border-[#E2E8F0] text-[#515DEF]'>
+                                    <ChevronLeft size={16} />
+                                </button>
+                                <button type='button' className='size-8 flex items-center justify-center rounded-full bg-[#515DEF] text-white text-sm font-medium'>1</button>
+                                <button type='button' className='size-8 flex items-center justify-center rounded-full border border-[#E2E8F0] text-[#515DEF]'>
+                                    <ChevronRight size={16} />
+                                </button>
+                            </div>
+                        </div>
+                    </>
+                )}
             </div>
 
             <ExportModal exportModal={exportModal} setExportModal={setExportModal} />

@@ -1,5 +1,6 @@
 import {
     canAssignToRole,
+    cleanRoleKey,
     DEMO_USER_ID_BY_ROLE,
     getRoleLabel,
     getUsersByRole,
@@ -317,19 +318,23 @@ const INITIAL_ENTERPRISE_TASKS = [
 ]
 
 const readTasks = () => {
+    // Prefer in-memory after writes so Created Tasks refreshes without a full page reload.
+    if (_memoryTasks && Array.isArray(_memoryTasks) && _memoryTasks.length > 0) {
+        return _memoryTasks
+    }
     try {
         if (typeof localStorage !== 'undefined') {
             const raw = localStorage.getItem(STORAGE_KEY)
             if (raw) {
                 const parsed = JSON.parse(raw)
-                if (Array.isArray(parsed) && parsed.length > 0) return parsed
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    _memoryTasks = parsed
+                    return parsed
+                }
             }
         }
     } catch {
         // ignore invalid storage
-    }
-    if (_memoryTasks && Array.isArray(_memoryTasks) && _memoryTasks.length > 0) {
-        return _memoryTasks
     }
     _memoryTasks = [...INITIAL_ENTERPRISE_TASKS]
     writeTasks(_memoryTasks)
@@ -390,6 +395,7 @@ export const isTaskAssignedToUser = (task, roleKey, userId) => {
 export const isTaskCreatedByUser = (task, roleKey, userId) => {
     if (!task) return false
     if (roleKey && task.assignedByRole === roleKey) return true
+    if (roleKey && cleanRoleKey(task.assignedByRole) === cleanRoleKey(roleKey)) return true
     if (userId && task.assignedById === userId) return true
     return false
 }
@@ -812,6 +818,12 @@ export const deleteTask = (taskId) => {
     writeTasks(tasks)
 }
 
-export const getDemoUserId = (roleKey) => DEMO_USER_ID_BY_ROLE[roleKey] ?? null
+export const getDemoUserId = (roleKey) => {
+    if (!roleKey) return null
+    if (DEMO_USER_ID_BY_ROLE[roleKey]) return DEMO_USER_ID_BY_ROLE[roleKey]
+    const clean = cleanRoleKey(roleKey)
+    const match = Object.entries(DEMO_USER_ID_BY_ROLE).find(([key]) => cleanRoleKey(key) === clean)
+    return match ? match[1] : null
+}
 
 export const getAssignedByLabel = (roleKey) => getRoleLabel(roleKey)

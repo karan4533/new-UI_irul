@@ -79,7 +79,6 @@ const TcRequestList = () => {
             </div>
 
             {source === 'backend' ? (
-                <p className='text-xs font-medium text-[#027A48]'>Live TC requests · GET /api/v1/tc-requests</p>
             ) : null}
             {source === 'error' ? (
                 <FeedbackState kind='error' title='TC API unavailable' description={error} />

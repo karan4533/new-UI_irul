@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react'
+import React, { useState, useMemo, useEffect, useCallback } from 'react'
 import {
     ClipboardList,
     CheckCircle2,
@@ -29,8 +29,18 @@ import {
     Paperclip,
     Trash2
 } from 'lucide-react'
+import { toast } from 'react-toastify'
 import { useAuth } from '../../context/AuthContext'
 import { getProfileLabel } from '../../Pages/Authentication/profileOptions'
+import { IntegrationNotice } from '../ui'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
+import {
+    listTasks,
+    createTask,
+    setTaskStatus,
+    listTaskAssignees,
+    mapUiTaskStatusToBackend,
+} from '../../services/api/taskApiService'
 import {
     getAllTasks,
     getMyTasks,
@@ -56,13 +66,16 @@ import {
 } from './taskManagementData'
 import { ENTERPRISE_EMPLOYEES } from '../AttendanceAndLeave/attendanceLeaveData'
 
+const LIVE_TASK_STATUSES = ['Incomplete', 'In Progress', 'Completed']
+
 // Status badge styling helper
 const getStatusBadge = (status) => {
     switch (status) {
         case 'Draft':
             return { label: 'Draft', bg: 'bg-slate-100 text-slate-700 border-slate-200' }
+        case 'Incomplete':
         case 'Assigned':
-            return { label: 'Assigned', bg: 'bg-indigo-50 text-indigo-700 border-indigo-200' }
+            return { label: status === 'Incomplete' ? 'Assigned' : 'Assigned', bg: 'bg-indigo-50 text-indigo-700 border-indigo-200' }
         case 'Acknowledged':
             return { label: 'Acknowledged', bg: 'bg-cyan-50 text-cyan-700 border-cyan-200' }
         case 'In Progress':
@@ -101,6 +114,7 @@ const getPriorityBadge = (priority) => {
 }
 
 export default function EnterpriseTaskWorkspace({ defaultTab = 'received', initialCreateOpen = false, roleOverride = null }) {
+    const live = isLiveApiEnabled()
     const { role: authRole, email: authEmail, name: authName } = useAuth()
     const activeRole = roleOverride || authRole || 'teacher'
     const roleLabel = getProfileLabel(activeRole)
@@ -111,6 +125,10 @@ export default function EnterpriseTaskWorkspace({ defaultTab = 'received', initi
     const [activeTab, setActiveTab] = useState(defaultTab === 'created' ? 'created' : 'received')
     const [refreshKey, setRefreshKey] = useState(0)
     const [bannerMessage, setBannerMessage] = useState('')
+    const [liveMineTasks, setLiveMineTasks] = useState([])
+    const [liveAssignedTasks, setLiveAssignedTasks] = useState([])
+    const [liveSource, setLiveSource] = useState(live ? 'syncing' : 'mock')
+    const [liveError, setLiveError] = useState('')
 
     // Modals
     const [isCreateOpen, setIsCreateOpen] = useState(initialCreateOpen)
@@ -135,26 +153,83 @@ export default function EnterpriseTaskWorkspace({ defaultTab = 'received', initi
         setTimeout(() => setBannerMessage(''), 4000)
     }
 
+    const notifyError = (msg) => {
+        toast.error(msg)
+    }
+
     const refreshData = () => {
         setRefreshKey((k) => k + 1)
     }
 
-    // Dynamic KPI calculation
-    const kpis = useMemo(() => {
-        void refreshKey
-        return getTaskKpis(activeRole, currentUserId)
-    }, [activeRole, currentUserId, refreshKey])
+    const loadLiveTasks = useCallback(async () => {
+        if (!isLiveApiEnabled()) {
+            setLiveSource('mock')
+            setLiveError('')
+            return
+        }
+        setLiveSource('syncing')
+        setLiveError('')
+        const [mineRes, assignedRes] = await Promise.all([
+            listTasks({ box: 'mine' }),
+            listTasks({ box: 'assigned' }),
+        ])
+        const mineOk = Boolean(mineRes?.success)
+        const assignedOk = Boolean(assignedRes?.success)
+        setLiveMineTasks(mineOk && Array.isArray(mineRes.data) ? mineRes.data : [])
+        setLiveAssignedTasks(assignedOk && Array.isArray(assignedRes.data) ? assignedRes.data : [])
+        if (!mineOk || !assignedOk) {
+            const err =
+                (!mineOk && mineRes?.error) ||
+                (!assignedOk && assignedRes?.error) ||
+                'Failed to load tasks from /api/v1/tasks.'
+            setLiveError(typeof err === 'string' ? err : 'Failed to load tasks.')
+            setLiveSource('failed')
+            return
+        }
+        setLiveSource('connected')
+    }, [])
+
+    useEffect(() => {
+        if (!live) {
+            setLiveSource('mock')
+            return
+        }
+        loadLiveTasks()
+    }, [live, loadLiveTasks, refreshKey])
 
     // Tasks queries
     const receivedTasks = useMemo(() => {
+        if (live) return liveMineTasks
         void refreshKey
         return getMyTasks(activeRole, currentUserId)
-    }, [activeRole, currentUserId, refreshKey])
+    }, [live, liveMineTasks, activeRole, currentUserId, refreshKey])
 
     const createdTasks = useMemo(() => {
+        if (live) return liveAssignedTasks
         void refreshKey
         return getTasksAssignedByMe(activeRole, currentUserId)
-    }, [activeRole, currentUserId, refreshKey])
+    }, [live, liveAssignedTasks, activeRole, currentUserId, refreshKey])
+
+    // Dynamic KPI calculation
+    const kpis = useMemo(() => {
+        if (live) {
+            const all = [...receivedTasks, ...createdTasks]
+            const seen = new Set()
+            const unique = all.filter((t) => {
+                if (seen.has(t.id)) return false
+                seen.add(t.id)
+                return true
+            })
+            return {
+                totalTasks: unique.length,
+                receivedTasks: receivedTasks.length,
+                createdTasks: createdTasks.length,
+                overdueTasks: unique.filter((t) => t.overdue || isTaskOverdue(t)).length,
+            }
+        }
+        void refreshKey
+        return getTaskKpis(activeRole, currentUserId)
+    }, [live, receivedTasks, createdTasks, activeRole, currentUserId, refreshKey])
 
     // Current tab tasks
     const activeTaskList = activeTab === 'created' ? createdTasks : receivedTasks
@@ -297,6 +372,28 @@ export default function EnterpriseTaskWorkspace({ defaultTab = 'received', initi
                     </button>
                 </div>
             </div>
+
+            <IntegrationNotice
+                state={liveSource === 'connected' ? 'connected' : liveSource === 'failed' ? 'failed' : live ? 'syncing' : 'mock'}
+                title={
+                    liveSource === 'connected'
+                        ? 'Live task queue'
+                        : liveSource === 'failed'
+                            ? 'Task API unavailable'
+                            : live
+                                ? 'Loading tasks'
+                                : 'Browser mock tasks'
+                }
+                description={
+                    liveSource === 'connected'
+                        ? 'GET/POST /api/v1/tasks · status updates use Incomplete | In Progress | Completed.'
+                        : liveSource === 'failed'
+                            ? (liveError || 'Could not reach /api/v1/tasks.')
+                            : live
+                                ? 'Fetching mine and assigned boxes…'
+                                : 'Live API is off. Tasks are stored only in this browser.'
+                }
+            />
 
             {/* 4 Compact KPI Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -549,7 +646,7 @@ export default function EnterpriseTaskWorkspace({ defaultTab = 'received', initi
                                                         <div className="font-semibold text-slate-900 group-hover:text-blue-600 transition flex items-center gap-1.5">
                                                             <span>{task.title}</span>
                                                             <span className="text-[10px] text-slate-400 font-mono">
-                                                                #{task.id}
+                                                                #{task.taskId || task.id}
                                                             </span>
                                                         </div>
                                                         <p className="text-[11px] text-slate-500 line-clamp-1 mt-0.5">
@@ -676,9 +773,11 @@ export default function EnterpriseTaskWorkspace({ defaultTab = 'received', initi
                     onClose={() => setIsCreateOpen(false)}
                     onSuccess={(created) => {
                         setIsCreateOpen(false)
+                        setActiveTab('created')
                         refreshData()
                         notify(`Task '${created.title}' created successfully!`)
                     }}
+                    onError={notifyError}
                     activeRole={activeRole}
                     currentUserId={currentUserId}
                     currentUserName={currentUserName}
@@ -698,11 +797,13 @@ export default function EnterpriseTaskWorkspace({ defaultTab = 'received', initi
                         refreshData()
                         notify('Task updated successfully!')
                     }}
+                    onError={notifyError}
                     activeRole={activeRole}
                     currentUserId={currentUserId}
                     currentUserName={currentUserName}
                     subTab={detailsSubTab}
                     setSubTab={setDetailsSubTab}
+                    liveMineIds={liveMineTasks.map((t) => t.id)}
                 />
             )}
 
@@ -720,6 +821,7 @@ export default function EnterpriseTaskWorkspace({ defaultTab = 'received', initi
                         refreshData()
                         notify(`Status updated to ${updated.status}`)
                     }}
+                    onError={notifyError}
                     currentUserName={currentUserName}
                 />
             )}
@@ -738,6 +840,7 @@ export default function EnterpriseTaskWorkspace({ defaultTab = 'received', initi
                         refreshData()
                         notify('Task details updated!')
                     }}
+                    onError={notifyError}
                     currentUserName={currentUserName}
                 />
             )}
@@ -748,7 +851,8 @@ export default function EnterpriseTaskWorkspace({ defaultTab = 'received', initi
 // -------------------------------------------------------------
 // CREATE TASK MODAL
 // -------------------------------------------------------------
-function CreateTaskModal({ onClose, onSuccess, activeRole, currentUserId, currentUserName }) {
+function CreateTaskModal({ onClose, onSuccess, onError, activeRole, currentUserId, currentUserName }) {
+    const live = isLiveApiEnabled()
     // Form fields
     const [title, setTitle] = useState('')
     const [department, setDepartment] = useState('Academics & Teaching')
@@ -764,15 +868,40 @@ function CreateTaskModal({ onClose, onSuccess, activeRole, currentUserId, curren
     // Individual Staff Selection
     const [selectedStaffIds, setSelectedStaffIds] = useState([])
     const [staffSearchQuery, setStaffSearchQuery] = useState('')
+    const [liveAssignees, setLiveAssignees] = useState([])
 
     // Submitting state
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [errorMsg, setErrorMsg] = useState('')
 
-    // Employees in selected department
+    useEffect(() => {
+        if (!live) return undefined
+        let cancelled = false
+        ;(async () => {
+            const res = await listTaskAssignees()
+            if (cancelled) return
+            if (!res.success) {
+                setErrorMsg(typeof res.error === 'string' ? res.error : 'Could not load assignees.')
+                setLiveAssignees([])
+                return
+            }
+            setLiveAssignees(
+                (res.data || []).map((row) => ({
+                    id: row.id,
+                    name: row.email || row.name || row.id,
+                    designation: row.role || '',
+                    roleKey: row.role || 'teacher',
+                })),
+            )
+        })()
+        return () => { cancelled = true }
+    }, [live])
+
+    // Employees in selected department (or live assignees)
     const departmentStaff = useMemo(() => {
+        if (live) return liveAssignees
         return getEmployeesByDepartment(department)
-    }, [department])
+    }, [live, liveAssignees, department])
 
     // Filtered staff for individual search
     const filteredStaff = useMemo(() => {
@@ -789,13 +918,13 @@ function CreateTaskModal({ onClose, onSuccess, activeRole, currentUserId, curren
         )
     }
 
-    const handleSubmit = (saveAsDraft = false) => {
+    const handleSubmit = async (saveAsDraft = false) => {
         setErrorMsg('')
         if (!title.trim()) {
             setErrorMsg('Task Title is required.')
             return
         }
-        if (!department) {
+        if (!live && !department) {
             setErrorMsg('Please select a Department.')
             return
         }
@@ -814,6 +943,42 @@ function CreateTaskModal({ onClose, onSuccess, activeRole, currentUserId, curren
         }
 
         setIsSubmitting(true)
+
+        if (live) {
+            if (saveAsDraft) {
+                setErrorMsg('Draft save is not available on the live API. Assign the task instead.')
+                setIsSubmitting(false)
+                return
+            }
+            try {
+                let lastCreated = null
+                for (const assigneeId of selectedStaffIds) {
+                    const res = await createTask({
+                        assigneeId,
+                        title: title.trim(),
+                        description: instructions.trim(),
+                        priority,
+                        dueDate,
+                    })
+                    if (!res.success) {
+                        const msg = typeof res.error === 'string' ? res.error : 'Failed to create task on the server.'
+                        setErrorMsg(msg)
+                        onError?.(msg)
+                        setIsSubmitting(false)
+                        return
+                    }
+                    lastCreated = res.data
+                }
+                onSuccess(lastCreated || { title: title.trim() })
+            } catch (err) {
+                const msg = err.message || 'Failed to create task.'
+                setErrorMsg(msg)
+                onError?.(msg)
+                setIsSubmitting(false)
+            }
+            return
+        }
+
         try {
             const selectedEmps = departmentStaff.filter((e) => selectedStaffIds.includes(e.id))
             const assigneeNames = selectedEmps.map((e) => e.name)
@@ -1081,20 +1246,31 @@ function TaskDetailsModal({
     task,
     onClose,
     onUpdated,
+    onError,
     activeRole,
     currentUserId,
     currentUserName,
     subTab,
-    setSubTab
+    setSubTab,
+    liveMineIds = [],
 }) {
+    const live = isLiveApiEnabled() || task?.dataSource === 'backend'
     const isCreator =
-        task.assignedByRole === activeRole ||
-        (currentUserId && task.assignedById === currentUserId) ||
-        ['super-admin', 'admin', 'director', 'principal'].includes(activeRole)
+        live
+            ? !liveMineIds.includes(task.id)
+            : (
+                task.assignedByRole === activeRole ||
+                (currentUserId && task.assignedById === currentUserId) ||
+                ['super-admin', 'admin', 'director', 'principal'].includes(activeRole)
+            )
 
     const isAssignee =
-        task.assigneeRole === activeRole ||
-        (currentUserId && task.assigneeUserIds?.includes(currentUserId))
+        live
+            ? liveMineIds.includes(task.id)
+            : (
+                task.assigneeRole === activeRole ||
+                (currentUserId && task.assigneeUserIds?.includes(currentUserId))
+            )
 
     const [commentText, setCommentText] = useState('')
     const [actionRemark, setActionRemark] = useState('')
@@ -1104,12 +1280,28 @@ function TaskDetailsModal({
 
     const statusBadge = getStatusBadge(task.status)
     const priorityBadge = getPriorityBadge(task.priority)
-    const overdue = isTaskOverdue(task)
+    const overdue = task.overdue || isTaskOverdue(task)
+
+    const applyLiveStatus = async (backendStatus, remark) => {
+        setIsSubmittingAction(true)
+        const res = await setTaskStatus(task.id, { status: backendStatus, remark: remark || null })
+        setIsSubmittingAction(false)
+        if (!res.success) {
+            const msg = typeof res.error === 'string' ? res.error : `Could not set status to ${backendStatus}.`
+            onError?.(msg)
+            return
+        }
+        onUpdated(res.data)
+    }
 
     // Handle posting a comment
     const handlePostComment = (e) => {
         e.preventDefault()
         if (!commentText.trim()) return
+        if (live) {
+            onError?.('Task comments are not available on the live API yet.')
+            return
+        }
         const updated = addTaskComment(task.id, {
             text: commentText.trim(),
             authorName: currentUserName,
@@ -1123,6 +1315,10 @@ function TaskDetailsModal({
 
     // Lifecycle Actions
     const handleAcknowledge = () => {
+        if (live) {
+            applyLiveStatus('In Progress', 'Task acknowledged / started by assignee.')
+            return
+        }
         setIsSubmittingAction(true)
         const updated = acknowledgeTask(task.id, currentUserName, 'Task acknowledged by assignee.')
         setIsSubmittingAction(false)
@@ -1130,6 +1326,10 @@ function TaskDetailsModal({
     }
 
     const handleStart = () => {
+        if (live) {
+            applyLiveStatus('In Progress', 'Assignee began execution of the task.')
+            return
+        }
         setIsSubmittingAction(true)
         const updated = startTask(task.id, currentUserName, 'Assignee began execution of the task.')
         setIsSubmittingAction(false)
@@ -1138,6 +1338,11 @@ function TaskDetailsModal({
 
     const handleSubmitEvidence = () => {
         if (!evidenceNote.trim()) return
+        if (live) {
+            onError?.('Submit-for-verification is not on the live API. Use Mark Complete or Update Status instead.')
+            setActionPrompt(null)
+            return
+        }
         setIsSubmittingAction(true)
         const updated = submitTaskForVerification({
             taskId: task.id,
@@ -1151,6 +1356,11 @@ function TaskDetailsModal({
     }
 
     const handleComplete = () => {
+        if (live) {
+            applyLiveStatus('Completed', actionRemark || 'Task approved and completed.')
+            setActionRemark('')
+            return
+        }
         setIsSubmittingAction(true)
         const updated = closeTask({
             taskId: task.id,
@@ -1164,6 +1374,11 @@ function TaskDetailsModal({
 
     const handleReject = () => {
         if (!actionRemark.trim()) return
+        if (live) {
+            onError?.('Rework/reject is not supported by the live task API.')
+            setActionPrompt(null)
+            return
+        }
         setIsSubmittingAction(true)
         const updated = rejectTask(task.id, actionRemark.trim(), currentUserName)
         setIsSubmittingAction(false)
@@ -1174,6 +1389,11 @@ function TaskDetailsModal({
 
     const handleCancel = () => {
         if (!actionRemark.trim()) return
+        if (live) {
+            onError?.('Cancel is not supported by the live task API.')
+            setActionPrompt(null)
+            return
+        }
         setIsSubmittingAction(true)
         const updated = cancelTask(task.id, actionRemark.trim(), currentUserName)
         setIsSubmittingAction(false)
@@ -1191,7 +1411,7 @@ function TaskDetailsModal({
                         <div>
                             <div className="flex items-center gap-2.5 mb-1.5">
                                 <span className="font-mono text-xs font-bold bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-lg border border-slate-200">
-                                    {task.id}
+                                    {task.taskId || task.id}
                                 </span>
                                 <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${priorityBadge.bg}`}>
                                     {priorityBadge.label} Priority
@@ -1636,14 +1856,39 @@ function TaskDetailsModal({
 // -------------------------------------------------------------
 // QUICK STATUS UPDATE MODAL
 // -------------------------------------------------------------
-function UpdateStatusModal({ task, onClose, onUpdated, currentUserName }) {
-    const [status, setStatus] = useState(task.status || 'In Progress')
+function UpdateStatusModal({ task, onClose, onUpdated, onError, currentUserName }) {
+    const live = isLiveApiEnabled() || task?.dataSource === 'backend'
+    const initialStatus = live
+        ? (task.backendStatus || mapUiTaskStatusToBackend(task.status) || 'In Progress')
+        : (task.status || 'In Progress')
+    const [status, setStatus] = useState(initialStatus)
     const [remark, setRemark] = useState('')
     const [progress, setProgress] = useState(task.progressPercentage || 0)
     const [isSaving, setIsSaving] = useState(false)
 
-    const handleSave = () => {
+    const handleSave = async () => {
         setIsSaving(true)
+        if (live) {
+            const backendStatus = LIVE_TASK_STATUSES.includes(status)
+                ? status
+                : mapUiTaskStatusToBackend(status)
+            if (!backendStatus || !LIVE_TASK_STATUSES.includes(backendStatus)) {
+                onError?.('Live status must be Incomplete, In Progress, or Completed.')
+                setIsSaving(false)
+                return
+            }
+            const res = await setTaskStatus(task.id, {
+                status: backendStatus,
+                remark: remark.trim() || `Status updated to ${backendStatus}`,
+            })
+            setIsSaving(false)
+            if (!res.success) {
+                onError?.(typeof res.error === 'string' ? res.error : 'Could not update task status on the server.')
+                return
+            }
+            onUpdated(res.data)
+            return
+        }
         const updated = updateTaskStatus(
             task.id,
             status,
@@ -1661,7 +1906,7 @@ function UpdateStatusModal({ task, onClose, onUpdated, currentUserName }) {
                 <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
                     <div>
                         <h3 className="text-sm font-bold text-slate-900">Update Task Status</h3>
-                        <p className="text-[11px] text-slate-500">#{task.id} — {task.title}</p>
+                        <p className="text-[11px] text-slate-500">#{task.taskId || task.id} — {task.title}</p>
                     </div>
                     <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg">
                         <X className="w-4 h-4" />
@@ -1681,14 +1926,24 @@ function UpdateStatusModal({ task, onClose, onUpdated, currentUserName }) {
                             }}
                             className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 font-semibold"
                         >
-                            <option value="Draft">Draft</option>
-                            <option value="Assigned">Assigned</option>
-                            <option value="Acknowledged">Acknowledged</option>
-                            <option value="In Progress">In Progress</option>
-                            <option value="Submitted">Submitted</option>
-                            <option value="Completed">Completed</option>
-                            <option value="Rejected">Rejected</option>
-                            <option value="Cancelled">Cancelled</option>
+                            {live ? (
+                                <>
+                                    <option value="Incomplete">Incomplete (Assigned)</option>
+                                    <option value="In Progress">In Progress</option>
+                                    <option value="Completed">Completed</option>
+                                </>
+                            ) : (
+                                <>
+                                    <option value="Draft">Draft</option>
+                                    <option value="Assigned">Assigned</option>
+                                    <option value="Acknowledged">Acknowledged</option>
+                                    <option value="In Progress">In Progress</option>
+                                    <option value="Submitted">Submitted</option>
+                                    <option value="Completed">Completed</option>
+                                    <option value="Rejected">Rejected</option>
+                                    <option value="Cancelled">Cancelled</option>
+                                </>
+                            )}
                         </select>
                     </div>
 
@@ -1743,7 +1998,8 @@ function UpdateStatusModal({ task, onClose, onUpdated, currentUserName }) {
 // -------------------------------------------------------------
 // EDIT TASK MODAL (For creator to update title, due date, etc.)
 // -------------------------------------------------------------
-function EditTaskModal({ task, onClose, onUpdated, currentUserName }) {
+function EditTaskModal({ task, onClose, onUpdated, onError, currentUserName }) {
+    const live = isLiveApiEnabled() || task?.dataSource === 'backend'
     const [title, setTitle] = useState(task.title || '')
     const [dueDate, setDueDate] = useState(() => {
         const d = parseTaskDate(task.dueDate)
@@ -1754,6 +2010,10 @@ function EditTaskModal({ task, onClose, onUpdated, currentUserName }) {
     const [isSaving, setIsSaving] = useState(false)
 
     const handleSave = () => {
+        if (live) {
+            onError?.('Editing task details is not available on the live API. Update status instead.')
+            return
+        }
         setIsSaving(true)
         const updated = updateTaskDetails(
             task.id,

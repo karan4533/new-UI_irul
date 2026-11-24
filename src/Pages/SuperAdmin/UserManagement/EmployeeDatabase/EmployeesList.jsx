@@ -67,7 +67,6 @@ const EmployeesList = () => {
     return (
         <section>
             {source === 'backend' ? (
-                <p className='mb-3 text-xs font-medium text-[#027A48]'>Live employees · GET /api/v1/hr/portal/employees (shared HR service)</p>
             ) : null}
             {source === 'error' ? (
                 <FeedbackState kind='error' title='Employees API unavailable' description={error} />

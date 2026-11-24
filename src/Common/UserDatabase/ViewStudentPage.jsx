@@ -789,11 +789,18 @@ const ViewStudentPage = ({ routeBase = '/front-office/student-management' }) => 
                         <div>
                             <h2 className='text-base font-bold text-slate-900'>Weekly Class Timetable</h2>
                             <p className='text-xs text-slate-500 mt-0.5'>
-                                Schedule for {student.classSection} · Academic Year {student.academicYear} · Effective {student.timetable.effectiveDate}
+                                {student.timetable?.hasData
+                                    ? `Schedule for ${student.timetable.classSection || student.classSection} · Academic Year ${student.academicYear} · Effective ${student.timetable.effectiveDate}`
+                                    : `Academic Year ${student.academicYear}`}
                             </p>
                         </div>
                     </div>
 
+                    {!student.timetable?.hasData ? (
+                        <div className='rounded-xl border border-amber-200 bg-amber-50 px-4 py-8 text-sm text-amber-800 text-center'>
+                            {student.timetable?.emptyMessage || `No historical timetable is available for ${student.academicYear}.`}
+                        </div>
+                    ) : (
                     <div className='overflow-x-auto'>
                         <table className='w-full text-sm text-left border border-slate-200 rounded-xl overflow-hidden'>
                             <thead className='text-xs uppercase bg-slate-100 text-slate-700 font-semibold border-b border-slate-200'>
@@ -827,6 +834,7 @@ const ViewStudentPage = ({ routeBase = '/front-office/student-management' }) => 
                             </tbody>
                         </table>
                     </div>
+                    )}
                 </div>
             )}
 

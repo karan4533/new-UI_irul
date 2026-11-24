@@ -10,14 +10,29 @@ const ICONS = {
     failed: CircleAlert,
 }
 
+/** Dev/staging only. Production UI stays clean. */
+export function showIntegrationDiagnostics() {
+    try {
+        return String(import.meta.env?.VITE_SHOW_INTEGRATION_NOTICES || '').toLowerCase() === 'true'
+    } catch {
+        return false
+    }
+}
+
 const IntegrationNotice = ({ state = 'disconnected', title, description, action, className = '' }) => {
-    // Suppress demonstration, offline, and non-actionable instructional banners per ERP clean-UI standards
+    // Always suppress non-error banners unless explicitly enabled for staging audits.
+    // Keep `failed` visible so users still see real outages.
+    if (state !== 'failed' && !showIntegrationDiagnostics()) {
+        return null
+    }
     if (state === 'demo' || state === 'disconnected') {
         return null
     }
-    const integration = getIntegrationState(state)
+    const integration = state === 'mock'
+        ? { state: 'mock', title: 'Browser mock data', description: 'This screen is not writing to the live API.', tone: 'warning' }
+        : getIntegrationState(state)
     const tone = getStatusTone(integration.tone)
-    const Icon = ICONS[integration.state] || CircleDashed
+    const Icon = state === 'mock' ? FlaskConical : (ICONS[integration.state] || CircleDashed)
 
     return (
         <aside

@@ -9,6 +9,8 @@ import {
     PARENT_SELECT_CHILD_ROUTE,
 } from '../Pages/Parent/parentPortalConfig'
 import AppShell from './AppShell'
+import { IntegrationNotice } from '../Common/ui'
+import { isLiveApiEnabled } from '../services/api/tokenStore'
 
 const LoadingPortal = ({ children }) => (
     <div className='flex min-h-screen items-center justify-center bg-[var(--erp-canvas)] px-6 text-sm text-[var(--erp-slate)]' role='status'>
@@ -17,7 +19,7 @@ const LoadingPortal = ({ children }) => (
 )
 
 const ParentLayoutShell = () => {
-    const { activeStudent, initialized } = useParentChild()
+    const { activeStudent, initialized, identitySource, liveIdentityError } = useParentChild()
 
     if (!initialized) return <LoadingPortal>Loading guardian workspace…</LoadingPortal>
     if (!activeStudent) return <Navigate to={PARENT_SELECT_CHILD_ROUTE} replace />
@@ -29,6 +31,20 @@ const ParentLayoutShell = () => {
             routePrefix={PARENT_ROUTE_PREFIX}
         >
             <AppShell roleKey='parent'>
+                {isLiveApiEnabled() && identitySource === 'backend' ? (
+                    <IntegrationNotice
+                        state='connected'
+                        title='Live Parent portal'
+                        description={`Child identity from GET /api/v1/parents/me/children (${activeStudent.admissionNumber || activeStudent.id}). LIVE: fees, TC, announcements, calendar, attendance calendar (UUID). BLOCKED: parent escalations. MOCK: Home Fun, Track Bus, hostel/transport payments, dashboard KPIs.`}
+                    />
+                ) : null}
+                {isLiveApiEnabled() && identitySource === 'error' ? (
+                    <IntegrationNotice
+                        state='failed'
+                        title='Parent children unavailable'
+                        description={liveIdentityError || 'GET /api/v1/parents/me/children failed. Temporary FE seed mapping is not used while live.'}
+                    />
+                ) : null}
                 <ParentRoutes />
             </AppShell>
         </ActiveStudentProvider>

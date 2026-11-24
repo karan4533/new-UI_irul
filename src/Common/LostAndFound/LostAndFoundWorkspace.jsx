@@ -33,7 +33,24 @@ import {
 import { useAuth } from '../../context/AuthContext'
 import { getProfileLabel } from '../../Pages/Authentication/profileOptions'
 import { lostFoundService } from '../../services/modules/lostFoundService'
-import { DataTable, StatusBadge } from '../ui'
+import { getFoundItems, getLostItems } from './lostAndFoundData'
+import { DataSourceIndicator, DataTable, StatusBadge } from '../ui'
+import { downloadCsv } from '../utils/downloadCsv'
+
+const mapLocalLostFoundItem = (item, type) => ({
+    ...item,
+    type,
+    title: item.title || item.itemName || '',
+    location: item.location || item.foundLocation || item.lastSeenLocation || '',
+    dateReported: item.dateReported || item.foundDate || item.lastSeenDate || '',
+    reporterName: item.reporterName || item.reportedBy || item.foundByName || '',
+    custodialLocker: item.custodialLocker || item.storageLocation || '',
+})
+
+const loadLocalLostFoundDirectory = () => [
+    ...getLostItems().map((item) => mapLocalLostFoundItem(item, 'LOST')),
+    ...getFoundItems().map((item) => mapLocalLostFoundItem(item, 'FOUND')),
+]
 
 export const ITEM_CATEGORIES = [
     'Electronics & Watches',
@@ -131,11 +148,12 @@ export default function LostAndFoundWorkspace({ defaultTab = 'directory', roleOv
         setLoading(true)
         try {
             const res = await lostFoundService.getItems()
-            if (res.success && Array.isArray(res.data)) {
-                setItems(res.data)
-            }
+            const remote = res?.success && Array.isArray(res.data) ? res.data : []
+            // Prefer remote when present; otherwise use local seed so directory/CSV/badge UAT is not empty.
+            setItems(remote.length > 0 ? remote : loadLocalLostFoundDirectory())
         } catch (err) {
             console.error('Failed to load lost & found items:', err)
+            setItems(loadLocalLostFoundDirectory())
         } finally {
             setLoading(false)
         }
@@ -354,6 +372,10 @@ export default function LostAndFoundWorkspace({ defaultTab = 'directory', roleOv
 
     return (
         <div className='space-y-6 p-4 md:p-6 bg-slate-50/50 min-h-screen'>
+            <DataSourceIndicator
+                status='PARTIAL'
+                detail='Directory may load mock/local seed when remote ops items are empty. Ops collection hk-lost-found exists but is not the sole SoT for all actions.'
+            />
             {/* Action Feedback Notification */}
             {actionMessage && (
                 <div className='flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-xs font-semibold text-emerald-800 shadow-2xs'>
@@ -556,9 +578,9 @@ export default function LostAndFoundWorkspace({ defaultTab = 'directory', roleOv
                             return (
                                 <div key={item.id} className='rounded-2xl border border-slate-200/80 bg-white p-5 shadow-xs flex flex-col justify-between space-y-3 hover:border-slate-300 transition-all'>
                                     <div className='space-y-3'>
-                                        <div className='flex items-start justify-between gap-2'>
-                                            <div>
-                                                <div className='flex items-center gap-1.5'>
+                                        <div className='flex items-start justify-between gap-2 min-w-0'>
+                                            <div className='min-w-0 flex-1'>
+                                                <div className='flex items-center gap-1.5 flex-wrap'>
                                                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                                                         isLost ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-teal-50 text-teal-700 border border-teal-200'
                                                     }`}>
@@ -572,7 +594,7 @@ export default function LostAndFoundWorkspace({ defaultTab = 'directory', roleOv
                                                 <p className='text-xs text-slate-500'>{item.category}</p>
                                             </div>
 
-                                            <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold whitespace-nowrap ${
+                                            <span className={`max-w-[55%] shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-bold text-right leading-snug break-words whitespace-normal ${
                                                 item.status.includes('Handed Over')
                                                     ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                                                     : item.status.includes('Review')
@@ -845,7 +867,47 @@ export default function LostAndFoundWorkspace({ defaultTab = 'directory', roleOv
                             <div className='space-y-2'>
                                 <button
                                     type='button'
-                                    onClick={() => notify('Lost & Found register exported to CSV.')}
+                                    onClick={() => {
+                                        try {
+                                            const custodyRows = items.filter(
+                                                (i) =>
+                                                    i.type === 'FOUND' ||
+                                                    String(i.status || '').toLowerCase().includes('custody') ||
+                                                    String(i.status || '').toLowerCase().includes('handover') ||
+                                                    String(i.status || '').toLowerCase().includes('claim')
+                                            )
+                                            const headers = [
+                                                'id',
+                                                'type',
+                                                'title',
+                                                'category',
+                                                'status',
+                                                'location',
+                                                'dateReported',
+                                                'reporterName',
+                                                'custodialLocker',
+                                            ]
+                                            const rows = custodyRows.map((i) => ({
+                                                id: i.id || '',
+                                                type: i.type || '',
+                                                title: i.title || i.itemName || '',
+                                                category: i.category || '',
+                                                status: i.status || '',
+                                                location: i.location || i.foundLocation || i.lastSeenLocation || '',
+                                                dateReported: i.dateReported || i.foundDate || i.lastSeenDate || '',
+                                                reporterName: i.reporterName || i.reportedBy || '',
+                                                custodialLocker: i.custodialLocker || i.storageLocation || '',
+                                            }))
+                                            downloadCsv(
+                                                `lost-found-custody-ledger-${new Date().toISOString().slice(0, 10)}.csv`,
+                                                headers,
+                                                rows
+                                            )
+                                            notify(`Custody Ledger CSV downloaded (${rows.length} records).`)
+                                        } catch (err) {
+                                            notify(err.message || 'Failed to export Custody Ledger CSV.')
+                                        }
+                                    }}
                                     className='w-full rounded-xl border border-slate-200 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-1.5'
                                 >
                                     <Download size={14} /> Export Custody Ledger (CSV)

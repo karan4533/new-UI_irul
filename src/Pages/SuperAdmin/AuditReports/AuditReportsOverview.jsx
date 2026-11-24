@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react'
 import ReactECharts from 'echarts-for-react'
+import { DataSourceIndicator } from '../../../Common/ui'
 import AuditReportsDataTable from './Components/AuditReportsDataTable'
 import {
     getComplianceScore,
@@ -75,6 +76,10 @@ const AuditReportsOverview = () => {
 
     return (
         <section className='space-y-6'>
+            <DataSourceIndicator
+                status='MOCK'
+                detail='Audit Reports / Compliance Score use static demo aggregates. No dedicated Super Admin compliance FastAPI SoT.'
+            />
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <h1 className='text-2xl font-semibold text-black'>Audit Reports</h1>
                 <p className='text-sm text-[#667085] mt-2'>

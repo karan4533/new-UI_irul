@@ -24,9 +24,12 @@ import {
     ACADEMIC_EVENT_TYPES,
     getAcademicCalendarRoleConfig,
     getAllCalendarItems,
-    addCustomCalendarItem
+    addCustomCalendarItem,
+    validateCalendarDateRange,
 } from './academicCalendarData'
-import { CALENDAR_UPDATED_EVENT } from '../Activities/activitiesData'
+import { CALENDAR_UPDATED_EVENT, getActivityCalendarItems } from '../Activities/activitiesData'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
+import { createCalendarEvent, listCalendarEvents } from '../../services/api/calendarApiService'
 import FeedbackState from '../ui/FeedbackState'
 import IntegrationNotice from '../ui/IntegrationNotice'
 import {
@@ -40,6 +43,8 @@ import {
     isToday,
     toDateKey,
 } from './utils'
+
+const ACADEMIC_CALENDAR_LOCAL_EVENT = 'schoolerp-academic-calendar-updated'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const TYPE_KEYS = Object.keys(ACADEMIC_EVENT_TYPES)
@@ -60,13 +65,19 @@ const TypeBadge = ({ type }) => {
 
 const AcademicCalendarPage = ({ roleKey }) => {
     const roleConfig = getAcademicCalendarRoleConfig(roleKey)
-    const [currentDate, setCurrentDate] = useState(() => new Date(2026, 6, 1)) // Jul 2026
+    const [currentDate, setCurrentDate] = useState(() => {
+        const today = new Date()
+        return new Date(today.getFullYear(), today.getMonth(), 1)
+    })
     const [selectedDate, setSelectedDate] = useState(null)
     const [activeTypes, setActiveTypes] = useState(() => new Set(TYPE_KEYS))
     const [calendarRefresh, setCalendarRefresh] = useState(0)
     const [viewMode, setViewMode] = useState('month') // 'month', 'agenda'
     const [searchQuery, setSearchQuery] = useState('')
     const [showAddEventModal, setShowAddEventModal] = useState(false)
+    const [liveEvents, setLiveEvents] = useState([])
+    const [liveStatus, setLiveStatus] = useState('idle') // idle | loading | connected | failed
+    const [liveError, setLiveError] = useState('')
 
     // Form state for new custom event
     const [newEventForm, setNewEventForm] = useState({
@@ -74,22 +85,70 @@ const AcademicCalendarPage = ({ roleKey }) => {
         type: 'event',
         startDate: new Date().toISOString().split('T')[0],
         endDate: new Date().toISOString().split('T')[0],
-        description: ''
+        description: '',
+        allDay: true,
+        startTime: '09:00',
+        endTime: '10:00',
     })
 
+    const hydrateLiveCalendar = async () => {
+        if (!isLiveApiEnabled()) {
+            setLiveEvents([])
+            setLiveStatus('idle')
+            setLiveError('')
+            return
+        }
+        setLiveStatus('loading')
+        setLiveError('')
+        const res = await listCalendarEvents()
+        if (!res.success) {
+            setLiveEvents([])
+            setLiveStatus('failed')
+            setLiveError(typeof res.error === 'string' ? res.error : 'Failed to load calendar from the server.')
+            return
+        }
+        setLiveEvents(Array.isArray(res.data) ? res.data : [])
+        setLiveStatus('connected')
+    }
+
     useEffect(() => {
-        const refresh = () => setCalendarRefresh((value) => value + 1)
+        hydrateLiveCalendar()
+        const refresh = () => {
+            setCalendarRefresh((value) => value + 1)
+            if (isLiveApiEnabled()) hydrateLiveCalendar()
+        }
         window.addEventListener(CALENDAR_UPDATED_EVENT, refresh)
+        window.addEventListener(ACADEMIC_CALENDAR_LOCAL_EVENT, refresh)
         window.addEventListener('focus', refresh)
         return () => {
             window.removeEventListener(CALENDAR_UPDATED_EVENT, refresh)
+            window.removeEventListener(ACADEMIC_CALENDAR_LOCAL_EVENT, refresh)
             window.removeEventListener('focus', refresh)
         }
     }, [])
 
     const filteredItems = useMemo(() => {
         void calendarRefresh
-        return getAllCalendarItems()
+        const live = isLiveApiEnabled()
+        const source = live
+            ? [
+                ...liveEvents.map((item) => ({
+                    id: item.id,
+                    type: item.type || 'event',
+                    title: item.title || '',
+                    startDate: item.startDate,
+                    endDate: item.endDate || item.startDate,
+                    description: item.description || '',
+                    allDay: item.allDay !== false,
+                    startTime: item.startTime || null,
+                    endTime: item.endTime || null,
+                    source: 'backend',
+                })),
+                // Activity overlays remain local until ops calendar sync exists.
+                ...getActivityCalendarItems(),
+            ]
+            : getAllCalendarItems()
+        return source
             .filter((item) => activeTypes.has(item.type))
             .filter((item) => {
                 if (!searchQuery.trim()) return true
@@ -99,7 +158,7 @@ const AcademicCalendarPage = ({ roleKey }) => {
                     (item.description && item.description.toLowerCase().includes(q))
                 )
             })
-    }, [activeTypes, calendarRefresh, searchQuery])
+    }, [activeTypes, calendarRefresh, searchQuery, liveEvents])
 
     const cells = useMemo(() => getMonthCells(currentDate), [currentDate])
     const monthItems = useMemo(
@@ -135,29 +194,63 @@ const AcademicCalendarPage = ({ roleKey }) => {
         setSelectedDate(toDateKey(today))
     }
 
-    const handleCreateEvent = (e) => {
+    const handleCreateEvent = async (e) => {
         e.preventDefault()
         if (!newEventForm.title.trim()) {
             toast.error('Event title is required.')
             return
         }
-        addCustomCalendarItem({
-            title: newEventForm.title.trim(),
-            type: newEventForm.type,
-            startDate: newEventForm.startDate,
-            endDate: newEventForm.endDate || newEventForm.startDate,
-            description: newEventForm.description.trim()
-        })
-        setCalendarRefresh((k) => k + 1)
-        setShowAddEventModal(false)
-        setNewEventForm({
-            title: '',
-            type: 'event',
-            startDate: new Date().toISOString().split('T')[0],
-            endDate: new Date().toISOString().split('T')[0],
-            description: ''
-        })
-        toast.success('Academic event scheduled and added to calendar!')
+        try {
+            const range = validateCalendarDateRange({
+                startDate: newEventForm.startDate,
+                endDate: newEventForm.endDate || newEventForm.startDate,
+                startTime: newEventForm.startTime,
+                endTime: newEventForm.endTime,
+                allDay: newEventForm.allDay,
+            })
+            const payload = {
+                title: newEventForm.title.trim(),
+                type: newEventForm.type,
+                startDate: range.startDate,
+                endDate: range.endDate,
+                description: newEventForm.description.trim(),
+                allDay: newEventForm.allDay,
+                startTime: newEventForm.allDay ? null : newEventForm.startTime,
+                endTime: newEventForm.allDay ? null : newEventForm.endTime,
+            }
+            let created = null
+            if (isLiveApiEnabled()) {
+                const res = await createCalendarEvent(payload)
+                if (!res.success) {
+                    toast.error(res.error || 'Calendar API rejected the event.')
+                    return
+                }
+                created = res.data
+                await hydrateLiveCalendar()
+            } else {
+                created = addCustomCalendarItem(payload)
+            }
+            setCalendarRefresh((k) => k + 1)
+            const jump = new Date(`${created.startDate}T00:00:00`)
+            if (!Number.isNaN(jump.getTime())) {
+                setCurrentDate(new Date(jump.getFullYear(), jump.getMonth(), 1))
+                setSelectedDate(created.startDate)
+            }
+            setShowAddEventModal(false)
+            setNewEventForm({
+                title: '',
+                type: 'event',
+                startDate: new Date().toISOString().split('T')[0],
+                endDate: new Date().toISOString().split('T')[0],
+                description: '',
+                allDay: true,
+                startTime: '09:00',
+                endTime: '10:00',
+            })
+            toast.success('Academic event scheduled and added to calendar!')
+        } catch (err) {
+            toast.error(err.message || 'Unable to schedule event with the selected dates.')
+        }
     }
 
     if (!roleConfig) {
@@ -170,6 +263,23 @@ const AcademicCalendarPage = ({ roleKey }) => {
 
     return (
         <div className="space-y-6 font-inter pb-8">
+            {isLiveApiEnabled() ? (
+                <IntegrationNotice
+                    state={liveStatus === 'failed' ? 'failed' : liveStatus === 'connected' ? 'connected' : 'demo'}
+                    title={liveStatus === 'failed' ? 'Calendar hydrate failed' : liveStatus === 'connected' ? 'Live academic calendar' : 'Loading calendar'}
+                    description={liveStatus === 'failed'
+                        ? liveError
+                        : liveStatus === 'connected'
+                            ? `Showing ${liveEvents.length} event(s) from GET /api/v1/calendar. Creates use POST /api/v1/calendar and re-hydrate — no sessionStorage SoT in live mode.`
+                            : 'Fetching calendar events from the server…'}
+                />
+            ) : (
+                <IntegrationNotice
+                    state='demo'
+                    title='Demo calendar catalog'
+                    description='Holidays and events are local demo data until VITE_USE_MOCK=false connects GET/POST /api/v1/calendar.'
+                />
+            )}
             {/* Redesigned Modern Calendar Header */}
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200/90 shadow-xs">
                 <div className="flex items-center gap-3.5">
@@ -427,6 +537,9 @@ const AcademicCalendarPage = ({ roleKey }) => {
                                             <p className="text-xs font-bold text-slate-900 mt-1">{item.title}</p>
                                             <p className="text-[11px] text-slate-500 mt-0.5">
                                                 {formatRangeLabel(item.startDate, item.endDate)}
+                                                {!item.allDay && item.startTime
+                                                    ? ` · ${item.startTime}${item.endTime ? `–${item.endTime}` : ''}`
+                                                    : ''}
                                             </p>
                                             {item.description && (
                                                 <p className="mt-1.5 text-xs text-slate-600 leading-relaxed border-t border-slate-200/60 pt-1.5">
@@ -606,6 +719,39 @@ const AcademicCalendarPage = ({ roleKey }) => {
                                     />
                                 </div>
                             </div>
+
+                            <label className="flex items-center gap-2 font-semibold text-slate-700">
+                                <input
+                                    type="checkbox"
+                                    checked={newEventForm.allDay}
+                                    onChange={(e) => setNewEventForm({ ...newEventForm, allDay: e.target.checked })}
+                                    className="rounded border-slate-300"
+                                />
+                                All-Day Event
+                            </label>
+
+                            {!newEventForm.allDay && (
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block font-semibold text-slate-700 mb-1">Start Time</label>
+                                        <input
+                                            type="time"
+                                            value={newEventForm.startTime}
+                                            onChange={(e) => setNewEventForm({ ...newEventForm, startTime: e.target.value })}
+                                            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs focus:outline-none focus:border-indigo-500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block font-semibold text-slate-700 mb-1">End Time</label>
+                                        <input
+                                            type="time"
+                                            value={newEventForm.endTime}
+                                            onChange={(e) => setNewEventForm({ ...newEventForm, endTime: e.target.value })}
+                                            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs focus:outline-none focus:border-indigo-500"
+                                        />
+                                    </div>
+                                </div>
+                            )}
 
                             <div>
                                 <label className="block font-semibold text-slate-700 mb-1">Description & Guidelines</label>

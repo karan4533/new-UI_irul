@@ -1729,19 +1729,23 @@ export const saveAttendanceRecords = (records) => {
 }
 
 export const getLeaveRequests = () => {
+    // Prefer in-memory after writes so list refresh works even if storage write lags/fails.
+    if (_memoryLeaveRequests && Array.isArray(_memoryLeaveRequests) && _memoryLeaveRequests.length > 0) {
+        return _memoryLeaveRequests
+    }
     try {
         if (typeof localStorage !== 'undefined') {
             const raw = localStorage.getItem(LEAVE_REQUESTS_STORAGE_KEY)
             if (raw) {
                 const parsed = JSON.parse(raw)
-                if (Array.isArray(parsed) && parsed.length > 0) return parsed
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    _memoryLeaveRequests = parsed
+                    return parsed
+                }
             }
         }
     } catch {
         /* ignore */
-    }
-    if (_memoryLeaveRequests && Array.isArray(_memoryLeaveRequests) && _memoryLeaveRequests.length > 0) {
-        return _memoryLeaveRequests
     }
     saveLeaveRequests(INITIAL_LEAVE_REQUESTS)
     return INITIAL_LEAVE_REQUESTS
@@ -2093,6 +2097,7 @@ export const updateLeaveRequestDecision = (requestId, decision, arg3, arg4, auth
  * Returns authorized attendance records based on authenticated user role and email.
  */
 export const FULL_ACCESS_MANAGEMENT_ROLES = [
+    'superadmin',
     'director',
     'principal',
     'super-admin',

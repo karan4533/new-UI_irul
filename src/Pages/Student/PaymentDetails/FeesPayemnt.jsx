@@ -1,9 +1,15 @@
-import React, { useState, useEffect, useCallback } from 'react'
-import { History, Smartphone, RotateCcw, Plus, X, CheckCircle, Clock, AlertCircle } from 'lucide-react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import { History, Smartphone, RotateCcw, Plus, X } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { useFinance } from '../../AccountHead/financeDomain/FinanceContext'
 import { DEFAULT_ACADEMIC_YEAR } from '../../AccountHead/financeDomain/financeConstants'
-import { formatCurrency, groupInstallmentsByMonth } from '../../AccountHead/financeDomain/financeHelpers'
+import {
+    formatCurrency,
+    groupInstallmentsByMonth,
+    hydrateInstallment,
+    summarizeStudentFees,
+} from '../../AccountHead/financeDomain/financeHelpers'
+import { getFineRuleForCategory } from '../../AccountHead/financeDomain/financeMasters'
 import FeeInstallmentCard from '../../AccountHead/FeesManagement/Components/FeeInstallmentCard'
 import CheckoutMockModal from '../../AccountHead/FeesManagement/Components/CheckoutMockModal'
 import PaymentHistoryDrawer from '../../AccountHead/FeesManagement/Components/PaymentHistoryDrawer'
@@ -13,8 +19,22 @@ import { useActiveStudent } from '../../../context/ActiveStudentContext'
 import EntryClosureGate from '../../../Common/demoDomain/EntryClosureGate'
 import { entryBlocked } from '../../../Common/demoDomain/governance'
 import { feeService } from '../../../services/modules/feeService'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { getMyFees, payMyFeesApi } from '../../../services/api/financeApiService'
+import IntegrationNotice from '../../../Common/ui/IntegrationNotice'
+
+const matchStudentRow = (row, activeStudent) => {
+    if (!row || !activeStudent) return false
+    const admissionNumber = activeStudent.admissionNumber || activeStudent.admissionNo
+    return (
+        String(row.id) === String(activeStudent.id)
+        || (admissionNumber && (row.admissionNo === admissionNumber || row.admissionNumber === admissionNumber))
+        || (activeStudent.name && row.name === activeStudent.name)
+    )
+}
 
 const FeesPayemnt = () => {
+    const live = isLiveApiEnabled()
     const {
         students,
         getInstallmentsForStudent,
@@ -23,15 +43,31 @@ const FeesPayemnt = () => {
         receipts,
         reprintReceipt,
         sendReceipt,
+        fineRules = [],
     } = useFinance()
 
     const { activeStudent } = useActiveStudent()
     const admissionNumber = activeStudent?.admissionNumber || activeStudent?.admissionNo
-    const student = students.find((item) => (
+
+    const [myFeesData, setMyFeesData] = useState(null)
+    const [feesLoading, setFeesLoading] = useState(Boolean(live))
+    const [feesSource, setFeesSource] = useState(live ? 'backend' : 'local')
+    const [feesError, setFeesError] = useState('')
+
+    const contextStudent = students.find((item) => (
         item.id === activeStudent?.id
         || item.admissionNo === admissionNumber
         || item.admissionNumber === admissionNumber
     )) || null
+
+    const liveStudent = useMemo(() => {
+        if (!myFeesData) return null
+        const list = Array.isArray(myFeesData.students) ? myFeesData.students : []
+        return list.find((row) => matchStudentRow(row, activeStudent)) || list[0] || null
+    }, [myFeesData, activeStudent])
+
+    const student = live ? liveStudent : contextStudent
+
     const [academicYear] = useState(student?.academicYear || DEFAULT_ACADEMIC_YEAR)
     const [view, setView] = useState('pay')
     const [selectedIds, setSelectedIds] = useState([])
@@ -39,7 +75,6 @@ const FeesPayemnt = () => {
     const [historyOpen, setHistoryOpen] = useState(false)
     const [receipt, setReceipt] = useState(null)
 
-    // Fee refund states
     const [refundRequests, setRefundRequests] = useState([])
     const [loadingRefunds, setLoadingRefunds] = useState(false)
     const [refundModalOpen, setRefundModalOpen] = useState(false)
@@ -53,6 +88,32 @@ const FeesPayemnt = () => {
         ifscCode: '',
         accountHolder: '',
     })
+
+    const loadMyFees = useCallback(async () => {
+        if (!isLiveApiEnabled()) return
+        setFeesLoading(true)
+        setFeesError('')
+        const res = await getMyFees()
+        setFeesLoading(false)
+        if (!res.success) {
+            setFeesSource('error')
+            setFeesError(typeof res.error === 'string' ? res.error : 'Failed to load fee ledger.')
+            setMyFeesData(null)
+            return
+        }
+        setMyFeesData(res.data && typeof res.data === 'object' ? res.data : {})
+        setFeesSource('backend')
+    }, [])
+
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            setFeesSource('local')
+            setFeesLoading(false)
+            setFeesError('')
+            return
+        }
+        loadMyFees()
+    }, [loadMyFees])
 
     const loadRefunds = useCallback(async () => {
         if (!student?.id) return
@@ -125,10 +186,31 @@ const FeesPayemnt = () => {
         }
     }
 
-    const installments = student ? getInstallmentsForStudent(student.id, academicYear) : []
-    const summary = student ? getStudentSummary(student.id, academicYear) : null
+    const liveFineRules = Array.isArray(myFeesData?.fineRules) ? myFeesData.fineRules : fineRules
+
+    const installments = useMemo(() => {
+        if (!student) return []
+        if (live && myFeesData) {
+            const rows = (Array.isArray(myFeesData.installments) ? myFeesData.installments : [])
+                .filter((row) => String(row.studentId) === String(student.id)
+                    && (!academicYear || !row.academicYear || row.academicYear === academicYear))
+            return rows.map((row) => hydrateInstallment(row, {
+                fineRule: getFineRuleForCategory(liveFineRules, row.feeCategoryId),
+            }))
+        }
+        return getInstallmentsForStudent(student.id, academicYear)
+    }, [student, live, myFeesData, academicYear, liveFineRules, getInstallmentsForStudent])
+
+    const summary = useMemo(() => {
+        if (!student) return null
+        if (live) return summarizeStudentFees(installments)
+        return getStudentSummary(student.id, academicYear)
+    }, [student, live, installments, getStudentSummary, academicYear])
+
     const grouped = groupInstallmentsByMonth(installments)
-    const studentReceipts = receipts.filter((item) => item.studentId === student?.id)
+    const studentReceipts = live
+        ? (Array.isArray(myFeesData?.receipts) ? myFeesData.receipts : []).filter((item) => String(item.studentId) === String(student?.id))
+        : receipts.filter((item) => item.studentId === student?.id)
 
     const allocations = selectedIds.map((id) => {
         const row = installments.find((item) => item.id === id)
@@ -136,9 +218,29 @@ const FeesPayemnt = () => {
     }).filter(Boolean)
     const totalAmount = allocations.reduce((sum, item) => sum + item.amount, 0)
 
-    const payNow = (payload) => {
+    const payNow = async (payload) => {
         if (!student || entryBlocked('Finance', activeStudent?.name || 'Student')) return { success: false }
-        const result = collectFeePayment({
+
+        if (isLiveApiEnabled()) {
+            const res = await payMyFeesApi({
+                studentId: student.id,
+                installmentIds: selectedIds,
+                allocations,
+                paymentMode: payload?.paymentMode || 'UPI',
+                details: payload?.details || {},
+                collectedBy: student.name,
+            })
+            if (!res.success) {
+                toast.error(typeof res.error === 'string' ? res.error : 'Payment failed.')
+                return { success: false, errors: [res.error] }
+            }
+            setSelectedIds([])
+            if (res.data?.receipt) setReceipt(res.data.receipt)
+            await loadMyFees()
+            return { success: true, receipt: res.data?.receipt || null }
+        }
+
+        const result = await collectFeePayment({
             studentId: student.id,
             allocations,
             ...payload,
@@ -155,6 +257,26 @@ const FeesPayemnt = () => {
 
     return (
         <section className='space-y-6'>
+            {feesSource === 'backend' ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Live my-fees ledger'
+                    description='Hydrated from GET /api/v1/finance/my-fees. Payments use pay-my-fees (not Account Head collect).'
+                />
+            ) : feesSource === 'error' ? (
+                <IntegrationNotice
+                    state='failed'
+                    title='Fees API unavailable'
+                    description={feesError || 'Could not load the scoped fee ledger.'}
+                />
+            ) : (
+                <IntegrationNotice
+                    state='mock'
+                    title='Browser fee payment'
+                    description='Fee ledger and payments use the demo FinanceContext in this browser.'
+                />
+            )}
+
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='flex gap-6 border-b border-[#F2F4F7]'>
                     {[
@@ -180,12 +302,19 @@ const FeesPayemnt = () => {
             </div>
 
             <EntryClosureGate moduleName='Finance' actor={activeStudent?.name || 'Student'} />
-            {!student && (
+
+            {feesLoading ? (
+                <div className='bg-white rounded-2xl shadow-md p-8 text-center text-[#667085]'>
+                    Loading fee information…
+                </div>
+            ) : null}
+
+            {!feesLoading && !student && (
                 <div className='bg-white rounded-2xl shadow-md p-8 text-center text-[#667085]'>
                     Fee information is not available for the selected student.
                 </div>
             )}
-            {view === 'pay' && student && (
+            {view === 'pay' && student && !feesLoading && (
                 <>
                     <StudentFeeSummary summary={summary} />
                     {grouped.map((group) => (
@@ -223,7 +352,7 @@ const FeesPayemnt = () => {
                 </>
             )}
 
-            {view === 'history' && student && (
+            {view === 'history' && student && !feesLoading && (
                 <div className='bg-white rounded-2xl shadow-md p-4 space-y-3'>
                     {studentReceipts.length === 0 && <p className='text-sm text-[#667085]'>No transactions yet.</p>}
                     {studentReceipts.map((item) => (
@@ -237,6 +366,11 @@ const FeesPayemnt = () => {
 
             {view === 'refunds' && student && (
                 <div className='bg-white rounded-2xl shadow-md p-5 space-y-4'>
+                    <IntegrationNotice
+                        state='mock'
+                        title='Refunds remain browser mock'
+                        description='Fee refund requests are not wired to the live finance API in Phase-1.'
+                    />
                     <div className='flex flex-wrap items-center justify-between gap-3 border-b border-[#F2F4F7] pb-4'>
                         <div>
                             <h3 className='text-base font-semibold text-[var(--erp-ink)]'>Fee Refund Applications</h3>
@@ -304,7 +438,6 @@ const FeesPayemnt = () => {
                 </div>
             )}
 
-            {/* Request Refund Modal */}
             {refundModalOpen && (
                 <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4'>
                     <div className='w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl'>

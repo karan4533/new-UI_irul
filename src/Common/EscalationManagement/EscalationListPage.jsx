@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowUpRight, Download, Plus } from 'lucide-react'
 import { NavLink, useLocation, useSearchParams } from 'react-router-dom'
 import DataTable from '../ui/DataTable'
@@ -20,13 +20,17 @@ import {
 } from './escalationData'
 import { formatEscalatedToDisplay } from './escalationUsersData'
 import { useEscalationContext } from './useEscalationContext'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
+import { listEscalations } from '../../services/api/escalationApiService'
 
 const EscalationListPage = ({ roleKey }) => {
+    const live = isLiveApiEnabled()
     const { pathname } = useLocation()
     const effectiveRoleKey = roleKey || (pathname.startsWith('/parent') ? 'parent' : (pathname.startsWith('/student') ? 'student' : null))
     const roleConfig = getRoleConfig(effectiveRoleKey || roleKey)
     const { currentUser } = useEscalationContext(effectiveRoleKey || roleKey)
-    const canAdd = Boolean(roleConfig?.escalatesToRoleKey)
+    const parentLiveBlocked = live && String(effectiveRoleKey || '').toLowerCase() === 'parent'
+    const canAdd = Boolean(roleConfig?.escalatesToRoleKey) && !parentLiveBlocked
     const [urlParams, setUrlParams] = useSearchParams()
     const initialTableState = parseTableState(urlParams)
     const [listView, setListView] = useState(initialTableState.filters.view || (canAdd ? 'sent' : 'received'))
@@ -36,15 +40,69 @@ const EscalationListPage = ({ roleKey }) => {
     const [search, setSearch] = useState(initialTableState.query)
     const [page, setPage] = useState(initialTableState.page)
     const [pageSize, setPageSize] = useState(initialTableState.pageSize)
+    const [liveSent, setLiveSent] = useState([])
+    const [liveReceived, setLiveReceived] = useState([])
+    const [listSource, setListSource] = useState(live ? 'syncing' : 'mock')
+    const [listError, setListError] = useState('')
+    const [listLoading, setListLoading] = useState(Boolean(live))
 
-    const sentEscalations = useMemo(
-        () => getSentEscalations(effectiveRoleKey || roleKey, currentUser),
-        [effectiveRoleKey, roleKey, currentUser],
-    )
-    const receivedEscalations = useMemo(
-        () => getReceivedEscalations(effectiveRoleKey || roleKey, currentUser),
-        [effectiveRoleKey, roleKey, currentUser],
-    )
+    const loadLive = useCallback(async () => {
+        if (!isLiveApiEnabled()) {
+            setListSource('mock')
+            setListLoading(false)
+            setListError('')
+            return
+        }
+        setListLoading(true)
+        setListError('')
+        const [sentRes, receivedRes] = await Promise.all([
+            listEscalations({ box: 'mine' }),
+            listEscalations({ box: 'received' }),
+        ])
+        setListLoading(false)
+        const sentOk = Boolean(sentRes?.success)
+        const receivedOk = Boolean(receivedRes?.success)
+        setLiveSent(sentOk && Array.isArray(sentRes.data) ? sentRes.data : [])
+        setLiveReceived(receivedOk && Array.isArray(receivedRes.data) ? receivedRes.data : [])
+        if (!sentOk || !receivedOk) {
+            setListSource('failed')
+            setListError(
+                (typeof sentRes?.error === 'string' && sentRes.error) ||
+                (typeof receivedRes?.error === 'string' && receivedRes.error) ||
+                'Failed to load /api/v1/escalations.',
+            )
+            return
+        }
+        setListSource('connected')
+    }, [])
+
+    useEffect(() => {
+        if (!live) {
+            setListSource('mock')
+            setListLoading(false)
+            return
+        }
+        if (String(effectiveRoleKey || '').toLowerCase() === 'parent') {
+            setLiveSent([])
+            setLiveReceived([])
+            setListSource('blocked')
+            setListError('Parent portal has no escalations.* grants on FastAPI. Raise/list is blocked — no false success.')
+            setListLoading(false)
+            return
+        }
+        loadLive()
+    }, [live, loadLive, effectiveRoleKey, roleKey])
+
+    const sentEscalations = useMemo(() => {
+        if (live) return liveSent
+        return getSentEscalations(effectiveRoleKey || roleKey, currentUser)
+    }, [live, liveSent, effectiveRoleKey, roleKey, currentUser])
+
+    const receivedEscalations = useMemo(() => {
+        if (live) return liveReceived
+        return getReceivedEscalations(effectiveRoleKey || roleKey, currentUser)
+    }, [live, liveReceived, effectiveRoleKey, roleKey, currentUser])
+
     const activeList = listView === 'received' ? receivedEscalations : sentEscalations
 
     const filtered = useMemo(() => {
@@ -57,7 +115,7 @@ const EscalationListPage = ({ roleKey }) => {
             if (from && itemDate < from) return false
             if (to && itemDate > to) return false
             if (!query) return true
-            return [item.id, item.escalatedBy, item.description, item.escalatedTo, item.escalatedToUserName]
+            return [item.id, item.escalationId, item.escalatedBy, item.description, item.escalatedTo, item.escalatedToUserName, item.recipientName]
                 .some((value) => String(value || '').toLowerCase().includes(query))
         })
     }, [activeList, fromDate, search, statusFilter, toDate])
@@ -89,18 +147,31 @@ const EscalationListPage = ({ roleKey }) => {
     }
 
     const columns = [
-        { key: 'id', label: 'Escalation ID', required: true, render: (item) => <span className='font-semibold text-[var(--erp-ink)]'>{item.id}</span> },
+        {
+            key: 'id',
+            label: 'Escalation ID',
+            required: true,
+            render: (item) => <span className='font-semibold text-[var(--erp-ink)]'>{item.escalationId || item.id}</span>,
+        },
         { key: 'escalatedBy', label: 'Raised by', render: (item) => <span><span className='block font-medium text-[var(--erp-ink)]'>{item.escalatedBy}</span><span className='text-xs text-[var(--erp-muted)]'>{item.escalatedByRole}</span></span> },
         { key: 'escalatedTo', label: 'Owner', render: formatEscalatedToDisplay },
         { key: 'description', label: 'Issue', render: (item) => <span className='line-clamp-2 max-w-sm'>{item.description}</span> },
         { key: 'escalationDate', label: 'Raised' },
-        { key: 'resolveBy', label: 'SLA due', render: (item) => getResolveByDate(item).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) },
+        {
+            key: 'resolveBy',
+            label: 'SLA due',
+            render: (item) => {
+                const dueAt = item.resolveBy ? new Date(item.resolveBy) : getResolveByDate(item)
+                return dueAt.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+            },
+        },
         {
             key: 'status',
             label: 'Workflow state',
             render: (item) => {
-                const workflow = getWorkflowState(item.status, { dueAt: getResolveByDate(item) })
-                return <StatusBadge status={workflow.key} label={workflow.overdue ? `${item.status} · overdue` : item.status} />
+                const dueAt = item.resolveBy ? new Date(item.resolveBy) : getResolveByDate(item)
+                const workflow = getWorkflowState(item.status, { dueAt })
+                return <StatusBadge status={workflow.key} label={workflow.overdue || item.overdue ? `${item.status} · overdue` : item.status} />
             },
         },
     ]
@@ -119,63 +190,90 @@ const EscalationListPage = ({ roleKey }) => {
             />
 
             <IntegrationNotice
-                state='demo'
-                title='Browser-stored escalation queue'
-                description='Ownership and SLA are calculated in the UI. Notification delivery, evidence storage, audit retention and reopen routing require the backend service.'
+                state={listSource === 'connected' ? 'connected' : (listSource === 'failed' || listSource === 'blocked') ? 'failed' : live ? 'syncing' : 'mock'}
+                title={
+                    listSource === 'connected'
+                        ? 'Live escalation queue'
+                        : listSource === 'blocked'
+                            ? 'Parent escalations blocked'
+                            : listSource === 'failed'
+                            ? 'Escalation API unavailable'
+                            : live
+                                ? 'Loading escalations'
+                                : 'Browser mock escalations'
+                }
+                description={
+                    listSource === 'connected'
+                        ? 'GET /api/v1/escalations?box=mine|received. Ownership and SLA come from the server.'
+                        : listSource === 'blocked'
+                            ? (listError || 'Parent has no escalations.* permission on the FastAPI matrix.')
+                        : listSource === 'failed'
+                            ? (listError || 'Could not reach /api/v1/escalations.')
+                            : live
+                                ? 'Fetching sent and received boxes…'
+                                : 'Live API is off. Escalations are stored only in this browser.'
+                }
             />
 
-            <div className='inline-flex rounded-lg border border-[var(--erp-line-strong)] bg-white p-1' role='tablist' aria-label='Escalation queue'>
-                {canAdd && <button type='button' role='tab' aria-selected={listView === 'sent'} onClick={() => switchView('sent')} className={`min-h-9 rounded-md px-3 text-sm font-semibold ${listView === 'sent' ? 'bg-[var(--erp-ink)] text-white' : 'text-[var(--erp-slate)]'}`}>Sent ({sentEscalations.length})</button>}
-                <button type='button' role='tab' aria-selected={listView === 'received'} onClick={() => switchView('received')} className={`min-h-9 rounded-md px-3 text-sm font-semibold ${listView === 'received' ? 'bg-[var(--erp-ink)] text-white' : 'text-[var(--erp-slate)]'}`}>Received ({receivedEscalations.length})</button>
-            </div>
+            {listLoading ? (
+                <FeedbackState kind='loading' title='Loading escalations' description='Fetching your escalation queues…' />
+            ) : null}
 
-            <div className='overflow-hidden rounded-[var(--erp-radius-surface)] border border-[var(--erp-line)] bg-white'>
-                <DataToolbar
-                    query={search}
-                    onQueryChange={(value) => { setSearch(value); setPage(1) }}
-                    searchPlaceholder='Search ID, owner or issue'
-                    resultCount={filtered.length}
-                    onReset={resetFilters}
-                    filters={(
-                        <>
-                            <label className='grid gap-1 text-xs font-medium text-[var(--erp-slate)]'>Status
-                                <select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1) }} className='min-h-10 rounded-lg border border-[var(--erp-line-strong)] bg-white px-3 text-sm'>
-                                    <option value=''>All statuses</option>
-                                    {ESCALATION_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
-                                </select>
-                            </label>
-                            <label className='grid gap-1 text-xs font-medium text-[var(--erp-slate)]'>From date
-                                <input type='date' value={fromDate} onChange={(event) => { setFromDate(event.target.value); setPage(1) }} className='min-h-10 rounded-lg border border-[var(--erp-line-strong)] px-3 text-sm' />
-                            </label>
-                            <label className='grid gap-1 text-xs font-medium text-[var(--erp-slate)]'>To date
-                                <input type='date' value={toDate} onChange={(event) => { setToDate(event.target.value); setPage(1) }} className='min-h-10 rounded-lg border border-[var(--erp-line-strong)] px-3 text-sm' />
-                            </label>
-                        </>
-                    )}
-                    actions={(
-                        <button type='button' disabled title='Export service is not connected' className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] px-4 text-sm font-semibold text-[var(--erp-muted)] opacity-65'>
-                            <Download aria-hidden='true' size={16} /> Export unavailable
-                        </button>
-                    )}
-                />
-                <DataTable
-                    caption={listView === 'received' ? 'Received escalations' : 'Sent escalations'}
-                    rows={pagination.rows}
-                    columns={columns}
-                    rowKey='id'
-                    emptyTitle='No escalations found'
-                    emptyDescription='No escalations match this queue and filter combination.'
-                    renderActions={(item) => (
-                        <NavLink to={`${roleConfig.routeBase}/view/${item.id}`} className='inline-flex min-h-9 items-center gap-1 rounded-lg border border-[var(--erp-line-strong)] px-3 text-xs font-semibold text-[var(--erp-ink)]'>
-                            Review <ArrowUpRight aria-hidden='true' size={14} />
-                        </NavLink>
-                    )}
-                />
-                <Pagination {...pagination} onPageChange={setPage} onPageSizeChange={(value) => { setPageSize(value); setPage(1) }} />
-            </div>
+            {!listLoading ? (
+                <>
+                    <div className='inline-flex rounded-lg border border-[var(--erp-line-strong)] bg-white p-1' role='tablist' aria-label='Escalation queue'>
+                        {canAdd && <button type='button' role='tab' aria-selected={listView === 'sent'} onClick={() => switchView('sent')} className={`min-h-9 rounded-md px-3 text-sm font-semibold ${listView === 'sent' ? 'bg-[var(--erp-ink)] text-white' : 'text-[var(--erp-slate)]'}`}>Sent ({sentEscalations.length})</button>}
+                        <button type='button' role='tab' aria-selected={listView === 'received'} onClick={() => switchView('received')} className={`min-h-9 rounded-md px-3 text-sm font-semibold ${listView === 'received' ? 'bg-[var(--erp-ink)] text-white' : 'text-[var(--erp-slate)]'}`}>Received ({receivedEscalations.length})</button>
+                    </div>
+
+                    <div className='overflow-hidden rounded-[var(--erp-radius-surface)] border border-[var(--erp-line)] bg-white'>
+                        <DataToolbar
+                            query={search}
+                            onQueryChange={(value) => { setSearch(value); setPage(1) }}
+                            searchPlaceholder='Search ID, owner or issue'
+                            resultCount={filtered.length}
+                            onReset={resetFilters}
+                            filters={(
+                                <>
+                                    <label className='grid gap-1 text-xs font-medium text-[var(--erp-slate)]'>Status
+                                        <select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1) }} className='min-h-10 rounded-lg border border-[var(--erp-line-strong)] bg-white px-3 text-sm'>
+                                            <option value=''>All statuses</option>
+                                            {ESCALATION_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+                                        </select>
+                                    </label>
+                                    <label className='grid gap-1 text-xs font-medium text-[var(--erp-slate)]'>From date
+                                        <input type='date' value={fromDate} onChange={(event) => { setFromDate(event.target.value); setPage(1) }} className='min-h-10 rounded-lg border border-[var(--erp-line-strong)] px-3 text-sm' />
+                                    </label>
+                                    <label className='grid gap-1 text-xs font-medium text-[var(--erp-slate)]'>To date
+                                        <input type='date' value={toDate} onChange={(event) => { setToDate(event.target.value); setPage(1) }} className='min-h-10 rounded-lg border border-[var(--erp-line-strong)] px-3 text-sm' />
+                                    </label>
+                                </>
+                            )}
+                            actions={(
+                                <button type='button' disabled title='Export service is not connected' className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] px-4 text-sm font-semibold text-[var(--erp-muted)] opacity-65'>
+                                    <Download aria-hidden='true' size={16} /> Export unavailable
+                                </button>
+                            )}
+                        />
+                        <DataTable
+                            caption={listView === 'received' ? 'Received escalations' : 'Sent escalations'}
+                            rows={pagination.rows}
+                            columns={columns}
+                            rowKey='id'
+                            emptyTitle='No escalations found'
+                            emptyDescription='No escalations match this queue and filter combination.'
+                            renderActions={(item) => (
+                                <NavLink to={`${roleConfig.routeBase}/view/${item.id}`} className='inline-flex min-h-9 items-center gap-1 rounded-lg border border-[var(--erp-line-strong)] px-3 text-xs font-semibold text-[var(--erp-ink)]'>
+                                    Review <ArrowUpRight aria-hidden='true' size={14} />
+                                </NavLink>
+                            )}
+                        />
+                        <Pagination {...pagination} onPageChange={setPage} onPageSizeChange={(value) => { setPageSize(value); setPage(1) }} />
+                    </div>
+                </>
+            ) : null}
         </section>
     )
 }
 
 export default EscalationListPage
-

@@ -17,12 +17,19 @@ import {
     getClassSectionLabel,
     getExamTimetables,
 } from './examinationTimetableData'
+import { EXAM_TIMETABLE_UPDATED_EVENT } from '../../../Common/ExaminationTimetable/examinationTimetableShared'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { listExams } from '../../../services/api/examsApiService'
+import IntegrationNotice from '../../../Common/ui/IntegrationNotice'
 
 const ExaminationTimetableList = () => {
     const { role } = useAuth()
     const canDelete = canRoleDelete(role)
     const location = useLocation()
-    const [records, setRecords] = useState(() => getExamTimetables())
+    const live = isLiveApiEnabled()
+    const [records, setRecords] = useState(() => (live ? [] : getExamTimetables()))
+    const [listSource, setListSource] = useState(live ? 'syncing' : 'local')
+    const [listError, setListError] = useState('')
     const [fromDate, setFromDate] = useState(new Date())
     const [toDate, setToDate] = useState(new Date())
     const [editRequestModal, setEditRequestModal] = useState(false)
@@ -33,7 +40,33 @@ const ExaminationTimetableList = () => {
     const [statusFilter, setStatusFilter] = useState('')
 
     useEffect(() => {
-        setRecords(getExamTimetables())
+        const refreshLocal = () => setRecords(getExamTimetables())
+        const refresh = async () => {
+            if (!isLiveApiEnabled()) {
+                refreshLocal()
+                setListSource('local')
+                setListError('')
+                return
+            }
+            setListSource('syncing')
+            setListError('')
+            const res = await listExams()
+            if (!res.success) {
+                setRecords([])
+                setListSource('failed')
+                setListError(typeof res.error === 'string' ? res.error : 'Failed to load exams from the server.')
+                return
+            }
+            setRecords(Array.isArray(res.data) ? res.data : [])
+            setListSource('connected')
+        }
+        refresh()
+        window.addEventListener(EXAM_TIMETABLE_UPDATED_EVENT, refresh)
+        window.addEventListener('focus', refresh)
+        return () => {
+            window.removeEventListener(EXAM_TIMETABLE_UPDATED_EVENT, refresh)
+            window.removeEventListener('focus', refresh)
+        }
     }, [location.key])
 
     const filteredRecords = useMemo(() => {
@@ -48,6 +81,23 @@ const ExaminationTimetableList = () => {
 
     return (
         <section>
+            {listSource === 'connected' ? (
+                <div className='mb-4'>
+                    <IntegrationNotice
+                        state='connected'
+                        title='Live examination timetable'
+                        description={`Showing ${records.length} exam(s) from GET /api/v1/exams. Seeded browser rows are not mixed in while live.`}
+                    />
+                </div>
+            ) : listSource === 'failed' ? (
+                <div className='mb-4'>
+                    <IntegrationNotice state='failed' title='Exam list unavailable' description={listError || 'Could not load /api/v1/exams.'} />
+                </div>
+            ) : listSource === 'local' ? (
+                <div className='mb-4'>
+                    <IntegrationNotice state='demo' title='Browser exam timetable' description='Showing local demonstration exam rows. Enable live API to hydrate from GET /api/v1/exams.' />
+                </div>
+            ) : null}
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='flex justify-between md:items-center sm:items-stretch md:flex-row sm:flex-col flex-col gap-y-4'>
                     <button

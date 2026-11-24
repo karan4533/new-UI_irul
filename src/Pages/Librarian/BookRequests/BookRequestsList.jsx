@@ -18,7 +18,9 @@ import {
     AlertCircle
 } from 'lucide-react'
 import ExportModal from '../../../Common/CommonComponents/ExportModal'
+import { IntegrationNotice } from '../../../Common/ui'
 import { useAuth } from '../../../context/AuthContext'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 
 const STORAGE_KEY = 'school-erp-library-book-requests-v1'
 
@@ -227,8 +229,15 @@ export default function BookRequestsList() {
         }
     }
 
+    const live = isLiveApiEnabled()
+
     return (
         <section className='space-y-4'>
+            <IntegrationNotice
+                state='mock'
+                title={live ? 'Book requests have no FastAPI collection' : 'Browser mock book requests'}
+                description='This screen intentionally uses browser storage. Catalog, issues and members are live elsewhere under /api/v1/ops/library-*.'
+            />
             {/* Unified Book Management Navigation Tabs */}
             <div className='flex items-center gap-2 border-b border-slate-200 pb-2'>
                 <NavLink

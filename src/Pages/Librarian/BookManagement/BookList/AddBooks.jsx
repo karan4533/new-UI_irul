@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { FeedbackState } from '../../../../Common/ui'
+import { FeedbackState, IntegrationNotice } from '../../../../Common/ui'
 import { isLiveApiEnabled } from '../../../../services/api/tokenStore'
 import { listLibraryBooks, replaceLibraryBooks } from '../../../../services/api/libraryApiService'
 
@@ -81,13 +81,20 @@ const AddBooks = () => {
     return (
         <section className='space-y-4'>
             {live ? (
-                <p className='text-xs font-medium text-[#027A48]'>
-                    Live add book · PUT /api/v1/ops/library-books (full catalog replace)
-                </p>
+                <IntegrationNotice
+                    state='connected'
+                    title='Add book writes the live catalog'
+                    description='PUT /api/v1/ops/library-books (full catalog replace). No localStorage fallback on failure.'
+                />
             ) : (
                 <FeedbackState kind='error' title='Live API required' description='Book create uses FastAPI ops library-books.' />
             )}
-            {error ? <FeedbackState kind='error' title='Could not save book' description={error} /> : null}
+            {error ? (
+                <>
+                    <IntegrationNotice state='failed' title='Book save failed' description={error} />
+                    <FeedbackState kind='error' title='Could not save book' description={error} />
+                </>
+            ) : null}
             {success ? <p className='text-sm text-[#027A48] font-medium'>{success}</p> : null}
 
             <form onSubmit={handleSubmit} className='bg-white rounded-2xl shadow-md p-4 space-y-4'>

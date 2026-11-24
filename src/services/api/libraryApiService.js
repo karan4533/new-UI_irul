@@ -100,6 +100,9 @@ export function replaceLibraryBooks(rows, options = {}) {
   return replaceCollection('/api/v1/ops/library-books', rows, options)
 }
 
+/** Alias used by some call sites / docs. */
+export const saveLibraryBooks = replaceLibraryBooks
+
 export function listLibraryIssues(options = {}) {
   return listCollection('/api/v1/ops/library-issues', mapIssueToUi, options)
 }

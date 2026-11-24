@@ -4,8 +4,8 @@ import { NavLink, useSearchParams } from 'react-router-dom'
 import {
     DataTable,
     DataToolbar,
+    DataSourceIndicator,
     FeedbackState,
-    IntegrationNotice,
     PageHeader,
     Pagination,
     StatusBadge,
@@ -83,10 +83,9 @@ const ActivityLogList = ({ logType }) => {
                 context={`${records.length} browser-stored records · ${filteredRecords.length} matching`}
             />
 
-            <IntegrationNotice
-                state='demo'
-                title='Demonstration audit evidence'
-                description='These records are local sample data. Production logs must be generated server-side, append-only, access-controlled and retained according to policy; client-side data is not admissible audit evidence.'
+            <DataSourceIndicator
+                status='LOCAL ONLY'
+                detail='These records are browser sample data. They are not append-only server audit evidence.'
             />
 
             <div className='grid grid-cols-2 gap-3 lg:grid-cols-4'>
@@ -171,7 +170,11 @@ const ActivityLogList = ({ logType }) => {
                     emptyTitle='No audit records found'
                     emptyDescription='No records match the selected query, status and date range.'
                     renderActions={(record) => (
-                        <NavLink to={`${ROUTE_BASE}/view/${record.id}`} className='inline-flex min-h-9 items-center gap-1 rounded-lg border border-[var(--erp-line-strong)] px-3 text-xs font-semibold text-[var(--erp-ink)]'>
+                        <NavLink
+                            to={`${ROUTE_BASE}/${encodeURIComponent(logType)}/view/${encodeURIComponent(record.id)}`}
+                            state={{ fromLogType: logType }}
+                            className='inline-flex min-h-9 items-center gap-1 rounded-lg border border-[var(--erp-line-strong)] px-3 text-xs font-semibold text-[var(--erp-ink)]'
+                        >
                             Inspect <ArrowUpRight aria-hidden='true' size={14} />
                         </NavLink>
                     )}

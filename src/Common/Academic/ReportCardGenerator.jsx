@@ -297,6 +297,15 @@ const ReportCardGenerator = () => {
         return getReportCardAcknowledgement(activeStudentProfile.id, selectedTerm)
     }, [activeStudentProfile, selectedTerm, lifecycleVersion])
 
+    // Available students filtered by selected class and section (must be declared
+    // before trackingReport — previously caused TDZ: Cannot access before initialization).
+    const classFilteredStudents = useMemo(() => {
+        const filtered = systemStudents.filter(
+            (s) => s.className === selectedClass && s.section === selectedSection
+        )
+        return filtered.length > 0 ? filtered : systemStudents
+    }, [systemStudents, selectedClass, selectedSection])
+
     const trackingReport = useMemo(() => {
         return getAcknowledgementTrackingReport({
             term: selectedTerm,
@@ -360,14 +369,6 @@ const ReportCardGenerator = () => {
         setGeneratedNotice(`Report Card generated & updated for ${activeStudentProfile.name} (${selectedTerm}).`)
         setTimeout(() => setGeneratedNotice(''), 4000)
     }
-
-    // Available students filtered by selected class and section
-    const classFilteredStudents = useMemo(() => {
-        const filtered = systemStudents.filter(
-            (s) => s.className === selectedClass && s.section === selectedSection
-        )
-        return filtered.length > 0 ? filtered : systemStudents
-    }, [systemStudents, selectedClass, selectedSection])
 
     return (
         <section className="space-y-6">

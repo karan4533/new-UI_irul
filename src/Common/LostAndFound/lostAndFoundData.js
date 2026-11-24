@@ -108,7 +108,7 @@ export const INITIAL_FOUND_ITEMS = [
         responsibleCustodianId: 'EMP-FO-001',
         responsibleCustodianName: 'Anita Desai (PRM)',
         photoUrl: 'casio_found_pic.jpg',
-        status: 'Claim Under Review',
+        status: 'Claim Approved - Ready for Handover',
         claims: [
             {
                 claimId: 'CLM-2026-001',
@@ -117,7 +117,7 @@ export const INITIAL_FOUND_ITEMS = [
                 claimantDept: 'Academics & Teaching',
                 claimDate: '30-10-2026 10:00 AM',
                 proofDescription: 'Belongs to Master Aarav Sharma (Grade 10-A). Has class sticker on reverse.',
-                status: 'Under Review'
+                status: 'Approved',
             }
         ],
         handoverDetails: null

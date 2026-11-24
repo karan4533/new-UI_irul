@@ -2,7 +2,14 @@ import React from 'react'
 import { X } from 'lucide-react'
 import ExamTimeTable from './ExamTimeTable'
 
-const TimeTableModal = ({ timeTableModal, setTimeTableModal }) => {
+const TimeTableModal = ({
+    timeTableModal,
+    setTimeTableModal,
+    title = 'Exam Time Table',
+    days,
+    timeSlots,
+    schedule,
+}) => {
     return (
         <div>
             {timeTableModal && (
@@ -14,13 +21,13 @@ const TimeTableModal = ({ timeTableModal, setTimeTableModal }) => {
 
                     <div className="relative z-10 w-full max-w-4xl rounded-xl bg-white shadow-lg p-5 py-4">
                         <div className='flex justify-between items-center mb-4'>
-                            <h3 className='text-xl font-medium text-[#1E1E1E]'>Exam Time Table</h3>
+                            <h3 className='text-xl font-medium text-[#1E1E1E]'>{title}</h3>
                             <button onClick={() => setTimeTableModal(false)} className='hover:text-red-500 cursor-pointer'>
                                 <X />
                             </button>
                         </div>
 
-                        <ExamTimeTable />
+                        <ExamTimeTable days={days} timeSlots={timeSlots} schedule={schedule} />
                     </div>
                 </div>
             )}

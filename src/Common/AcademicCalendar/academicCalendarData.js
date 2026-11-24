@@ -174,17 +174,53 @@ const loadCustomItems = () => {
     }
 }
 
+export const validateCalendarDateRange = ({ startDate, endDate, startTime, endTime, allDay = true }) => {
+    const start = String(startDate || '').trim()
+    const end = String(endDate || start || '').trim()
+    if (!start) {
+        throw new Error('Start date is required.')
+    }
+    if (!end) {
+        throw new Error('End date is required.')
+    }
+    const startMs = Date.parse(`${start}T00:00:00`)
+    const endMs = Date.parse(`${end}T00:00:00`)
+    if (Number.isNaN(startMs) || Number.isNaN(endMs)) {
+        throw new Error('Start and end dates must be valid calendar dates.')
+    }
+    if (endMs < startMs) {
+        throw new Error('End date must be on or after the start date.')
+    }
+    if (!allDay && start === end && startTime && endTime && endTime < startTime) {
+        throw new Error('End time must be on or after the start time for same-day events.')
+    }
+    return { startDate: start, endDate: end }
+}
+
 export const addCustomCalendarItem = (item) => {
+    const { startDate, endDate } = validateCalendarDateRange(item)
     const existing = loadCustomItems()
     const newItem = {
         id: `custom-evt-${Date.now()}`,
         ...item,
+        startDate,
+        endDate: endDate || startDate,
+        allDay: item.allDay !== false && !item.startTime,
+        startTime: item.allDay === false ? item.startTime || null : null,
+        endTime: item.allDay === false ? item.endTime || null : null,
     }
     const updated = [newItem, ...existing]
     try {
         sessionStorage.setItem(CUSTOM_STORAGE_KEY, JSON.stringify(updated))
     } catch {
         /* ignore storage quota or access errors */
+    }
+    try {
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('schoolerp-academic-calendar-updated', { detail: newItem }))
+        }
+    } catch {
+        /* ignore */
     }
     return newItem
 }

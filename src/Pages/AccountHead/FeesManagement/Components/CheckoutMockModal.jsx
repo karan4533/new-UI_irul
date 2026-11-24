@@ -5,13 +5,47 @@ import { PAYMENT_MODES } from '../../financeDomain/financeConstants'
 import { formatCurrency } from '../../financeDomain/financeHelpers'
 import IntegrationNotice from '../../../../Common/ui/IntegrationNotice'
 import Dialog from '../../../../Common/ui/Dialog'
+import { isLiveApiEnabled } from '../../../../services/api/tokenStore'
 
+/**
+ * Mode picker for online checkout.
+ * When live: does NOT invent gateway success — only collects paymentMode and hands off to onSuccess (API).
+ * When mock: simulates a gateway capture for demo only.
+ */
 const CheckoutMockModal = ({ isOpen, onClose, amount, student, onSuccess, onFail }) => {
+    const live = isLiveApiEnabled()
     const [busy, setBusy] = useState(false)
     if (!isOpen) return null
 
-    const pay = (mode) => {
+    const pay = async (mode) => {
         setBusy(true)
+        const payload = {
+            paymentMode: mode,
+            details: {
+                transactionReference: live ? undefined : `RZP-${Date.now().toString().slice(-8)}`,
+                paymentDate: new Date().toISOString().slice(0, 10),
+                narration: `Online ${mode === PAYMENT_MODES.UPI ? 'UPI' : 'Card'} checkout — ${student?.name ?? ''}`,
+            },
+        }
+
+        if (live) {
+            try {
+                const result = await onSuccess?.(payload)
+                if (result?.success === false) {
+                    onFail?.()
+                    return
+                }
+                toast.success('Payment recorded on the server.')
+                onClose()
+            } catch (err) {
+                toast.error(err?.message || 'Payment failed.')
+                onFail?.()
+            } finally {
+                setBusy(false)
+            }
+            return
+        }
+
         window.setTimeout(() => {
             const ok = Math.random() > 0.08
             if (!ok) {
@@ -20,15 +54,8 @@ const CheckoutMockModal = ({ isOpen, onClose, amount, student, onSuccess, onFail
                 setBusy(false)
                 return
             }
-            onSuccess({
-                paymentMode: mode,
-                details: {
-                    transactionReference: `RZP-${Date.now().toString().slice(-8)}`,
-                    paymentDate: new Date().toISOString().slice(0, 10),
-                    narration: `Online ${mode === PAYMENT_MODES.UPI ? 'UPI' : 'Card'} checkout — ${student?.name ?? ''}`,
-                },
-            })
-            toast.success('Payment successful.')
+            onSuccess?.(payload)
+            toast.success('Mock payment successful (browser only).')
             setBusy(false)
             onClose()
         }, 900)
@@ -38,9 +65,11 @@ const CheckoutMockModal = ({ isOpen, onClose, amount, student, onSuccess, onFail
         <Dialog open={isOpen} onClose={onClose} title='Checkout' description={`${formatCurrency(amount)}.00 · Pay School Trust`} size='sm'>
                 <div className='space-y-3'>
                     <IntegrationNotice
-                        state='demo'
-                        title='Simulated checkout'
-                        description='No payment gateway is contacted and no money is transferred.'
+                        state={live ? 'connected' : 'mock'}
+                        title={live ? 'Live fee payment' : 'Simulated checkout'}
+                        description={live
+                            ? 'Payment mode is sent to POST /api/v1/finance/actions/pay-my-fees. No client-side success without the API.'
+                            : 'No payment gateway is contacted and no money is transferred. Browser demo only.'}
                     />
                     <button
                         type='button'
@@ -60,7 +89,7 @@ const CheckoutMockModal = ({ isOpen, onClose, amount, student, onSuccess, onFail
                         <Smartphone className='text-[#515DEF]' size={20} />
                         <span>UPI</span>
                     </button>
-                    {busy && <p className='text-xs text-[#808080] text-center'>Contacting mock gateway...</p>}
+                    {busy && <p className='text-xs text-[#808080] text-center'>{live ? 'Submitting to finance API…' : 'Contacting mock gateway...'}</p>}
                 </div>
         </Dialog>
     )

@@ -2,8 +2,9 @@ import React from 'react'
 import { Route, Routes as ReactRoutes, Navigate } from 'react-router-dom'
 import AttendanceAndLeaveWorkspace from '../Common/AttendanceAndLeave/AttendanceAndLeaveWorkspace'
 import { EnterpriseOperationsRoutes } from './EnterpriseOperationsRoutes'
-import GatePassSecurityWorkspace from '../Common/GatePassSecurity/GatePassSecurityWorkspace'
-import VisitorsWorkspace from '../Common/Visitors/VisitorsWorkspace'
+import VisitorsLive from '../Pages/Gatekeeper/Visitors/VisitorsLive'
+import GateOpsCollectionLive from '../Pages/Gatekeeper/GateOpsCollectionLive'
+import StudentGatePassesLive from '../Pages/Gatekeeper/StudentGatePassesLive'
 import Dashboard from '../Pages/Gatekeeper/Dashboard/Dashboard'
 import HosteGatePass from '../Pages/Gatekeeper/HosteGatePass/HosteGatePass'
 import MyDuty from '../Pages/Gatekeeper/MyDuty/MyDuty'
@@ -31,14 +32,14 @@ const GateKeeperRoutes = () => {
             <Route path="/gate-keeper/add-incident" element={<AddIncidents />} />
             <Route path="/gate-keeper/incidents/:id" element={<ViewIncident />} />
             
-            {/* Gate Pass & Security Primary Workspaces */}
-            <Route path="/gate-keeper/visitors" element={<VisitorsWorkspace roleOverride="gatekeeper" />} />
-            <Route path="/gate-keeper/gate-pass-list" element={<GatePassSecurityWorkspace roleOverride="gatekeeper" />} />
-            <Route path="/gate-keeper/security-workspace" element={<GatePassSecurityWorkspace roleOverride="gatekeeper" />} />
-            <Route path="/gate-keeper/add-gate-pass" element={<GatePassSecurityWorkspace defaultTab="live-gate" roleOverride="gatekeeper" />} />
-            <Route path="/gate-keeper/registers" element={<GatePassSecurityWorkspace defaultTab="audit-logs" roleOverride="gatekeeper" />} />
-            <Route path="/gate-keeper/handover" element={<GatePassSecurityWorkspace defaultTab="returnable-tracker" roleOverride="gatekeeper" />} />
-            <Route path="/gate-keeper/vendors" element={<GatePassSecurityWorkspace defaultTab="visitors" roleOverride="gatekeeper" />} />
+            {/* Gate Pass & Security — all live ops / FO read; no mock workspace */}
+            <Route path="/gate-keeper/visitors" element={<VisitorsLive />} />
+            <Route path="/gate-keeper/gate-pass-list" element={<StudentGatePassesLive />} />
+            <Route path="/gate-keeper/security-workspace" element={<VisitorsLive />} />
+            <Route path="/gate-keeper/add-gate-pass" element={<StudentGatePassesLive />} />
+            <Route path="/gate-keeper/registers" element={<GateOpsCollectionLive kind="registers" />} />
+            <Route path="/gate-keeper/handover" element={<GateOpsCollectionLive kind="handover" />} />
+            <Route path="/gate-keeper/vendors" element={<GateOpsCollectionLive kind="vendors" />} />
 
             <Route path="/gate-keeper/broadcast-list" element={<AnnouncementList />} />
             <Route path="/gate-keeper/view-broadcast/:id" element={<ViewAnnouncement />} />

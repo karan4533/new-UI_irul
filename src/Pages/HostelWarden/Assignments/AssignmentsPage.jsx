@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'react-toastify'
-import { FeedbackState } from '../../../Common/ui'
+import { FeedbackState, IntegrationNotice } from '../../../Common/ui'
 import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 import { listStudents } from '../../../services/api/studentApiService'
 import { listHostelAssignments, upsertHostelAssignment } from '../../../services/api/hostelApiService'
@@ -114,10 +114,22 @@ const AssignmentsPage = () => {
                 </p>
             </div>
 
-            {live ? (
-                <p className='text-xs font-medium text-[#027A48]'>Live · GET/PUT /api/v1/ops/hostel-assignments</p>
+            {live && !error && !loading ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Hostel assignments are live'
+                    description='GET/PUT /api/v1/ops/hostel-assignments. Rooms/outpass/mess stay mock elsewhere.'
+                />
             ) : null}
-            {error ? <FeedbackState kind='error' title='Assignments API unavailable' description={error} /> : null}
+            {!live ? (
+                <IntegrationNotice state='mock' title='Live API disabled' description='Enable live API to persist hostel assignments on FastAPI ops.' />
+            ) : null}
+            {error ? (
+                <>
+                    <IntegrationNotice state='failed' title='Assignments API failed' description={error} />
+                    <FeedbackState kind='error' title='Assignments API unavailable' description={error} />
+                </>
+            ) : null}
             {loading ? <FeedbackState kind='loading' title='Loading assignments' description='Fetching hostel assignments…' /> : null}
 
             {!loading && !error ? (

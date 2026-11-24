@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom'
 import { Download } from 'lucide-react'
 import mo_user from '../../../../assets/images/no-profile.png'
 import ExportModal from '../../../../Common/CommonComponents/ExportModal'
-import { FeedbackState } from '../../../../Common/ui'
+import { DataSourceIndicator, FeedbackState } from '../../../../Common/ui'
 import { DEPARTMENTS, EMPLOYEES_LIST, ROUTE_BASE } from './employeeDatabaseData'
 import { isLiveApiEnabled } from '../../../../services/api/tokenStore'
 import { listPortalEmployees } from '../../../../services/api/hrApiService'
@@ -67,7 +67,18 @@ const EmployeesList = () => {
     return (
         <section>
             {source === 'backend' ? (
-                <p className='mb-3 text-xs font-medium text-[#027A48]'>Live employees · GET /api/v1/hr/portal/employees (shared HR service)</p>
+                <DataSourceIndicator
+                    className='mb-4'
+                    status='LIVE'
+                    detail='Employee list is loaded from the HR portal employees API.'
+                />
+            ) : null}
+            {source === 'local' ? (
+                <DataSourceIndicator
+                    className='mb-4'
+                    status='LOCAL ONLY'
+                    detail='Live API is off. Showing local demo employee rows.'
+                />
             ) : null}
             {source === 'error' ? (
                 <FeedbackState kind='error' title='Employees API unavailable' description={error} />

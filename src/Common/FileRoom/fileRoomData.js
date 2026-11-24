@@ -410,7 +410,8 @@ export const issuePhysicalFile = ({
     }
 
     // Confidentiality Check
-    if (targetFile.confidentiality.includes('Strictly Confidential') && !approvedBy.toLowerCase().includes('director') && !approvedBy.toLowerCase().includes('md')) {
+    const confidentiality = String(targetFile.confidentiality || '')
+    if (confidentiality.includes('Strictly Confidential') && !String(approvedBy || '').toLowerCase().includes('director') && !String(approvedBy || '').toLowerCase().includes('md')) {
         throw new Error('Strictly Confidential files require explicit Managing Director (MD) sign-off before release.')
     }
 

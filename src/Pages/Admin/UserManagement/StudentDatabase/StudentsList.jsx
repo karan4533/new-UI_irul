@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom'
 import { Download } from 'lucide-react'
 import mo_user from '../../../../assets/images/no-profile.png'
 import ExportModal from '../../../../Common/CommonComponents/ExportModal'
-import { FeedbackState } from '../../../../Common/ui'
+import { DataSourceIndicator, FeedbackState } from '../../../../Common/ui'
 import { ROUTE_BASE, STUDENTS_LIST } from './studentDatabaseData'
 import { isLiveApiEnabled } from '../../../../services/api/tokenStore'
 import { listStudents } from '../../../../services/api/studentApiService'
@@ -54,7 +54,18 @@ const StudentsList = () => {
     return (
         <section>
             {source === 'backend' ? (
-                <p className='mb-3 text-xs font-medium text-[#027A48]'>Live students · GET /api/v1/students</p>
+                <DataSourceIndicator
+                    className='mb-4'
+                    status='LIVE'
+                    detail='Student list is loaded from GET /api/v1/students.'
+                />
+            ) : null}
+            {source === 'local' ? (
+                <DataSourceIndicator
+                    className='mb-4'
+                    status='LOCAL ONLY'
+                    detail='Live API is off. Showing local demo student rows.'
+                />
             ) : null}
             {source === 'error' ? (
                 <FeedbackState kind='error' title='Students API unavailable' description={error} />

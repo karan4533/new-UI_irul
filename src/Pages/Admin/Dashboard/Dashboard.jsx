@@ -52,38 +52,39 @@ const Dashboard = () => {
         return () => { cancelled = true }
     }, [])
 
-    const metrics = liveKpis
-        ? [
-            { label: 'Students', value: String(liveKpis.students), context: `As of ${liveKpis.asOf || 'today'}`, icon: 'people', to: '/admin/user-management/student-database' },
-            { label: 'Employees', value: String(liveKpis.employees), context: 'Campus HR directory', icon: 'approvals', to: '/admin/user-management/employee-database' },
-            { label: 'Open escalations', value: String(liveKpis.openEscalations), context: 'Escalation inbox', icon: 'risk', to: '/admin/escalation-management' },
-            { label: 'Unread notifications', value: String(liveKpis.unreadNotifications), context: `${liveKpis.announcementsThisMonth} announcements this month`, icon: 'documents', to: '/admin/notifications' },
-        ]
+    // LIVE: never show hardcoded demo metrics/queues (keeps UI aligned with Postgres).
+    // MOCK mode only: keep fallbackMetrics + queues for offline demos.
+    const metrics = live
+        ? (liveKpis
+            ? [
+                { label: 'Students', value: String(liveKpis.students), context: `As of ${liveKpis.asOf || 'today'}`, icon: 'people', to: '/admin/user-management/student-database' },
+                { label: 'Employees', value: String(liveKpis.employees), context: 'Campus HR directory', icon: 'approvals', to: '/admin/user-management/employee-database' },
+                { label: 'Open escalations', value: String(liveKpis.openEscalations), context: 'Escalation inbox', icon: 'risk', to: '/admin/escalation-management' },
+                { label: 'Unread notifications', value: String(liveKpis.unreadNotifications), context: `${liveKpis.announcementsThisMonth} announcements this month`, icon: 'documents', to: '/admin/notifications' },
+            ]
+            : [])
         : fallbackMetrics
+    const visibleQueues = live ? [] : queues
+    const lastUpdated = live
+        ? (liveKpis?.asOf ? `Live API · as of ${liveKpis.asOf}` : 'Live API · campus KPIs')
+        : undefined
 
     return (
         <section className='space-y-4'>
-            {live ? (
-                <div className='rounded-2xl border border-emerald-200 bg-emerald-50/60 px-4 py-3'>
-                    <p className='text-xs font-semibold uppercase tracking-wide text-emerald-800'>
-                        Live campus KPIs · GET /api/v1/admin/dashboard
-                    </p>
-                    {loading ? (
-                        <div className='mt-2'><FeedbackState kind='loading' title='Loading KPIs' description='Fetching admin dashboard…' /></div>
-                    ) : error ? (
-                        <div className='mt-2'><FeedbackState kind='error' title='Dashboard API unavailable' description={error} /></div>
-                    ) : (
-                        <p className='mt-1 text-xs text-slate-600'>Queues below remain demo until those Admin workflows are wired.</p>
-                    )}
-                </div>
+            {live && loading ? (
+                <FeedbackState kind='loading' title='Loading KPIs' description='Fetching admin dashboard…' />
+            ) : null}
+            {live && error ? (
+                <FeedbackState kind='error' title='Dashboard API unavailable' description={error} />
             ) : null}
             <OperationalBriefing
                 title='Administration briefing'
                 description='A focused view of admissions, records, approvals and access-control work that needs attention.'
                 roleContext='Administrator workspace'
                 metrics={metrics}
-                queues={queues}
+                queues={visibleQueues}
                 quickActions={quickActions}
+                lastUpdated={lastUpdated}
             />
         </section>
     )

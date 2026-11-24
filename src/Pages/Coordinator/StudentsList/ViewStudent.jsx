@@ -94,7 +94,6 @@ const ViewStudent = () => {
                     View Full Profile & Parent Details
                 </NavLink>
             </div>
-            {live ? <p className='text-xs font-medium text-[#027A48]'>Live student · GET /api/v1/students/{'{id}'} (grade-band scoped)</p> : null}
 
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='flex flex-col sm:flex-row sm:items-center gap-4'>

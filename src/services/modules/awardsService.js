@@ -7,6 +7,11 @@
 import { apiClient } from '../api/apiClient.js';
 import { generateUniqueId, validateRequired } from '../models/index.js';
 import { createErrorResponse } from '../api/responseEnvelope.js';
+import {
+  evaluateMandatorySoyGates,
+  formatSoyEligibilityFailure,
+  parseRequiredNumber,
+} from './soyEligibility.js';
 
 export const awardsService = {
   // ==========================================================================
@@ -79,21 +84,35 @@ export const awardsService = {
    * - Cumulative GPA >= 8.5.
    * - Attendance >= 95%.
    * - Zero disciplinary infractions.
+   *
+   * Missing / invalid GPA or attendance never coerce to passing defaults.
+   * Optional somWinsCount from the leaderboard is accepted when the awards API
+   * registry uses a different nominee id than the recognition SoT.
    */
-  async verifySoyEligibility({ nomineeId, academicYear = '2025-2026', cumulativeGpa, attendancePercentage, infractions = 0 }) {
+  async verifySoyEligibility({
+    nomineeId,
+    academicYear = '2025-2026',
+    cumulativeGpa,
+    attendancePercentage,
+    infractions = 0,
+    somWinsCount,
+  } = {}) {
     const somRes = await this.getSomNominations();
     const somList = somRes.data || [];
 
-    const somWins = somList.filter(
+    const apiSomWins = somList.filter(
       (s) => s.nomineeId === nomineeId && s.status === 'Announced Winner'
     ).length;
 
-    const minimumSomWinsMet = somWins >= 2;
-    const gpaMet = (Number(cumulativeGpa) || 9.0) >= 8.5;
-    const attendanceMet = (Number(attendancePercentage) || 96.0) >= 95.0;
-    const zeroInfractions = infractions === 0;
+    const providedWins = parseRequiredNumber(somWinsCount);
+    const somWins = providedWins.ok ? providedWins.value : apiSomWins;
 
-    const isEligible = minimumSomWinsMet && gpaMet && attendanceMet && zeroInfractions;
+    const evaluation = evaluateMandatorySoyGates({
+      somWinsCount: somWins,
+      cumulativeGpa,
+      attendancePercentage,
+      infractions,
+    });
 
     return {
       success: true,
@@ -101,13 +120,12 @@ export const awardsService = {
         nomineeId,
         academicYear,
         somWinsCount: somWins,
-        minimumSomWinsMet,
-        cumulativeGpa: Number(cumulativeGpa) || 9.0,
-        gpaMet,
-        attendancePercentage: Number(attendancePercentage) || 96.0,
-        attendanceMet,
-        zeroDisciplinaryInfractions: zeroInfractions,
-        isEligible,
+        apiSomWinsCount: apiSomWins,
+        ...evaluation.values,
+        isEligible: evaluation.isEligible,
+        overallResult: evaluation.overallResult,
+        gates: evaluation.gates,
+        failedCriteria: evaluation.failedCriteria.map((g) => `${g.name}: ${g.reason}`),
       },
       meta: null,
       error: null,
@@ -120,7 +138,14 @@ export const awardsService = {
 
     const eligibility = await this.verifySoyEligibility(soyData);
     if (!eligibility.data?.isEligible) {
-      return createErrorResponse('Nominee does not meet mandatory SOY criteria (requires >= 2 monthly SOM wins, GPA >= 8.5, attendance >= 95%, zero infractions).');
+      const detail = formatSoyEligibilityFailure({
+        isEligible: false,
+        failedCriteria: (eligibility.data?.gates || []).filter((g) => !g.passed),
+      });
+      return createErrorResponse(
+        detail ||
+          'Nominee does not meet mandatory SOY criteria (requires >= 2 monthly SOM wins, GPA >= 8.5, attendance >= 95%, zero infractions).'
+      );
     }
 
     const payload = {

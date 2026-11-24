@@ -19,7 +19,7 @@ const Panel = ({ title, subtitle, children }) => (
 
 const Dashboard = () => {
     const navigate = useNavigate()
-    const { dashboardMetrics, receipts = [], students = [], annualBudget = [] } = useFinance()
+    const { dashboardMetrics, receipts = [], students = [], annualBudget = [], liveSource, liveError } = useFinance()
     const [filterState, setFilterState] = useState({
         campus: 'All Campuses',
         department: 'Finance & Accounts',
@@ -86,9 +86,13 @@ const Dashboard = () => {
                 actions={<span className='text-xs text-slate-400'>Export unavailable</span>}
             />
             <IntegrationNotice
-                state='demo'
-                title='Demonstration finance ledger'
-                description='Collections and vouchers are stored in browser memory.'
+                state={liveSource === 'backend' ? 'connected' : liveSource === 'error' ? 'failed' : 'demo'}
+                title={liveSource === 'backend' ? 'Live finance snapshot' : liveSource === 'error' ? 'Finance hydrate failed' : 'Demonstration finance ledger'}
+                description={liveSource === 'backend'
+                    ? 'KPIs and recent receipts come from GET /api/v1/finance/state. Some chart panels may still include decorative demo series.'
+                    : liveSource === 'error'
+                        ? (liveError || 'Could not hydrate /api/v1/finance/state.')
+                        : 'Collections and vouchers are stored in browser memory until live API mode is enabled.'}
             />
 
             {/* Hierarchical Filter Bar */}

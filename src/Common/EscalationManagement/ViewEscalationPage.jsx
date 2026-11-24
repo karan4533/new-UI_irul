@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { toast } from 'react-toastify'
@@ -25,6 +25,11 @@ import {
 import { getRoleConfig } from './escalationRoleConfig'
 import { formatEscalatedToDisplay } from './escalationUsersData'
 import { useEscalationContext } from './useEscalationContext'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
+import {
+    getEscalation,
+    setEscalationStatus,
+} from '../../services/api/escalationApiService'
 
 const Field = ({ label, value }) => (
     <div>
@@ -34,6 +39,7 @@ const Field = ({ label, value }) => (
 )
 
 const ViewEscalationPage = ({ roleKey }) => {
+    const live = isLiveApiEnabled()
     const navigate = useNavigate()
     const { id } = useParams()
     const location = useLocation()
@@ -42,30 +48,101 @@ const ViewEscalationPage = ({ roleKey }) => {
     const roleConfig = getRoleConfig(effectiveRoleKey)
     const { currentUser } = useEscalationContext(effectiveRoleKey)
     const [revision, setRevision] = useState(0)
-    const escalation = useMemo(() => {
-        void revision
-        return getEscalationById(effectiveRoleKey, id)
-    }, [id, revision, effectiveRoleKey])
+    const [escalation, setEscalation] = useState(() => (live ? null : getEscalationById(effectiveRoleKey, id)))
+    const [loading, setLoading] = useState(Boolean(live))
+    const [loadError, setLoadError] = useState('')
+    const [saving, setSaving] = useState(false)
     const [resolutionEdit, setResolutionEdit] = useState(() => {
-        const current = getEscalationById(effectiveRoleKey, id)
+        const current = live ? null : getEscalationById(effectiveRoleKey, id)
         return { recordId: id, status: current?.status || '', remarks: current?.resolutionRemarks || '' }
     })
     const [confirmOpen, setConfirmOpen] = useState(false)
     const resolutionDraft = resolutionEdit.recordId === id ? resolutionEdit.status : (escalation?.status || '')
     const resolutionRemarks = resolutionEdit.recordId === id ? resolutionEdit.remarks : (escalation?.resolutionRemarks || '')
 
-    const isReceived = useMemo(
-        () => (escalation ? isReceivedEscalation(escalation, effectiveRoleKey, currentUser) : false),
-        [escalation, effectiveRoleKey, currentUser],
-    )
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            const local = getEscalationById(effectiveRoleKey, id)
+            setEscalation(local)
+            setLoading(false)
+            setLoadError('')
+            setResolutionEdit({
+                recordId: id,
+                status: local?.status || '',
+                remarks: local?.resolutionRemarks || '',
+            })
+            return undefined
+        }
+        let cancelled = false
+        ;(async () => {
+            setLoading(true)
+            setLoadError('')
+            const res = await getEscalation(id)
+            if (cancelled) return
+            setLoading(false)
+            if (!res.success) {
+                setEscalation(null)
+                setLoadError(typeof res.error === 'string' ? res.error : 'Escalation was not found on the server.')
+                return
+            }
+            setEscalation(res.data)
+            setResolutionEdit({
+                recordId: id,
+                status: res.data?.status || '',
+                remarks: res.data?.resolutionRemarks || '',
+            })
+        })()
+        return () => { cancelled = true }
+    }, [id, revision, effectiveRoleKey, live])
 
-    const resolveByDate = useMemo(
-        () => (escalation ? getResolveByDate(escalation) : null),
-        [escalation],
-    )
+    const isReceived = useMemo(() => {
+        if (!escalation) return false
+        if (isReceivedEscalation(escalation, effectiveRoleKey, currentUser)) return true
+        // Live records may use backend role codes / email ownership.
+        if (live || escalation.dataSource === 'backend') {
+            const myEmail = String(currentUser?.email || '').trim().toLowerCase()
+            const ownerEmail = String(escalation.escalatedToUserEmail || '').trim().toLowerCase()
+            if (myEmail && ownerEmail && myEmail === ownerEmail) return true
+            const raiserEmail = String(escalation.escalatedBy || '').trim().toLowerCase()
+            if (myEmail && raiserEmail && myEmail === raiserEmail) return false
+        }
+        return false
+    }, [escalation, effectiveRoleKey, currentUser, live])
 
-    const commitResolution = () => {
+    const resolveByDate = useMemo(() => {
+        if (!escalation) return null
+        if (escalation.resolveBy) {
+            const parsed = new Date(escalation.resolveBy)
+            if (!Number.isNaN(parsed.getTime())) return parsed
+        }
+        return getResolveByDate(escalation)
+    }, [escalation])
+
+    const commitResolution = async () => {
         const isTerminal = ['Resolved', 'Rejected'].includes(resolutionDraft)
+
+        if (live || escalation?.dataSource === 'backend') {
+            setSaving(true)
+            const res = await setEscalationStatus(id, {
+                status: resolutionDraft,
+                note: resolutionRemarks.trim() || null,
+            })
+            setSaving(false)
+            if (!res.success) {
+                toast.error(typeof res.error === 'string' ? res.error : 'The escalation status could not be updated on the server.')
+                return
+            }
+            setEscalation(res.data)
+            setResolutionEdit({
+                recordId: id,
+                status: res.data?.status || resolutionDraft,
+                remarks: res.data?.resolutionRemarks || resolutionRemarks.trim(),
+            })
+            setConfirmOpen(false)
+            toast.success(`Escalation moved to ${resolutionDraft.toLowerCase()}.`)
+            return
+        }
+
         const updated = updateEscalation(effectiveRoleKey, id, {
             status: resolutionDraft,
             resolutionRemarks: resolutionRemarks.trim(),
@@ -81,13 +158,21 @@ const ViewEscalationPage = ({ roleKey }) => {
         toast.success(`Escalation moved to ${resolutionDraft.toLowerCase()}.`)
     }
 
+    if (loading) {
+        return (
+            <section className='space-y-5'>
+                <FeedbackState kind='loading' title='Loading escalation' description='Fetching this escalation from the server.' />
+            </section>
+        )
+    }
+
     if (!escalation) {
         return (
             <section className='space-y-5'>
                 <button type='button' onClick={() => navigate(roleConfig.routeBase)} className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] bg-white px-3 text-sm font-semibold text-[var(--erp-ink)]'>
                     <ArrowLeft aria-hidden='true' size={17} /> Back to escalations
                 </button>
-                <FeedbackState kind='permission' title='Escalation unavailable' description='This escalation does not exist or is outside your role and user scope.' />
+                <FeedbackState kind='permission' title='Escalation unavailable' description={loadError || 'This escalation does not exist or is outside your role and user scope.'} />
             </section>
         )
     }
@@ -111,7 +196,7 @@ const ViewEscalationPage = ({ roleKey }) => {
     return (
         <section className='space-y-5'>
             <PageHeader
-                title={escalation.id}
+                title={escalation.escalationId || escalation.id}
                 description={isReceived ? `Raised by ${escalation.escalatedBy}` : `Sent to ${owner}`}
                 status={workflowState.key}
                 context={isReceived ? 'Received escalation' : 'Sent escalation'}
@@ -124,9 +209,11 @@ const ViewEscalationPage = ({ roleKey }) => {
             />
 
             <IntegrationNotice
-                state='demo'
-                title='Browser-stored escalation workflow'
-                description='Status changes are local to this browser. Email, push notification and production audit delivery are not connected.'
+                state={live || escalation.dataSource === 'backend' ? 'connected' : 'mock'}
+                title={live || escalation.dataSource === 'backend' ? 'Live escalation detail' : 'Browser mock escalation'}
+                description={live || escalation.dataSource === 'backend'
+                    ? 'Loaded from /api/v1/escalations/{id}. Status updates POST to /status.'
+                    : 'Status changes are local to this browser.'}
             />
 
             <WorkflowContextBar
@@ -158,7 +245,7 @@ const ViewEscalationPage = ({ roleKey }) => {
                                 </FormField>
                             </div>
                             <div className='mt-4 flex justify-end'>
-                                <button type='button' onClick={() => setConfirmOpen(true)} disabled={!resolutionDraft || resolutionDraft === escalation.status && resolutionRemarks.trim() === (escalation.resolutionRemarks || '')} className='min-h-10 rounded-lg bg-[var(--erp-indigo)] px-4 text-sm font-semibold text-white disabled:opacity-50'>Review status update</button>
+                                <button type='button' onClick={() => setConfirmOpen(true)} disabled={saving || !resolutionDraft || resolutionDraft === escalation.status && resolutionRemarks.trim() === (escalation.resolutionRemarks || '')} className='min-h-10 rounded-lg bg-[var(--erp-indigo)] px-4 text-sm font-semibold text-white disabled:opacity-50'>Review status update</button>
                             </div>
                         </Surface>
                     )}
@@ -197,15 +284,16 @@ const ViewEscalationPage = ({ roleKey }) => {
                 onClose={() => setConfirmOpen(false)}
                 onConfirm={commitResolution}
                 title={`Move escalation to ${resolutionDraft}?`}
-                description='Confirm the new state before updating this browser-stored escalation.'
-                confirmLabel='Update status'
+                description={live || escalation.dataSource === 'backend'
+                    ? 'Confirm the new state before posting to /api/v1/escalations/{id}/status.'
+                    : 'Confirm the new state before updating this browser-stored escalation.'}
+                confirmLabel={saving ? 'Updating…' : 'Update status'}
                 tone={resolutionDraft === 'Rejected' ? 'danger' : 'primary'}
             >
-                <p>The recorded status will change from <strong>{escalation.status}</strong> to <strong>{resolutionDraft}</strong>. This action does not send a notification.</p>
+                <p>The recorded status will change from <strong>{escalation.status}</strong> to <strong>{resolutionDraft}</strong>.{live || escalation.dataSource === 'backend' ? '' : ' This action does not send a notification.'}</p>
             </ConfirmAction>
         </section>
     )
 }
 
 export default ViewEscalationPage
-

@@ -40,8 +40,10 @@ import {
     saveActivities,
     MD_APPROVAL_STATUS,
     mdApprovalBadgeColor,
-    getPersonInCharge
+    getPersonInCharge,
+    ACTIVITIES_UPDATED_EVENT,
 } from './activitiesData'
+import { useLocation } from 'react-router-dom'
 
 const CATEGORY_TABS = [
     { key: 'all', label: 'All Activities', icon: Trophy, color: 'text-blue-600' },
@@ -55,7 +57,10 @@ const CATEGORY_TABS = [
 
 export default function CentralActivitiesWorkspace({ defaultCategory = 'all', roleKey = 'admin' }) {
     const { role: userRole } = useAuth()
-    const isDirectorOrAdmin = ['director', 'admin', 'super-admin'].includes(userRole || roleKey)
+    const location = useLocation()
+    const isDirectorOrAdmin = ['director', 'admin', 'super-admin', 'superadmin'].includes(
+        String(userRole || roleKey || '').toLowerCase()
+    )
 
     const [activeCategory, setActiveCategory] = useState(defaultCategory)
     const [viewMode, setViewMode] = useState('table') // 'table' | 'cards' | 'timeline'
@@ -91,6 +96,21 @@ export default function CentralActivitiesWorkspace({ defaultCategory = 'all', ro
         void refreshTrigger
         return getActivities()
     }, [refreshTrigger])
+
+    // Refresh when returning from Add Activity or when shared SoT notifies.
+    useEffect(() => {
+        setRefreshTrigger((k) => k + 1)
+    }, [location.key, defaultCategory])
+
+    useEffect(() => {
+        const bump = () => setRefreshTrigger((k) => k + 1)
+        window.addEventListener(ACTIVITIES_UPDATED_EVENT, bump)
+        window.addEventListener('focus', bump)
+        return () => {
+            window.removeEventListener(ACTIVITIES_UPDATED_EVENT, bump)
+            window.removeEventListener('focus', bump)
+        }
+    }, [])
 
     // Filter by category, status, and search
     const filteredActivities = useMemo(() => {

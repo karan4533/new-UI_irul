@@ -23,6 +23,7 @@ import {
     EnterpriseKpiCard,
     StatusBadge,
     DataTable,
+    IntegrationNotice,
 } from '../../../Common/ui'
 import {
     getPosTerminals,
@@ -111,10 +112,12 @@ export default function PosEdcSyncWorkspace() {
                 const res = executePosSync(null, 'Manual Trigger (Account Head)')
                 refreshData()
                 setIsSyncing(false)
-                toast.success(`POS sync complete! Synced ${res.syncedCount} records from ${terminals.filter(t => t.status === 'Active').length} active terminals.`)
+                toast.info(
+                    `Demo POS sync only (not live gateway). ${res.syncedCount} local records refreshed from ${terminals.filter((t) => t.status === 'Active').length} demo terminals.`,
+                )
             } catch {
                 setIsSyncing(false)
-                toast.error('Failed to communicate with POS gateway. Please check terminal connection.')
+                toast.error('Demo POS sync failed in this browser. No live gateway was contacted.')
             }
         }, 900)
     }
@@ -223,6 +226,11 @@ export default function PosEdcSyncWorkspace() {
 
     return (
         <section className='space-y-6 pb-8'>
+            <IntegrationNotice
+                state='mock'
+                title='POS / EDC — MOCK / gateway BLOCKED'
+                description='No live POS/EDC gateway is configured (finance gateway may return NOT_CONFIGURED). Device lists, sync, and reconciliation below are browser demonstration only — never treat toast success as a bank capture.'
+            />
             <PageHeader
                 title='POS / EDC Machine Transaction Synchronization'
                 description='Manage campus payment machines, synchronize live swipe batches from Paytm and PineLabs EDC devices, reconcile collections against student fee ledgers, and track automated sync audits.'

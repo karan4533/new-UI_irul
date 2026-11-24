@@ -122,10 +122,11 @@ const SuperAdminRoutes = () => {
             <Route path="/super-admin/activity-logs/demo-activity" element={<DemoActivityPage />} />
             <Route path="/super-admin/reentry" element={<ReentryPage />} />
             <Route path="/super-admin/module-health" element={<CriticalInventoryPage />} />
+            <Route path="/super-admin/activity-logs/:logType/view/:id" element={<ViewActivityLog />} />
             <Route path="/super-admin/activity-logs/view/:id" element={<ViewActivityLog />} />
 
             {/* Enterprise Functional Operations (Stores, Gate Pass, File Room, Ticketing, Monitoring, Lost & Found) */}
-            {EnterpriseOperationsRoutes({ basePath: '/super-admin', role: 'super-admin' })}
+            {EnterpriseOperationsRoutes({ basePath: '/super-admin', role: 'superadmin' })}
 
             <Route path="*" element={<Navigate to="/super-admin/dashboard" replace />} />
         </ReactRoutes>

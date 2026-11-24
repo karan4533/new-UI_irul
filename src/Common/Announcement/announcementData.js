@@ -17,6 +17,7 @@ export const CATEGORY_OPTIONS = [
     'HR Circular',
 ]
 
+/** Roles with FastAPI `announcements.write`. Teacher/Coordinator have read-only on BE. */
 export const CREATOR_ROLE_KEYS = new Set([
     ROLES.SUPER_ADMIN,
     ROLES.ADMIN,
@@ -25,8 +26,6 @@ export const CREATOR_ROLE_KEYS = new Set([
     ROLES.JOINT_DIRECTOR,
     ROLES.JOINT_DIRECTOR_ASSISTANT,
     ROLES.JOINT_DIRECTOR_AUDIT,
-    ROLES.COORDINATOR,
-    ROLES.TEACHER,
     ROLES.HR,
     ROLES.ACCOUNT_HEAD,
     ROLES.LIBRARIAN,

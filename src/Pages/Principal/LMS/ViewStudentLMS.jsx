@@ -1,6 +1,7 @@
-import React from 'react'
+import React, { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Eye, Download } from 'lucide-react'
+import { ArrowLeft, Eye, Download, X } from 'lucide-react'
+import { toast } from 'react-toastify'
 import mo_user from '../../../assets/images/no-profile.png'
 import pdf_icon from '../../../assets/images/pdf-icon.png'
 import mp4_icon from '../../../assets/images/mp4-icon.png'
@@ -32,7 +33,7 @@ const SUBJECT_HOMEWORK = [
                 uploadedDate: '12-03-2026',
                 documents: [
                     { name: 'Quadratic_Practice.pdf', type: 'pdf' },
-                    { name: 'Solution_Scan.jpg', type: 'pdf' },
+                    { name: 'Solution_Scan.jpg', type: 'image' },
                 ],
             },
         ],
@@ -92,9 +93,80 @@ const DocumentIcon = ({ type }) => (
     <img src={type === 'video' ? mp4_icon : pdf_icon} alt="" className="w-6 h-6 shrink-0" />
 )
 
+const buildDemoAttachmentBlob = (doc) => {
+    const type = String(doc.type || '').toLowerCase()
+    if (type === 'image' || String(doc.name || '').match(/\.(png|jpe?g|gif|webp)$/i)) {
+        // 1x1 PNG
+        const binary = atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==')
+        const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0))
+        return new Blob([bytes], { type: 'image/png' })
+    }
+    if (type === 'video' || String(doc.name || '').match(/\.(mp4|webm|mov)$/i)) {
+        return new Blob(
+            [`Demo video placeholder for ${doc.name}. Binary media is not embedded in this demo dossier.`],
+            { type: 'text/plain;charset=utf-8' }
+        )
+    }
+    const text = [
+        `QMIS Student Home Fun Attachment`,
+        `File: ${doc.name}`,
+        `Generated: ${new Date().toISOString()}`,
+        '',
+        'This is a demonstration attachment used when a live file URL is not available.',
+        'Replace with authenticated GET /files/{id} when LMS storage is LIVE.',
+    ].join('\n')
+    return new Blob([text], { type: 'application/pdf' })
+}
+
 const ViewStudentLMS = () => {
     const navigate = useNavigate()
     const student = MOCK_STUDENT
+    const [previewDoc, setPreviewDoc] = useState(null)
+    const [previewUrl, setPreviewUrl] = useState('')
+
+    const previewKind = useMemo(() => {
+        if (!previewDoc) return 'none'
+        const name = String(previewDoc.name || '')
+        const type = String(previewDoc.type || '').toLowerCase()
+        if (type === 'image' || /\.(png|jpe?g|gif|webp)$/i.test(name)) return 'image'
+        if (type === 'video' || /\.(mp4|webm|mov)$/i.test(name)) return 'unsupported'
+        return 'text'
+    }, [previewDoc])
+
+    const closePreview = () => {
+        if (previewUrl) URL.revokeObjectURL(previewUrl)
+        setPreviewUrl('')
+        setPreviewDoc(null)
+    }
+
+    const handlePreview = (doc) => {
+        try {
+            if (previewUrl) URL.revokeObjectURL(previewUrl)
+            const blob = buildDemoAttachmentBlob(doc)
+            const url = URL.createObjectURL(blob)
+            setPreviewDoc(doc)
+            setPreviewUrl(url)
+        } catch (err) {
+            toast.error(err.message || 'Unable to open attachment preview.')
+        }
+    }
+
+    const handleDownload = (doc) => {
+        try {
+            const blob = buildDemoAttachmentBlob(doc)
+            const url = URL.createObjectURL(blob)
+            const link = document.createElement('a')
+            link.href = url
+            link.download = doc.name || 'attachment.bin'
+            document.body.appendChild(link)
+            link.click()
+            document.body.removeChild(link)
+            URL.revokeObjectURL(url)
+            toast.success(`Download started: ${doc.name}`)
+        } catch (err) {
+            toast.error(err.message || 'Unable to download attachment.')
+        }
+    }
 
     return (
         <section className='space-y-6'>
@@ -172,6 +244,7 @@ const ViewStudentLMS = () => {
                                                             <span className='flex items-center gap-1 shrink-0'>
                                                                 <button
                                                                     type='button'
+                                                                    onClick={() => handlePreview(doc)}
                                                                     className='p-1.5 rounded-md text-[#515DEF] hover:bg-[#515DEF]/10 cursor-pointer'
                                                                     title='View'
                                                                 >
@@ -179,6 +252,7 @@ const ViewStudentLMS = () => {
                                                                 </button>
                                                                 <button
                                                                     type='button'
+                                                                    onClick={() => handleDownload(doc)}
                                                                     className='p-1.5 rounded-md text-[#515DEF] hover:bg-[#515DEF]/10 cursor-pointer'
                                                                     title='Download'
                                                                 >
@@ -199,6 +273,48 @@ const ViewStudentLMS = () => {
                     </div>
                 </div>
             ))}
+
+            {previewDoc && (
+                <div className='fixed inset-0 z-50 flex items-center justify-center p-4'>
+                    <div className='absolute inset-0 bg-black/40' onClick={closePreview} />
+                    <div className='relative z-10 w-full max-w-2xl rounded-2xl bg-white shadow-xl border border-slate-200 p-5 space-y-4'>
+                        <div className='flex items-start justify-between gap-3'>
+                            <div>
+                                <h3 className='text-lg font-semibold text-slate-900'>Attachment Preview</h3>
+                                <p className='text-xs text-slate-500 mt-0.5'>{previewDoc.name}</p>
+                            </div>
+                            <button type='button' onClick={closePreview} className='p-1 text-slate-400 hover:text-slate-700'>
+                                <X size={18} />
+                            </button>
+                        </div>
+                        {previewKind === 'image' && previewUrl ? (
+                            <img src={previewUrl} alt={previewDoc.name} className='w-full max-h-[60vh] object-contain rounded-xl border border-slate-100' />
+                        ) : previewKind === 'unsupported' ? (
+                            <div className='rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800'>
+                                In-browser preview is not available for this media type. Use Download to save the file.
+                            </div>
+                        ) : (
+                            <iframe title={previewDoc.name} src={previewUrl} className='w-full h-[50vh] rounded-xl border border-slate-200' />
+                        )}
+                        <div className='flex justify-end gap-2'>
+                            <button
+                                type='button'
+                                onClick={() => handleDownload(previewDoc)}
+                                className='inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700'
+                            >
+                                <Download size={14} /> Download
+                            </button>
+                            <button
+                                type='button'
+                                onClick={closePreview}
+                                className='rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50'
+                            >
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </section>
     )
 }

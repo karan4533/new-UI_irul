@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Upload } from 'lucide-react'
+import { toast } from 'react-toastify'
 import {
     ACADEMIC_YEAR_OPTIONS,
     MONTH_OPTIONS,
@@ -10,6 +11,9 @@ import {
     SUBJECT_OPTIONS,
 } from '../lessonPlanApprovalData'
 import { PLANNING_COLUMNS, emptyPlanningRow } from '../lessonPlanTemplate'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { createLessonPlan, submitLessonPlan } from '../../../services/api/lessonPlanApiService'
+import IntegrationNotice from '../../ui/IntegrationNotice'
 
 const inputClass = 'text-sm text-[#1E1E1E] border border-[#D9D9D9] rounded-md px-2 py-2 w-full bg-white'
 const areaClass = `${inputClass} min-h-20`
@@ -21,8 +25,25 @@ const toDisplayDate = (value) => {
     return `${day}-${month}-${year}`
 }
 
+/** Convert month display name + academic year into API YYYY-MM. */
+export function monthNameToYyyyMm(monthName, academicYear) {
+    const idx = MONTH_OPTIONS.indexOf(monthName)
+    const monthIndex = idx >= 0 ? idx : new Date().getMonth()
+    const mm = String(monthIndex + 1).padStart(2, '0')
+    const ay = String(academicYear || '')
+    const startMatch = ay.match(/^(\d{4})/)
+    let year = startMatch ? Number(startMatch[1]) : new Date().getFullYear()
+    // Indian AY Apr–Mar: Jan–Mar belong to the second calendar year of the AY.
+    if (startMatch && monthIndex <= 2 && /-\d{2,4}$/.test(ay)) {
+        year += 1
+    }
+    return `${year}-${mm}`
+}
+
 const LessonPlanEntryForm = ({ submitterName, submitterRole, successPath }) => {
+    const live = isLiveApiEnabled()
     const navigate = useNavigate()
+    const [saving, setSaving] = useState(false)
     const [header, setHeader] = useState({
         subject: '',
         className: '',
@@ -53,9 +74,51 @@ const LessonPlanEntryForm = ({ submitterName, submitterRole, successPath }) => {
     const setHeaderField = (key, value) => setHeader((current) => ({ ...current, [key]: value }))
     const updateRow = (id, key, value) => setRows((current) => current.map((row) => (row.id === id ? { ...row, [key]: value } : row)))
 
-    const submit = () => {
+    const submit = async () => {
         if (!header.subject || !header.className || !header.section || !header.academicYear || !header.month || !header.weekNo || !header.fromDate || !header.toDate) return
         if (!rows.length) return
+
+        if (live) {
+            setSaving(true)
+            const month = monthNameToYyyyMm(header.month, header.academicYear)
+            const content = {
+                ...header,
+                ...summary,
+                fromDate: toDisplayDate(header.fromDate),
+                toDate: toDisplayDate(header.toDate),
+                planningRows: rows,
+                attachment: header.attachmentName,
+                submitterName,
+                submitterRole,
+            }
+            const created = await createLessonPlan({
+                className: header.className,
+                section: header.section,
+                subject: header.subject,
+                month,
+                title: header.chapterName || header.subject,
+                content,
+            })
+            if (!created.success) {
+                setSaving(false)
+                toast.error(typeof created.error === 'string' ? created.error : 'Unable to create lesson plan on the server.')
+                return
+            }
+            const planId = created.data?.id || created.data?.planId
+            if (planId) {
+                const submitted = await submitLessonPlan(planId)
+                if (!submitted.success) {
+                    setSaving(false)
+                    toast.error(typeof submitted.error === 'string' ? submitted.error : 'Plan created but submit failed.')
+                    return
+                }
+            }
+            setSaving(false)
+            toast.success('Lesson plan submitted for approval.')
+            navigate(successPath)
+            return
+        }
+
         addLessonPlan({
             ...header,
             ...summary,
@@ -71,6 +134,19 @@ const LessonPlanEntryForm = ({ submitterName, submitterRole, successPath }) => {
 
     return (
         <section className='space-y-6'>
+            {live ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Live lesson-plan create'
+                    description='Submit posts to /api/v1/lesson-plans then /submit. Browser localStorage is not used.'
+                />
+            ) : (
+                <IntegrationNotice
+                    state='mock'
+                    title='Browser lesson-plan draft'
+                    description='This form saves into browser storage only.'
+                />
+            )}
             <div className='bg-white rounded-2xl shadow-md p-4 space-y-4'>
                 <div>
                     <h2 className='text-xl font-semibold text-black'>Submit Lesson Plan</h2>
@@ -146,7 +222,9 @@ const LessonPlanEntryForm = ({ submitterName, submitterRole, successPath }) => {
                         <label key={key} className='text-sm'>{label}<input className={inputClass} value={summary[key]} onChange={(e) => setSummary({ ...summary, [key]: e.target.value })} /></label>
                     ))}
                 </div>
-                <button type='button' onClick={submit} className='bg-[#515DEF] text-white text-sm px-4 py-2 rounded-md cursor-pointer'>Submit for Approval</button>
+                <button type='button' disabled={saving} onClick={submit} className='bg-[#515DEF] text-white text-sm px-4 py-2 rounded-md cursor-pointer disabled:opacity-60'>
+                    {saving ? 'Submitting…' : 'Submit for Approval'}
+                </button>
             </div>
         </section>
     )

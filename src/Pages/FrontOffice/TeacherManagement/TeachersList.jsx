@@ -67,7 +67,6 @@ const TeachersList = () => {
     return (
         <section>
             {source === 'backend' ? (
-                <p className='mb-3 text-xs font-medium text-[#027A48]'>Live teachers · GET /api/v1/hr/portal/employees (filtered)</p>
             ) : null}
             {source === 'error' ? (
                 <FeedbackState kind='error' title='Teachers API unavailable' description={error} />

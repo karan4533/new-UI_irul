@@ -1,13 +1,14 @@
-import React from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import React, { useMemo } from 'react'
+import { useNavigate, useParams, useSearchParams, useLocation } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import {
     LOG_TYPES,
-    ROUTE_BASE,
     getActivityLogById,
     getViewFields,
+    resolveActivityBackRoute,
     statusBadgeColor,
 } from './activityLogsData'
+import { getActivityLogs } from '../../../Common/demoDomain/activityLog'
 
 const Field = ({ label, value, badge }) => (
     <div className='flex flex-col gap-y-1'>
@@ -23,23 +24,36 @@ const Field = ({ label, value, badge }) => (
 )
 
 const ViewActivityLog = () => {
-    const { id } = useParams()
+    const { id, logType: routeLogType } = useParams()
     const navigate = useNavigate()
-    const record = getActivityLogById(id)
-    const config = record ? LOG_TYPES[record.logType] : null
+    const location = useLocation()
+    const [searchParams] = useSearchParams()
+
+    const demoLogs = useMemo(() => getActivityLogs(), [])
+    const record = getActivityLogById(id, { demoLogs })
+    const fromType =
+        routeLogType ||
+        searchParams.get('from') ||
+        location.state?.fromLogType ||
+        record?.logType ||
+        null
+    const config = record ? LOG_TYPES[record.logType] : (fromType ? LOG_TYPES[fromType] : null)
+    const backRoute = resolveActivityBackRoute(fromType || record?.logType)
 
     if (!record || !config) {
         return (
             <section className='space-y-6'>
                 <button
                     type='button'
-                    onClick={() => navigate(`${ROUTE_BASE}/login-history`)}
+                    onClick={() => navigate(backRoute)}
                     className='inline-flex items-center gap-2 text-sm text-[#515DEF] border border-[#515DEF] rounded-md px-4 py-2 hover:bg-[#515DEF] hover:text-white transition-colors cursor-pointer'
                 >
                     <ArrowLeft size={18} />
-                    Back to logs
+                    Back to {LOG_TYPES[fromType]?.label || 'logs'}
                 </button>
-                <div className='bg-white rounded-2xl shadow-md p-8 text-center text-[#667085]'>Activity log not found.</div>
+                <div className='bg-white rounded-2xl shadow-md p-8 text-center text-[#667085]'>
+                    Activity log not found for this category. The selected record may have been removed from the audit source.
+                </div>
             </section>
         )
     }
@@ -50,7 +64,7 @@ const ViewActivityLog = () => {
         <section className='space-y-6'>
             <button
                 type='button'
-                onClick={() => navigate(config.route)}
+                onClick={() => navigate(backRoute)}
                 className='inline-flex items-center gap-2 text-sm text-[#515DEF] border border-[#515DEF] rounded-md px-4 py-2 hover:bg-[#515DEF] hover:text-white transition-colors cursor-pointer'
             >
                 <ArrowLeft size={18} />

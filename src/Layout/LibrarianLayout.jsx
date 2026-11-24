@@ -12,7 +12,7 @@ const LibrarianLayout = () => {
                 <IntegrationNotice
                     state='connected'
                     title='Live Librarian workspace'
-                    description='Library catalog, members, issue and return use FastAPI /api/v1/ops/library-* collections. Announcements are read-only. No students directory, finance, or admin-user access.'
+                    description='LIVE: catalog, members, issue/return, dashboard KPIs (/api/v1/ops/library-*). MOCK: book requisitions, SMS reminders. Announcements read-only. No students directory, finance, or admin-user access.'
                 />
             ) : null}
             <LibrarianRoutes />

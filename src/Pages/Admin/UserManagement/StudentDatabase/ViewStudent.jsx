@@ -81,7 +81,6 @@ const ViewStudent = () => {
                 <ArrowLeft size={18} />
                 Back to list
             </button>
-            {live ? <p className='text-xs font-medium text-[#027A48]'>Live student · GET /api/v1/students/{'{id}'}</p> : null}
 
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='flex flex-col sm:flex-row sm:items-center gap-4'>

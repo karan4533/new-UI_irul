@@ -32,7 +32,7 @@ import {
     issueBookToMember,
     returnBookIssue
 } from './libraryData'
-import { FeedbackState } from '../../Common/ui'
+import { FeedbackState, IntegrationNotice } from '../../Common/ui'
 import { isLiveApiEnabled } from '../../services/api/tokenStore'
 import {
     loadLibraryWorkspace,
@@ -384,12 +384,30 @@ const LibraryManagementWorkspace = ({ defaultTab = 'catalog' }) => {
 
     return (
         <div className="space-y-6 pb-12">
-            {live ? (
-                <p className="text-xs font-medium text-[#027A48]">
-                    Live library · GET/PUT /api/v1/ops/library-books|issues|members (campus ops).{saving ? ' Saving…' : ''}
-                </p>
+            {live && !loadError && !loading ? (
+                <IntegrationNotice
+                    state="connected"
+                    title="Library catalog, issues and members are live"
+                    description={`GET/PUT /api/v1/ops/library-books|issues|members.${saving ? ' Saving…' : ''} Book requests / requisitions and dashboard KPI charts remain browser mock.`}
+                />
             ) : null}
-            {loadError ? <FeedbackState kind="error" title="Library API unavailable" description={loadError} /> : null}
+            {!live ? (
+                <IntegrationNotice
+                    state="mock"
+                    title="Browser mock library data"
+                    description="Set VITE_USE_MOCK=false and VITE_API_BASE_URL to persist catalog, issues and members on FastAPI ops."
+                />
+            ) : null}
+            {loadError ? (
+                <>
+                    <IntegrationNotice
+                        state="failed"
+                        title="Library API unavailable"
+                        description={loadError}
+                    />
+                    <FeedbackState kind="error" title="Library API unavailable" description={loadError} />
+                </>
+            ) : null}
             {loading ? <FeedbackState kind="loading" title="Loading library" description="Fetching catalog, issues and members…" /> : null}
 
             {/* Header with Title and Unified Tabs */}

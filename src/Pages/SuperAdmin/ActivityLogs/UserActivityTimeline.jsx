@@ -51,21 +51,28 @@ export const getUserTimelineEvents = (user) => {
 
     const dataChangeLogs = DATA_CHANGES_LOGS.filter(
         (l) => (l.user || '').toLowerCase().includes(userName) || (l.userRole || '').toLowerCase().includes(userRole)
-    ).map((l) => ({
-        id: l.id,
-        category: 'Form Submissions & Edits',
-        action: 'Form Data Update',
-        title: `Updated ${l.module} Record`,
-        description: `Modified field "${l.fieldModified || 'General'}" on record #${l.recordId}`,
-        module: l.module,
-        target: l.recordId,
-        timestamp: l.timestamp,
-        sessionDuration: '—',
-        device: 'Chrome 126 · Windows 11',
-        ip: '192.168.10.15',
-        status: 'Success',
-        details: { Before: l.previousValue || 'N/A', After: l.newValue || 'N/A' }
-    }))
+    ).map((l) => {
+        const previous = l.oldValue ?? l.previousValue ?? l.before
+        const updated = l.newValue ?? l.updatedValue ?? l.after
+        return {
+            id: l.id,
+            category: 'Form Submissions & Edits',
+            action: 'Form Data Update',
+            title: `Updated ${l.module} Record`,
+            description: `Modified field "${l.fieldChanged || l.fieldModified || 'General'}" on record #${l.recordId}`,
+            module: l.module,
+            target: l.recordId,
+            timestamp: l.timestamp,
+            sessionDuration: '—',
+            device: 'Chrome 126 · Windows 11',
+            ip: l.ipAddress || '192.168.10.15',
+            status: 'Success',
+            details: {
+                Before: previous == null || previous === '' ? '—' : String(previous),
+                After: updated == null || updated === '' ? '—' : String(updated),
+            },
+        }
+    })
 
     const approvalLogs = APPROVAL_ACTIONS_LOGS.filter(
         (l) => (l.approver || '').toLowerCase().includes(userName) || (l.approverRole || '').toLowerCase().includes(userRole)

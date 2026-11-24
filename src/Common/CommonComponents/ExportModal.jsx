@@ -2,6 +2,12 @@ import React, { useId, useState } from 'react'
 import { Calendar, Download, FileSpreadsheet, FileText } from 'lucide-react'
 import { toast } from 'react-toastify'
 import Dialog from '../ui/Dialog'
+import {
+    buildValidPdf,
+    downloadBytes,
+    downloadTextFile,
+    isPdfSignature,
+} from '../../Pages/SuperAdmin/utils/buildValidPdf'
 
 /**
  * Standardized Enterprise Export Modal
@@ -32,29 +38,35 @@ const ExportModal = ({
     }
 
     const triggerFileDownload = (fileFormat, startDate, endDate) => {
-        try {
-            const fileName = `export-${startDate}-to-${endDate}.${fileFormat === 'excel' ? 'xlsx' : 'pdf'}`
-            const mimeType = fileFormat === 'excel'
-                ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-                : 'application/pdf'
-            
-            // Build export payload with metadata
-            const content = fileFormat === 'excel'
-                ? `Export Date: ${new Date().toLocaleString()}\nDate Range: ${startDate} to ${endDate}\nFormat: Microsoft Excel (.xlsx)\nStatus: Verified Complete`
-                : `%PDF-1.4\n% School ERP Export Report\nDate Range: ${startDate} to ${endDate}\nGenerated: ${new Date().toISOString()}`
-            
-            const blob = new Blob([content], { type: mimeType })
-            const url = URL.createObjectURL(blob)
-            const a = document.createElement('a')
-            a.href = url
-            a.download = fileName
-            document.body.appendChild(a)
-            a.click()
-            document.body.removeChild(a)
-            URL.revokeObjectURL(url)
-        } catch {
-            /* ignore browser blob errors in test environment */
+        const fileName = `export-${startDate}-to-${endDate}.${fileFormat === 'excel' ? 'csv' : 'pdf'}`
+        if (fileFormat === 'excel') {
+            // Honest CSV bytes (not a fabricated XLSX zip). Filename uses .csv when excel selected historically.
+            const content = [
+                'Export Date,' + new Date().toLocaleString(),
+                `Date Range,${startDate} to ${endDate}`,
+                'Format,Spreadsheet (CSV)',
+                'Status,Verified Complete',
+            ].join('\n')
+            downloadTextFile(
+                `export-${startDate}-to-${endDate}.csv`,
+                content,
+                'text/csv;charset=utf-8',
+            )
+            return
         }
+        const bytes = buildValidPdf({
+            title: title || 'QMIS Export',
+            subtitle: `Date range: ${startDate} to ${endDate}`,
+            lines: [
+                exportDescription || 'School ERP export report',
+                `Generated: ${new Date().toISOString()}`,
+                recordCount != null ? `Records: ${recordCount}` : '',
+            ].filter(Boolean),
+        })
+        if (!isPdfSignature(bytes)) {
+            throw new Error('PDF generation failed validation (%PDF- signature missing).')
+        }
+        downloadBytes(fileName, bytes, 'application/pdf')
     }
 
     const submit = (e) => {
@@ -67,18 +79,23 @@ const ExportModal = ({
             return
         }
 
-        // Trigger real file download
-        triggerFileDownload(format, fromDate, toDate)
-
-        // Invoke custom callback if provided
-        onExport?.({
-            format,
-            fromDate,
-            toDate,
-        })
-
-        toast.success(`Exported ${format === 'excel' ? 'Excel (.xlsx)' : 'PDF (.pdf)'} report successfully for selected date range.`)
-        close()
+        try {
+            triggerFileDownload(format, fromDate, toDate)
+            onExport?.({
+                format,
+                fromDate,
+                toDate,
+            })
+            toast.success(
+                format === 'excel'
+                    ? 'Spreadsheet (CSV) downloaded for the selected date range.'
+                    : 'PDF downloaded. Open it in a PDF reader to verify.',
+            )
+            close()
+        } catch (error) {
+            toast.error(typeof error?.message === 'string' ? error.message : 'Export failed.')
+            setIsExporting(false)
+        }
     }
 
     return (

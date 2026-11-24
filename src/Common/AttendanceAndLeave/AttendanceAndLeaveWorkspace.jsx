@@ -36,6 +36,8 @@ import { useAuth } from '../../context/AuthContext'
 import { getProfileLabel } from '../../Pages/Authentication/profileOptions'
 import ClassAttendanceSection from './Components/ClassAttendanceSection'
 import EsslDeviceConfigSection from './Components/EsslDeviceConfigSection'
+import IntegrationNotice from '../ui/IntegrationNotice'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
 import {
     ENTERPRISE_EMPLOYEES,
     DEFAULT_HR_POLICIES,
@@ -177,6 +179,12 @@ export default function AttendanceAndLeaveWorkspace({ defaultTab = 'overview', r
     const [refreshKey, setRefreshKey] = useState(0)
     const [bannerMessage, setBannerMessage] = useState('')
 
+    useEffect(() => {
+        const onLeaveUpdated = () => setRefreshKey((k) => k + 1)
+        window.addEventListener('schoolerp-leave-requests-updated', onLeaveUpdated)
+        return () => window.removeEventListener('schoolerp-leave-requests-updated', onLeaveUpdated)
+    }, [])
+
     // Modals state
     const [isApplyModalOpen, setIsApplyModalOpen] = useState(false)
     const [selectedLeaveRequest, setSelectedLeaveRequest] = useState(null)
@@ -277,6 +285,14 @@ export default function AttendanceAndLeaveWorkspace({ defaultTab = 'overview', r
 
     return (
         <div className="min-h-screen bg-slate-50/60 p-4 md:p-6 lg:p-8 space-y-6">
+            {isLiveApiEnabled() ? (
+                <IntegrationNotice
+                    state='mock'
+                    title='This workspace remains a browser demo'
+                    description='Formal leave and attendance pages use the live API. eSSL devices, HR policies, and writes on this workspace stay local to the browser and are not LIVE-persisted.'
+                />
+            ) : null}
+
             {/* Banner Alert */}
             {bannerMessage && (
                 <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-xl shadow-sm animate-fade-in">
@@ -580,6 +596,9 @@ export default function AttendanceAndLeaveWorkspace({ defaultTab = 'overview', r
                     onClose={() => setIsApplyModalOpen(false)}
                     onSuccess={(newReq) => {
                         setIsApplyModalOpen(false)
+                        // Surface the new request immediately on My Leave (or staff queue when HR applied for another employee).
+                        const appliedForSelf = !newReq?.employeeId || newReq.employeeId === currentUserId
+                        setActiveTab(appliedForSelf || isStudentOrParent ? 'my-leave' : (hasReceivedLeavesAccess ? 'leave-management' : 'my-leave'))
                         refreshData()
                         notify(`Leave application submitted successfully (Ref: ${newReq.id})`)
                     }}

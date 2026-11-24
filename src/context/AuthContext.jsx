@@ -11,6 +11,7 @@ import {
     CREATABLE_ROLES,
 } from '../Common/RBAC/createdUsersData'
 import { ROLES } from '../constants/roles'
+import { normalizeRoleCode } from '../constants/roleRegistry'
 import { deviceLabel, logActivity } from '../Common/demoDomain/activityLog'
 import { findUserByIdentifier, ENTERPRISE_USER_DIRECTORY } from '../Pages/Authentication/enterpriseUserDirectory'
 import {
@@ -186,7 +187,7 @@ export const AuthProvider = ({ children }) => {
                     setUser(null)
                 } else {
                     setIsAuthenticated(true)
-                    setRole(me.role)
+                    setRole(normalizeRoleCode(me.role) || me.role)
                     setEmail(me.user.email)
                     setName(me.user.name)
                     setEmployeeId(me.user.employeeId || null)
@@ -237,6 +238,7 @@ export const AuthProvider = ({ children }) => {
      * Automatically identifies user identity, assigned role, permissions, department, and hierarchy.
      */
     const applyAuthenticatedSession = useCallback((resolvedUser, authenticatedRole, rememberMe = false) => {
+        const canonicalRole = normalizeRoleCode(authenticatedRole) || authenticatedRole
         const normalizedEmail = resolvedUser.email.toLowerCase()
         const resolvedName = resolvedUser.name
         const resolvedEmpId = resolvedUser.employeeId || resolvedUser.id
@@ -245,7 +247,7 @@ export const AuthProvider = ({ children }) => {
 
         const sessionPayload = {
             isAuthenticated: true,
-            role: authenticatedRole,
+            role: canonicalRole,
             email: normalizedEmail,
             name: resolvedName,
             employeeId: resolvedEmpId,
@@ -256,7 +258,7 @@ export const AuthProvider = ({ children }) => {
         }
 
         setIsAuthenticated(true)
-        setRole(authenticatedRole)
+        setRole(canonicalRole)
         setEmail(normalizedEmail)
         setName(resolvedName)
         setEmployeeId(resolvedEmpId)
@@ -269,7 +271,7 @@ export const AuthProvider = ({ children }) => {
 
         logActivity({
             actor: resolvedName || normalizedEmail,
-            role: authenticatedRole,
+            role: canonicalRole,
             action: 'LOGIN',
             module: 'Authentication',
             details: `${deviceLabel()} · ${resolvedUser.source === 'backend' ? 'Backend JWT' : 'Central Enterprise Authentication'}`,
@@ -278,7 +280,7 @@ export const AuthProvider = ({ children }) => {
 
         clearActiveCreatedUserSession()
 
-        if (authenticatedRole === ROLES.ADMIN) {
+        if (canonicalRole === ROLES.ADMIN) {
             const createdAdminUser = getAdminUserByEmail(normalizedEmail)
             if (createdAdminUser && !createdAdminUser.isSystem) {
                 setActiveAdminSession(createdAdminUser)

@@ -1,49 +1,120 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { toast } from 'react-toastify'
-import { DataTable } from '../../../Common/ui'
+import { DataTable, IntegrationNotice } from '../../../Common/ui'
 import { DEPARTMENTS } from '../domain/hrStatus'
 import { employeeName, getEmployees, getTraining, nextId, pushNotification, saveTraining } from '../domain/hrStore'
 import { Badge, Modal, PageIntro, PrimaryButton, TableWrap, inputClass } from '../components/HrUi'
 import { useHrTick } from '../components/hrUiState'
+import { useHrLiveCollection } from '../hooks/useHrLiveCollection'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { listPortalEmployees } from '../../../services/api/hrApiService'
 
 const Training = () => {
     const path = useLocation().pathname
     const mode = path.includes('feedback') ? 'feedback' : path.includes('records') ? 'records' : 'schedule'
     const tick = useHrTick()
-    const rows = useMemo(() => {
+    const live = isLiveApiEnabled()
+    const {
+        rows: liveRows,
+        listLoading,
+        listError,
+        listSource,
+        saving,
+        createOne,
+        patchOne,
+    } = useHrLiveCollection('training', {
+        loadLocal: getTraining,
+        saveLocal: saveTraining,
+    })
+    const localRows = useMemo(() => {
         void tick
         return getTraining().filter((row) => row?.id)
     }, [tick])
-    const employees = useMemo(() => {
-        void tick
-        return getEmployees().filter((row) => row?.id)
-    }, [tick])
+    const rows = (live ? liveRows : localRows).filter((row) => row?.id)
+    const [employees, setEmployees] = useState(() => (live ? [] : getEmployees().filter((row) => row?.id)))
     const [form, setForm] = useState(null)
     const [feedback, setFeedback] = useState(null)
 
-    const save = (event) => {
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            setEmployees(getEmployees().filter((row) => row?.id))
+            return
+        }
+        listPortalEmployees().then((res) => {
+            if (res.success && Array.isArray(res.data)) setEmployees(res.data.filter((row) => row?.id))
+            else setEmployees([])
+        })
+    }, [tick, live])
+
+    const save = async (event) => {
         event.preventDefault()
         if (!form?.title || !form.startDate) return toast.error('Title and date are required.')
         const participantIds = String(form.participants || '').split(',').map((item) => item.trim()).filter(Boolean)
-        const record = { id: nextId('TRN-2026', rows), title: form.title, category: form.category || 'General', trainer: form.trainer, department: form.department, participantIds, startDate: form.startDate, endDate: form.endDate || form.startDate, time: form.time, location: form.location, mode: form.mode, description: form.description, status: 'Scheduled', photos: form.photoName ? [{ name: form.photoName, size: form.photoSize }] : [], attendance: {}, feedback: [] }
+        const record = {
+            id: nextId('TRN-2026', rows),
+            title: form.title,
+            category: form.category || 'General',
+            trainer: form.trainer,
+            department: form.department,
+            participantIds,
+            startDate: form.startDate,
+            endDate: form.endDate || form.startDate,
+            time: form.time,
+            location: form.location,
+            mode: form.mode,
+            description: form.description,
+            status: 'Scheduled',
+            photos: form.photoName ? [{ name: form.photoName, size: form.photoSize }] : [],
+            attendance: {},
+            feedback: [],
+        }
+        if (isLiveApiEnabled()) {
+            const res = await createOne(record)
+            if (!res.success) {
+                toast.error(typeof res.error === 'string' ? res.error : 'Training was not saved on the server.')
+                return
+            }
+            toast.success('Training scheduled on the server.')
+            setForm(null)
+            return
+        }
         saveTraining([record, ...getTraining()])
         pushNotification({ type: 'Training', title: 'Upcoming Training', message: `${record.title} on ${record.startDate} at ${record.time}.`, relatedDate: record.startDate })
-        toast.success('Training scheduled and notification created.')
+        toast.success('Training scheduled and notification created in this browser.')
         setForm(null)
     }
 
-    const mark = (session, employeeId, status) => {
+    const mark = async (session, employeeId, status) => {
         if (!session) return
-        saveTraining(getTraining().filter(Boolean).map((item) => item.id === session.id ? { ...item, attendance: { ...(item.attendance || {}), [employeeId]: status } } : item))
+        const nextAttendance = { ...(session.attendance || {}), [employeeId]: status }
+        if (isLiveApiEnabled()) {
+            const res = await patchOne(session.id, { ...session, attendance: nextAttendance })
+            if (!res.success) toast.error(typeof res.error === 'string' ? res.error : 'Attendance was not saved.')
+            return
+        }
+        saveTraining(getTraining().filter(Boolean).map((item) => item.id === session.id ? { ...item, attendance: nextAttendance } : item))
     }
 
-    const saveFeedback = (event) => {
+    const saveFeedback = async (event) => {
         event.preventDefault()
         if (!feedback) return
         const entry = { employeeId: feedback.employeeId, relevance: Number(feedback.relevance), trainer: Number(feedback.trainer), content: Number(feedback.content), usefulness: Number(feedback.usefulness), overall: Number(feedback.overall), comments: feedback.comments || '' }
-        saveTraining(getTraining().filter(Boolean).map((item) => item.id === feedback.trainingId ? { ...item, feedback: [...(item.feedback || []).filter((row) => row && row.employeeId !== entry.employeeId), entry] } : item))
-        toast.success('Feedback stored.')
+        const session = rows.find((item) => item.id === feedback.trainingId)
+        if (!session) return
+        const nextFeedback = [...(session.feedback || []).filter((row) => row && row.employeeId !== entry.employeeId), entry]
+        if (isLiveApiEnabled()) {
+            const res = await patchOne(session.id, { ...session, feedback: nextFeedback })
+            if (!res.success) {
+                toast.error(typeof res.error === 'string' ? res.error : 'Feedback was not saved on the server.')
+                return
+            }
+            toast.success('Feedback stored on the server.')
+            setFeedback(null)
+            return
+        }
+        saveTraining(getTraining().filter(Boolean).map((item) => item.id === feedback.trainingId ? { ...item, feedback: nextFeedback } : item))
+        toast.success('Feedback stored in this browser.')
         setFeedback(null)
     }
 
@@ -66,11 +137,11 @@ const Training = () => {
                 const attendance = row.attendance || {}
                 return (
                     <div className='space-y-2'>
-                        <p>{participants.map((id) => employeeName(id)).join(', ') || 'No participants assigned'}</p>
+                        <p>{participants.map((id) => employeeName(id) || id).join(', ') || 'No participants assigned'}</p>
                         {mode === 'records' && participants.map((id) => (
                             <label key={id} className='flex flex-wrap items-center gap-2 text-xs'>
-                                <span>{employeeName(id)}</span>
-                                <select aria-label={`Attendance for ${employeeName(id)} in ${row.title}`} className='min-h-9 rounded border border-[#D9D9D9] px-2' value={attendance[id] || ''} onChange={(event) => mark(row, id, event.target.value)}>
+                                <span>{employeeName(id) || id}</span>
+                                <select aria-label={`Attendance for ${employeeName(id) || id} in ${row.title}`} className='min-h-9 rounded border border-[#D9D9D9] px-2' value={attendance[id] || ''} onChange={(event) => mark(row, id, event.target.value)} disabled={saving}>
                                     <option value=''>Mark attendance</option><option>Present</option><option>Absent</option>
                                 </select>
                             </label>
@@ -84,8 +155,15 @@ const Training = () => {
 
     return (
         <section>
+            {listSource === 'backend' ? (
+                <div className='mb-4'><IntegrationNotice state='connected' title='Live training collection' description='Rows persist via GET/POST/PATCH /api/v1/hr/training. Success toasts only follow a confirmed API response.' /></div>
+            ) : listSource === 'error' ? (
+                <div className='mb-4'><IntegrationNotice state='failed' title='Training API unavailable' description={listError || 'Could not load /api/v1/hr/training.'} /></div>
+            ) : (
+                <div className='mb-4'><IntegrationNotice state='demo' title='Browser training register' description='Training sessions are stored in this browser until live API mode is enabled.' /></div>
+            )}
             <PageIntro text={`Training completion: ${completed} of ${rows.length} sessions completed. Photos keep file metadata only.`}>
-                {mode === 'schedule' && <PrimaryButton onClick={() => setForm({ title: '', category: 'Soft Skills', trainer: '', department: 'Academic', participants: employees.slice(0, 2).map((item) => item?.id).filter(Boolean).join(', '), startDate: '2026-09-25', endDate: '2026-09-25', time: '10:00 AM', location: 'Seminar Hall', mode: 'In Person', description: '' })}>Schedule Training</PrimaryButton>}
+                {mode === 'schedule' && <PrimaryButton disabled={listLoading || saving} onClick={() => setForm({ title: '', category: 'Soft Skills', trainer: '', department: 'Academic', participants: employees.slice(0, 2).map((item) => item?.id).filter(Boolean).join(', '), startDate: '2026-09-25', endDate: '2026-09-25', time: '10:00 AM', location: 'Seminar Hall', mode: 'In Person', description: '' })}>Schedule Training</PrimaryButton>}
             </PageIntro>
             <TableWrap title={mode === 'feedback' ? 'Training Feedback' : mode === 'records' ? 'Training Records' : 'Training Schedule'}>
                 <DataTable
@@ -93,7 +171,7 @@ const Training = () => {
                     rows={rows}
                     columns={columns}
                     rowKey='id'
-                    emptyTitle='No training sessions found'
+                    emptyTitle={listLoading ? 'Loading training…' : 'No training sessions found'}
                     emptyDescription='Schedule a training session to create the first record.'
                     renderActions={mode === 'feedback' ? (row) => {
                         const participants = row.participantIds || []
@@ -106,15 +184,15 @@ const Training = () => {
                     {['title', 'category', 'trainer', 'participants', 'startDate', 'time', 'location', 'description'].map((key) => <input key={key} className={inputClass} placeholder={key} value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} />)}
                     <select className={inputClass} value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}>{DEPARTMENTS.map((item) => <option key={item}>{item}</option>)}</select>
                     <input type='file' accept='image/*' onChange={(e) => { const file = e.target.files?.[0]; if (file) setForm({ ...form, photoName: file.name, photoSize: `${Math.ceil(file.size / 1024)} KB` }) }} />
-                    <PrimaryButton type='submit'>Save</PrimaryButton>
+                    <PrimaryButton type='submit' disabled={saving}>{saving ? 'Saving…' : 'Save'}</PrimaryButton>
                 </form>
             </Modal>}
             {feedback && <Modal title='Training feedback' onClose={() => setFeedback(null)}>
                 <form onSubmit={saveFeedback} className='grid gap-3'>
-                    <select className={inputClass} value={feedback.employeeId} onChange={(e) => setFeedback({ ...feedback, employeeId: e.target.value })}>{employees.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
+                    <select className={inputClass} value={feedback.employeeId} onChange={(e) => setFeedback({ ...feedback, employeeId: e.target.value })}>{employees.map((item) => <option key={item.id} value={item.id}>{item.name || item.id}</option>)}</select>
                     {['relevance', 'trainer', 'content', 'usefulness', 'overall'].map((key) => <select key={key} className={inputClass} value={feedback[key]} onChange={(e) => setFeedback({ ...feedback, [key]: Number(e.target.value) })}>{[1, 2, 3].map((n) => <option key={n} value={n}>{key} {n}</option>)}</select>)}
                     <input className={inputClass} placeholder='Comments' value={feedback.comments} onChange={(e) => setFeedback({ ...feedback, comments: e.target.value })} />
-                    <PrimaryButton type='submit'>Save</PrimaryButton>
+                    <PrimaryButton type='submit' disabled={saving}>{saving ? 'Saving…' : 'Save'}</PrimaryButton>
                 </form>
             </Modal>}
         </section>

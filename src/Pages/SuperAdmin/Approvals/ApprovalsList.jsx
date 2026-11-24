@@ -1,34 +1,94 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowUpRight, Download, RefreshCw } from 'lucide-react'
 import { NavLink, useSearchParams } from 'react-router-dom'
+import { toast } from 'react-toastify'
 import {
     DataTable,
     DataToolbar,
+    FeedbackState,
     IntegrationNotice,
     PageHeader,
     Pagination,
     StatusBadge,
 } from '../../../Common/ui'
 import { paginateRows, parseTableState, serializeTableState } from '../../../Common/ui/dataTableState'
+import { listApprovalInbox } from '../../../services/api/approvalsApiService'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 import {
     APPROVAL_STATUSES,
     filterApprovalRequests,
     formatAmount,
-    getAllApprovalRequests,
     getApprovalSummary,
     REQUEST_CATEGORIES,
     ROUTE_BASE,
 } from './approvalsData'
 
 const ApprovalsList = () => {
+    const live = isLiveApiEnabled()
     const [urlParams, setUrlParams] = useSearchParams()
     const initialTableState = parseTableState(urlParams)
-    const [records, setRecords] = useState(() => getAllApprovalRequests())
+    const [records, setRecords] = useState([])
+    const [loading, setLoading] = useState(live)
+    const [refreshing, setRefreshing] = useState(false)
+    const [error, setError] = useState('')
+    const [refreshNotice, setRefreshNotice] = useState(null)
     const [search, setSearch] = useState(initialTableState.query)
     const [category, setCategory] = useState(initialTableState.filters.category || '')
     const [status, setStatus] = useState(initialTableState.filters.status || '')
     const [page, setPage] = useState(initialTableState.page)
     const [pageSize, setPageSize] = useState(urlParams.has('pageSize') ? initialTableState.pageSize : 5)
+
+    const loadInbox = useCallback(async ({ notifySuccess = false } = {}) => {
+        if (!live) {
+            setLoading(false)
+            setRefreshing(false)
+            setError('Live API is disabled. Approvals inbox requires GET /api/v1/approvals/inbox.')
+            if (notifySuccess) {
+                toast.error('Live API is disabled. Cannot refresh approval records.')
+            }
+            return
+        }
+
+        setRefreshing(true)
+        setError('')
+        if (notifySuccess) setRefreshNotice(null)
+        try {
+            const res = await listApprovalInbox()
+            if (!res.success) {
+                const message = res.error || 'Failed to load approval inbox.'
+                setError(message)
+                if (notifySuccess) {
+                    setRefreshNotice({ tone: 'error', message: message || 'Failed to refresh approval records.' })
+                    toast.error(message || 'Failed to refresh approval records.')
+                }
+                return
+            }
+            setRecords(Array.isArray(res.data) ? res.data : [])
+            if (notifySuccess) {
+                setRefreshNotice({ tone: 'success', message: 'Approval records refreshed successfully.' })
+                toast.success('Approval records refreshed successfully.')
+            }
+        } catch (err) {
+            const message = err?.message || 'Network error while refreshing approval records.'
+            setError(message)
+            if (notifySuccess) {
+                setRefreshNotice({ tone: 'error', message })
+                toast.error(message)
+            }
+        } finally {
+            setLoading(false)
+            setRefreshing(false)
+        }
+    }, [live])
+
+    useEffect(() => {
+        loadInbox({ notifySuccess: false })
+    }, [loadInbox])
+
+    const categoryOptions = useMemo(() => {
+        const fromRecords = records.map((row) => row.category).filter(Boolean)
+        return Array.from(new Set([...REQUEST_CATEGORIES, ...fromRecords]))
+    }, [records])
 
     const summary = useMemo(() => getApprovalSummary(records), [records])
     const filteredRecords = useMemo(
@@ -56,18 +116,34 @@ const ApprovalsList = () => {
         { key: 'status', label: 'Status', render: (request) => <StatusBadge status={request.status} /> },
     ]
 
+    if (!live) {
+        return (
+            <section className='space-y-5'>
+                <PageHeader
+                    title='Approval inbox'
+                    description='Finance, data, HR, procurement, budget and policy requests routed for final governance review.'
+                />
+                <FeedbackState
+                    kind='error'
+                    title='Live API required'
+                    description='Super Admin Approvals uses GET /api/v1/approvals/inbox. Enable the live API to load and refresh records.'
+                />
+            </section>
+        )
+    }
+
     return (
         <section className='space-y-5'>
             <PageHeader
                 title='Approval inbox'
-                description='Finance, data, HR, procurement, budget and policy requests routed for final governance review.'
+                description='Pending workflow items awaiting your role via FastAPI approval engine.'
                 context={`${summary.pending} pending · ${summary.highPriority} high-priority pending`}
             />
 
             <IntegrationNotice
-                state='demo'
-                title='Browser-stored approval queue'
-                description='Requests and decisions are local demo records. Production routing, segregation-of-duties checks, notifications and immutable audit events require backend services.'
+                state='connected'
+                title='Live approval inbox'
+                description='List and Refresh use GET /api/v1/approvals/inbox (pending items awaiting your role). Decisions use POST /api/v1/approvals/{id}/decide. Demo sessionStorage seed records are not used.'
             />
 
             <div className='grid grid-cols-2 gap-3 lg:grid-cols-5'>
@@ -85,6 +161,23 @@ const ApprovalsList = () => {
                 ))}
             </div>
 
+            {refreshNotice ? (
+                <div
+                    role='status'
+                    className={`rounded-lg border px-4 py-3 text-sm font-medium ${
+                        refreshNotice.tone === 'success'
+                            ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                            : 'border-red-200 bg-red-50 text-red-800'
+                    }`}
+                >
+                    {refreshNotice.message}
+                </div>
+            ) : null}
+
+            {error && !refreshing && !refreshNotice ? (
+                <FeedbackState kind='error' title='Could not refresh approval records' description={error} />
+            ) : null}
+
             <div className='overflow-hidden rounded-[var(--erp-radius-surface)] border border-[var(--erp-line)] bg-white'>
                 <DataToolbar
                     query={search}
@@ -97,7 +190,7 @@ const ApprovalsList = () => {
                             <label className='grid gap-1 text-xs font-medium text-[var(--erp-slate)]'>Category
                                 <select value={category} onChange={(event) => { setCategory(event.target.value); setPage(1) }} className='min-h-10 rounded-lg border border-[var(--erp-line-strong)] bg-white px-3 text-sm'>
                                     <option value=''>All categories</option>
-                                    {REQUEST_CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}
+                                    {categoryOptions.map((item) => <option key={item} value={item}>{item}</option>)}
                                 </select>
                             </label>
                             <label className='grid gap-1 text-xs font-medium text-[var(--erp-slate)]'>Status
@@ -110,8 +203,18 @@ const ApprovalsList = () => {
                     )}
                     actions={(
                         <>
-                            <button type='button' onClick={() => setRecords(getAllApprovalRequests())} className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] px-4 text-sm font-semibold text-[var(--erp-ink)]'>
-                                <RefreshCw aria-hidden='true' size={16} /> Refresh
+                            <button
+                                type='button'
+                                disabled={refreshing || loading}
+                                onClick={() => loadInbox({ notifySuccess: true })}
+                                className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] px-4 text-sm font-semibold text-[var(--erp-ink)] disabled:cursor-not-allowed disabled:opacity-60'
+                            >
+                                <RefreshCw
+                                    aria-hidden='true'
+                                    size={16}
+                                    className={refreshing || loading ? 'animate-spin' : undefined}
+                                />
+                                {refreshing || loading ? 'Refreshing...' : 'Refresh'}
                             </button>
                             <button type='button' disabled title='Export service is not connected' className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] px-4 text-sm font-semibold text-[var(--erp-muted)] opacity-65'>
                                 <Download aria-hidden='true' size={16} /> Export unavailable
@@ -119,19 +222,23 @@ const ApprovalsList = () => {
                         </>
                     )}
                 />
-                <DataTable
-                    caption='Approval requests'
-                    rows={pagination.rows}
-                    columns={columns}
-                    rowKey='id'
-                    emptyTitle='No approval requests found'
-                    emptyDescription='No requests match the current search, category and status filters.'
-                    renderActions={(request) => (
-                        <NavLink to={`${ROUTE_BASE}/view/${request.id}`} className='inline-flex min-h-9 items-center gap-1 rounded-lg border border-[var(--erp-line-strong)] px-3 text-xs font-semibold text-[var(--erp-ink)]'>
-                            Review <ArrowUpRight aria-hidden='true' size={14} />
-                        </NavLink>
-                    )}
-                />
+                {loading && records.length === 0 ? (
+                    <p className='px-4 py-10 text-center text-sm text-[var(--erp-muted)]'>Loading approval inbox…</p>
+                ) : (
+                    <DataTable
+                        caption='Approval requests'
+                        rows={pagination.rows}
+                        columns={columns}
+                        rowKey='id'
+                        emptyTitle='No approval requests found'
+                        emptyDescription='Inbox is empty for your role, or no requests match the current filters. Refresh pulls the latest GET /api/v1/approvals/inbox response.'
+                        renderActions={(request) => (
+                            <NavLink to={`${ROUTE_BASE}/view/${request.id}`} className='inline-flex min-h-9 items-center gap-1 rounded-lg border border-[var(--erp-line-strong)] px-3 text-xs font-semibold text-[var(--erp-ink)]'>
+                                Review <ArrowUpRight aria-hidden='true' size={14} />
+                            </NavLink>
+                        )}
+                    />
+                )}
                 <Pagination {...pagination} pageSizeOptions={[5, 10, 25]} onPageChange={setPage} onPageSizeChange={(value) => { setPageSize(value); setPage(1) }} />
             </div>
         </section>

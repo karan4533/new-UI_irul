@@ -745,6 +745,81 @@ export const submitMaterialRequisition = (payload) => {
     return newReq
 }
 
+const EDITABLE_REQUISITION_STATUSES = new Set([
+    'Submitted',
+    'Pending HOD Approval',
+    'Draft',
+])
+
+/**
+ * Update a product / material request while it remains in an editable pre-approval status.
+ */
+export const updateMaterialRequisition = (requisitionId, payload = {}, actorName = 'Requester') => {
+    const requisitions = getMaterialRequisitions()
+    const target = requisitions.find((r) => r.id === requisitionId)
+    if (!target) throw new Error('Requisition not found.')
+
+    if (!EDITABLE_REQUISITION_STATUSES.has(target.status)) {
+        throw new Error(
+            `Editing is unavailable while status is "${target.status}". Only Submitted / Pending HOD Approval requests can be edited before approval.`
+        )
+    }
+
+    const items = payload.items || payload.requestedItems || target.items || []
+    if (!items.length) {
+        throw new Error('At least one material item must remain on the request.')
+    }
+
+    if (payload.department) target.department = payload.department
+    if (payload.urgency || payload.priority) {
+        target.urgency = payload.urgency || payload.priority
+        target.priority = payload.urgency || payload.priority
+    }
+    if (payload.requiredByDate || payload.requiredDate) {
+        target.requiredByDate = payload.requiredByDate || payload.requiredDate
+        target.requiredDate = payload.requiredByDate || payload.requiredDate
+    }
+    if (payload.purpose) target.purpose = payload.purpose
+
+    target.items = items
+    target.totalItemsCount = items.reduce(
+        (acc, it) => acc + Number(it.requestedQty || it.requestedQuantity || 0),
+        0
+    )
+    target.totalEstimatedValuation = items.reduce(
+        (acc, it) => acc + Number(it.estimatedTotal || 0),
+        0
+    )
+    target.approvalHistory = [
+        ...(target.approvalHistory || []),
+        {
+            actor: actorName,
+            role: 'Requester',
+            action: 'Edited',
+            timestamp:
+                new Date().toLocaleDateString('en-GB') +
+                ' ' +
+                new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+            remarks: 'Request details updated prior to HOD approval.',
+        },
+    ]
+
+    saveMaterialRequisitions(requisitions)
+    recordAuditLog({
+        actorName,
+        module: 'Stores & Procurement',
+        action: 'EDIT_MATERIAL_REQ',
+        entityId: requisitionId,
+        previousState: 'Submitted',
+        newState: target.status,
+        remarks: `Requisition ${requisitionId} edited before approval.`,
+    })
+    return target
+}
+
+export const canEditMaterialRequisition = (req) =>
+    Boolean(req && EDITABLE_REQUISITION_STATUSES.has(req.status))
+
 /**
  * 2. Approve Material Requisition (HOD / Management)
  */

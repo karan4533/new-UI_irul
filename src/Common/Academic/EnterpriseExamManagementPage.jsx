@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect, useCallback } from 'react'
 import {
     Calendar,
     CalendarDays,
@@ -26,6 +26,7 @@ import {
     MapPin,
     AlertTriangle,
 } from 'lucide-react'
+import { toast } from 'react-toastify'
 import { useAuth } from '../../context/AuthContext'
 import {
     getExamHalls,
@@ -37,6 +38,45 @@ import {
     checkInvigilatorClash,
     FACULTY_INVIGILATOR_POOL,
 } from './invigilationData'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
+import { listExams, createExam, submitExam } from '../../services/api/examsApiService'
+import { IntegrationNotice } from '../ui'
+
+/** Map FastAPI exam row (via mapExamToUi) into the existing term-card shape. */
+function mapLiveExamToCard(exam = {}) {
+    const approval = String(exam.approvalStatus || '').toLowerCase()
+    const statusRaw = String(exam.status || '').toLowerCase()
+    let status = 'Scheduled'
+    if (approval === 'approved' || statusRaw === 'published') status = 'In Progress'
+    else if (approval === 'denied' || approval === 'rejected') status = 'Completed'
+    else if (statusRaw === 'draft' || approval === 'pending' || approval === 'draft') status = 'Scheduled'
+    return {
+        id: exam.id || exam.examId,
+        code: exam.examType || exam.examTypeName || 'EXAM',
+        title: exam.examName || exam.name || 'Untitled examination',
+        term: exam.examTypeName || exam.examType || 'Assessment',
+        academicYear: exam.academicYear || '—',
+        applicableClasses: exam.className || exam.classSection || '—',
+        startDate: exam.startDate || '—',
+        endDate: exam.endDate || '—',
+        marksEntryDeadline: '—',
+        resultDate: '—',
+        status,
+        totalPapers: 0,
+        marksEnteredPapers: 0,
+        source: 'backend',
+        approvalStatus: exam.approvalStatus,
+    }
+}
+
+const EMPTY_CREATE_FORM = {
+    name: '',
+    examType: 'MIDTERM',
+    className: 'Class 10',
+    academicYear: '2025-2026',
+    startDate: '',
+    endDate: '',
+}
 
 // Master Examination Terms & Schedules
 export const EXAMINATION_TERMS = [
@@ -164,8 +204,10 @@ export const INVIGILATION_DUTIES = [
 
 const EnterpriseExamManagementPage = ({ roleOverride }) => {
     const { role: authRole } = useAuth() || {}
-    const activeRole = roleOverride || authRole || 'teacher'
+    const activeRole = String(roleOverride || authRole || 'teacher').toLowerCase().replace(/[-_\s]/g, '')
+    const live = isLiveApiEnabled()
     const isTeacher = activeRole === 'teacher'
+    // Matches FastAPI exams.write holders used in this product surface (teacher has read only).
     const canCreateExam = ['coordinator', 'principal', 'director', 'admin', 'superadmin'].includes(activeRole)
 
     const canManageDuties = ['coordinator', 'principal', 'director', 'admin', 'superadmin'].includes(activeRole)
@@ -175,6 +217,35 @@ const EnterpriseExamManagementPage = ({ roleOverride }) => {
     const [statusFilter, setStatusFilter] = useState('ALL')
     const [classFilter, setClassFilter] = useState('ALL')
     const [actionNotice, setActionNotice] = useState('')
+    const [liveExams, setLiveExams] = useState([])
+    const [liveLoading, setLiveLoading] = useState(Boolean(live))
+    const [liveError, setLiveError] = useState('')
+    const [showCreateExamModal, setShowCreateExamModal] = useState(false)
+    const [createForm, setCreateForm] = useState(() => ({ ...EMPTY_CREATE_FORM }))
+    const [createSaving, setCreateSaving] = useState(false)
+    const [createError, setCreateError] = useState('')
+
+    const loadLiveExams = useCallback(async () => {
+        if (!isLiveApiEnabled()) {
+            setLiveLoading(false)
+            return
+        }
+        setLiveLoading(true)
+        setLiveError('')
+        const res = await listExams()
+        if (!res.success) {
+            setLiveExams([])
+            setLiveError(typeof res.error === 'string' ? res.error : 'Could not load /api/v1/exams.')
+            setLiveLoading(false)
+            return
+        }
+        setLiveExams((res.data || []).map(mapLiveExamToCard))
+        setLiveLoading(false)
+    }, [])
+
+    useEffect(() => {
+        loadLiveExams()
+    }, [loadLiveExams])
 
     // Invigilation & Halls State
     const [halls, setHalls] = useState(() => getExamHalls())
@@ -323,25 +394,85 @@ const EnterpriseExamManagementPage = ({ roleOverride }) => {
         setTimeout(() => setActionNotice(''), 4000)
     }
 
+    const scheduleSource = live ? liveExams : EXAMINATION_TERMS
+
     const filteredExams = useMemo(() => {
-        return EXAMINATION_TERMS.filter((e) => {
+        return scheduleSource.filter((e) => {
             if (statusFilter !== 'ALL' && e.status !== statusFilter) return false
-            if (classFilter !== 'ALL' && !e.applicableClasses.includes(classFilter)) return false
+            if (classFilter !== 'ALL' && !String(e.applicableClasses || '').includes(classFilter)) return false
             if (searchTerm.trim()) {
                 const q = searchTerm.toLowerCase()
                 return (
-                    e.title.toLowerCase().includes(q) ||
-                    e.code.toLowerCase().includes(q) ||
-                    e.term.toLowerCase().includes(q)
+                    String(e.title || '').toLowerCase().includes(q) ||
+                    String(e.code || '').toLowerCase().includes(q) ||
+                    String(e.term || '').toLowerCase().includes(q)
                 )
             }
             return true
         })
-    }, [statusFilter, classFilter, searchTerm])
+    }, [scheduleSource, statusFilter, classFilter, searchTerm])
 
     const handleDownloadSchedule = () => {
-        setActionNotice('Official examination schedule and student hall ticket roster exported successfully.')
+        if (live) {
+            setActionNotice('PDF export is not wired to a backend endpoint — download remains local/demo only.')
+        } else {
+            setActionNotice('Official examination schedule and student hall ticket roster exported successfully.')
+        }
         setTimeout(() => setActionNotice(''), 4000)
+    }
+
+    const handleOpenCreateExam = () => {
+        if (!canCreateExam) return
+        if (live) {
+            setCreateForm({ ...EMPTY_CREATE_FORM, startDate: '2026-12-01', endDate: '2026-12-05' })
+            setCreateError('')
+            setShowCreateExamModal(true)
+            return
+        }
+        setActionNotice('New examination term creator opened. Institutional parameters applied.')
+        setTimeout(() => setActionNotice(''), 4000)
+    }
+
+    const handleCreateExamSubmit = async (e) => {
+        e.preventDefault()
+        if (!canCreateExam || !live) return
+        if (!createForm.name.trim() || !createForm.className.trim() || !createForm.startDate || !createForm.endDate) {
+            setCreateError('Name, class, start date, and end date are required.')
+            return
+        }
+        setCreateSaving(true)
+        setCreateError('')
+        const created = await createExam({
+            name: createForm.name.trim(),
+            examType: createForm.examType || 'MIDTERM',
+            className: createForm.className.trim(),
+            academicYear: createForm.academicYear || null,
+            startDateIso: createForm.startDate,
+            endDateIso: createForm.endDate,
+        })
+        if (!created.success) {
+            setCreateSaving(false)
+            setCreateError(created.error || 'Exam create failed.')
+            toast.error(created.error || 'Exam create failed.')
+            return
+        }
+        const examId = created.data?.id || created.data?.examId
+        if (examId) {
+            const submitted = await submitExam(examId)
+            if (!submitted.success) {
+                setCreateSaving(false)
+                setCreateError(submitted.error || 'Exam created but submit for approval failed.')
+                toast.error(submitted.error || 'Exam created but submit failed.')
+                await loadLiveExams()
+                return
+            }
+        }
+        setCreateSaving(false)
+        setShowCreateExamModal(false)
+        await loadLiveExams()
+        setActionNotice(`Examination "${createForm.name.trim()}" saved on the server (GET /api/v1/exams).`)
+        toast.success('Examination persisted on the server.')
+        setTimeout(() => setActionNotice(''), 4500)
     }
 
     return (
@@ -380,10 +511,7 @@ const EnterpriseExamManagementPage = ({ roleOverride }) => {
                     {canCreateExam ? (
                         <button
                             type='button'
-                            onClick={() => {
-                                setActionNotice('New examination term creator opened. Institutional parameters applied.')
-                                setTimeout(() => setActionNotice(''), 4000)
-                            }}
+                            onClick={handleOpenCreateExam}
                             className='inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer'
                         >
                             <Plus size={14} /> Schedule Examination
@@ -396,6 +524,21 @@ const EnterpriseExamManagementPage = ({ roleOverride }) => {
                     )}
                 </div>
             </div>
+
+            {live && !liveError ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Live examination schedules'
+                    description='Schedules tab hydrates from GET /api/v1/exams. Create uses POST /api/v1/exams + submit (exams.write). Blueprints, grading bands, and invigilation halls remain LOCAL ONLY / MOCK — no hall/duty API.'
+                />
+            ) : null}
+            {live && liveError ? (
+                <IntegrationNotice
+                    state='failed'
+                    title='Exam list unavailable'
+                    description={liveError}
+                />
+            ) : null}
 
             {/* Action Notice */}
             {actionNotice && (
@@ -412,8 +555,12 @@ const EnterpriseExamManagementPage = ({ roleOverride }) => {
                         <span className='text-xs font-semibold'>Scheduled Terms</span>
                         <CalendarDays size={18} className='text-blue-600' />
                     </div>
-                    <p className='text-2xl font-bold tracking-tight text-slate-900'>6 Active Cycles</p>
-                    <p className='text-[11px] text-slate-500'>Pre-Board & Annual active</p>
+                    <p className='text-2xl font-bold tracking-tight text-slate-900'>
+                        {live ? `${liveExams.length} Live Exam${liveExams.length === 1 ? '' : 's'}` : '6 Active Cycles'}
+                    </p>
+                    <p className='text-[11px] text-slate-500'>
+                        {live ? 'From GET /api/v1/exams' : 'Pre-Board & Annual active'}
+                    </p>
                 </div>
 
                 <div className='rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs space-y-1.5'>
@@ -421,8 +568,12 @@ const EnterpriseExamManagementPage = ({ roleOverride }) => {
                         <span className='text-xs font-semibold'>Total Assessment Papers</span>
                         <BookOpen size={18} className='text-indigo-600' />
                     </div>
-                    <p className='text-2xl font-bold tracking-tight text-slate-900'>192 Subject Papers</p>
-                    <p className='text-[11px] text-emerald-600 font-semibold'>82% evaluations finalized</p>
+                    <p className='text-2xl font-bold tracking-tight text-slate-900'>
+                        {live ? '—' : '192 Subject Papers'}
+                    </p>
+                    <p className='text-[11px] text-slate-500'>
+                        {live ? 'Paper counts not on exams API' : '82% evaluations finalized'}
+                    </p>
                 </div>
 
                 <div className='rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs space-y-1.5'>
@@ -430,8 +581,12 @@ const EnterpriseExamManagementPage = ({ roleOverride }) => {
                         <span className='text-xs font-semibold'>Enrolled Candidates</span>
                         <Users size={18} className='text-purple-600' />
                     </div>
-                    <p className='text-2xl font-bold tracking-tight text-slate-900'>1,240 Students</p>
-                    <p className='text-[11px] text-slate-500'>Classes 1 through 12</p>
+                    <p className='text-2xl font-bold tracking-tight text-slate-900'>
+                        {live ? '—' : '1,240 Students'}
+                    </p>
+                    <p className='text-[11px] text-slate-500'>
+                        {live ? 'Candidate roster not on exams API' : 'Classes 1 through 12'}
+                    </p>
                 </div>
 
                 <div className='rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs space-y-1.5'>
@@ -495,6 +650,11 @@ const EnterpriseExamManagementPage = ({ roleOverride }) => {
             {/* TAB 1: Examination Schedules */}
             {activeTab === 'schedules' && (
                 <div className='space-y-4'>
+                    {liveLoading ? (
+                        <div className='rounded-xl border border-slate-200 bg-white p-4 text-xs text-slate-600'>
+                            Loading examinations from the server…
+                        </div>
+                    ) : null}
                     {/* Filters Bar */}
                     <div className='rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3'>
                         <div className='relative flex-1 max-w-sm'>
@@ -537,6 +697,11 @@ const EnterpriseExamManagementPage = ({ roleOverride }) => {
                     </div>
 
                     {/* Examination Cards Grid */}
+                    {!liveLoading && filteredExams.length === 0 ? (
+                        <div className='rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-xs text-slate-600'>
+                            {live ? 'No examinations returned from GET /api/v1/exams for the current filters.' : 'No examination terms match the current filters.'}
+                        </div>
+                    ) : null}
                     <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'>
                         {filteredExams.map((exam) => {
                             const isPublished = exam.status === 'Results Published'
@@ -615,6 +780,13 @@ const EnterpriseExamManagementPage = ({ roleOverride }) => {
             {/* TAB 2: Subject Blueprints & Weightage */}
             {activeTab === 'blueprints' && (
                 <div className='rounded-2xl border border-slate-200/80 bg-white p-5 shadow-xs space-y-4'>
+                    {live ? (
+                        <IntegrationNotice
+                            state='mock'
+                            title='Blueprints — LOCAL ONLY / MOCK'
+                            description='GET/PUT /api/v1/exam-weightage exists for class weightage but this matrix UI is still static. Weightage write also needs exams.configure (Coordinator does not have it).'
+                        />
+                    ) : null}
                     <div>
                         <h3 className='text-sm font-bold text-slate-900'>Subject Assessment Blueprints & Weightage Matrix</h3>
                         <p className='text-xs text-slate-500 mt-0.5'>
@@ -663,6 +835,13 @@ const EnterpriseExamManagementPage = ({ roleOverride }) => {
             {/* TAB 3: Grading Scale & Performance Bands */}
             {activeTab === 'grading' && (
                 <div className='rounded-2xl border border-slate-200/80 bg-white p-5 shadow-xs space-y-4'>
+                    {live ? (
+                        <IntegrationNotice
+                            state='mock'
+                            title='Grading scale — LOCAL ONLY'
+                            description='No FastAPI grading-band endpoint is mounted. Display standards only.'
+                        />
+                    ) : null}
                     <div>
                         <h3 className='text-sm font-bold text-slate-900'>Institutional Grading Standards & Performance Descriptors</h3>
                         <p className='text-xs text-slate-500 mt-0.5'>
@@ -695,6 +874,13 @@ const EnterpriseExamManagementPage = ({ roleOverride }) => {
             {/* TAB 4: Invigilation Duties & Halls */}
             {activeTab === 'duties' && (
                 <div className='space-y-4'>
+                    {live ? (
+                        <IntegrationNotice
+                            state='mock'
+                            title='Invigilation & halls — LOCAL ONLY'
+                            description='Hall and duty roster changes stay in this browser. There is no FastAPI invigilation/halls collection.'
+                        />
+                    ) : null}
                     {/* Invigilation Metrics Overview */}
                     <div className='grid grid-cols-2 md:grid-cols-4 gap-3'>
                         <div className='p-4 rounded-xl border border-slate-200/80 bg-white shadow-2xs'>
@@ -1257,6 +1443,115 @@ const EnterpriseExamManagementPage = ({ roleOverride }) => {
                             </div>
                         </div>
                     )}
+                </div>
+            )}
+
+            {showCreateExamModal && (
+                <div className='fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4'>
+                    <div className='bg-white rounded-2xl shadow-xl border border-slate-200 max-w-md w-full p-6 space-y-4 animate-in fade-in duration-200'>
+                        <div className='flex items-center justify-between border-b border-slate-100 pb-3'>
+                            <h3 className='font-bold text-slate-900 text-base'>Schedule Examination</h3>
+                            <button
+                                type='button'
+                                onClick={() => setShowCreateExamModal(false)}
+                                className='text-slate-400 hover:text-slate-600 p-1 rounded-lg'
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <p className='text-xs text-slate-500'>
+                            Persists via POST /api/v1/exams then submit. Requires exams.write. Success only after server confirmation.
+                        </p>
+                        {createError ? (
+                            <div className='p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs font-semibold'>
+                                {createError}
+                            </div>
+                        ) : null}
+                        <form onSubmit={handleCreateExamSubmit} className='space-y-3 text-xs'>
+                            <div>
+                                <label className='block font-bold text-slate-700 mb-1'>Examination name</label>
+                                <input
+                                    type='text'
+                                    value={createForm.name}
+                                    onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
+                                    className='w-full px-3 py-2 rounded-xl border border-slate-200 font-semibold focus:outline-none focus:border-blue-500'
+                                    required
+                                />
+                            </div>
+                            <div className='grid grid-cols-2 gap-3'>
+                                <div>
+                                    <label className='block font-bold text-slate-700 mb-1'>Exam type</label>
+                                    <select
+                                        value={createForm.examType}
+                                        onChange={(e) => setCreateForm({ ...createForm, examType: e.target.value })}
+                                        className='w-full px-3 py-2 rounded-xl border border-slate-200 font-semibold bg-white'
+                                    >
+                                        <option value='MIDTERM'>MIDTERM</option>
+                                        <option value='FINAL'>FINAL</option>
+                                        <option value='UNIT'>UNIT</option>
+                                        <option value='PREBOARD'>PREBOARD</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className='block font-bold text-slate-700 mb-1'>Class</label>
+                                    <input
+                                        type='text'
+                                        value={createForm.className}
+                                        onChange={(e) => setCreateForm({ ...createForm, className: e.target.value })}
+                                        className='w-full px-3 py-2 rounded-xl border border-slate-200 font-semibold'
+                                        required
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className='block font-bold text-slate-700 mb-1'>Academic year</label>
+                                <input
+                                    type='text'
+                                    value={createForm.academicYear}
+                                    onChange={(e) => setCreateForm({ ...createForm, academicYear: e.target.value })}
+                                    className='w-full px-3 py-2 rounded-xl border border-slate-200 font-semibold'
+                                />
+                            </div>
+                            <div className='grid grid-cols-2 gap-3'>
+                                <div>
+                                    <label className='block font-bold text-slate-700 mb-1'>Start date</label>
+                                    <input
+                                        type='date'
+                                        value={createForm.startDate}
+                                        onChange={(e) => setCreateForm({ ...createForm, startDate: e.target.value })}
+                                        className='w-full px-3 py-2 rounded-xl border border-slate-200 font-semibold'
+                                        required
+                                    />
+                                </div>
+                                <div>
+                                    <label className='block font-bold text-slate-700 mb-1'>End date</label>
+                                    <input
+                                        type='date'
+                                        value={createForm.endDate}
+                                        onChange={(e) => setCreateForm({ ...createForm, endDate: e.target.value })}
+                                        className='w-full px-3 py-2 rounded-xl border border-slate-200 font-semibold'
+                                        required
+                                    />
+                                </div>
+                            </div>
+                            <div className='pt-3 border-t border-slate-100 flex items-center justify-end gap-2.5'>
+                                <button
+                                    type='button'
+                                    onClick={() => setShowCreateExamModal(false)}
+                                    className='px-4 py-2 rounded-xl border border-slate-200 text-slate-700 font-semibold hover:bg-slate-50'
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type='submit'
+                                    disabled={createSaving}
+                                    className='px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold shadow-xs'
+                                >
+                                    {createSaving ? 'Saving…' : 'Save on server'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
             )}
         </section>

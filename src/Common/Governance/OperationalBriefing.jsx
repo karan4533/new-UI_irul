@@ -96,31 +96,33 @@ const OperationalBriefing = ({
             {metrics.map((metric) => <MetricCard key={metric.label} metric={metric} />)}
         </div>
 
-        <div className='grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.8fr)]'>
-            <Surface
-                title='Priority work queues'
-                description='Items are ordered by urgency and show the accountable destination.'
-                contentClassName='divide-y divide-[var(--erp-line)]'
-            >
-                {queues.map((queue) => (
-                    <article key={queue.title} className='flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5'>
-                        <div className='min-w-0'>
-                            <div className='flex flex-wrap items-center gap-2'>
-                                <h3 className='text-sm font-semibold text-[var(--erp-ink)]'>{queue.title}</h3>
-                                <StatusBadge status={queue.status} />
+        <div className={`grid grid-cols-1 gap-5 ${queues?.length ? 'xl:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.8fr)]' : ''}`}>
+            {queues?.length ? (
+                <Surface
+                    title='Priority work queues'
+                    description='Items are ordered by urgency and show the accountable destination.'
+                    contentClassName='divide-y divide-[var(--erp-line)]'
+                >
+                    {queues.map((queue) => (
+                        <article key={queue.title} className='flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5'>
+                            <div className='min-w-0'>
+                                <div className='flex flex-wrap items-center gap-2'>
+                                    <h3 className='text-sm font-semibold text-[var(--erp-ink)]'>{queue.title}</h3>
+                                    <StatusBadge status={queue.status} />
+                                </div>
+                                <p className='mt-1 text-sm text-[var(--erp-slate)]'>{queue.description}</p>
+                                <p className='mt-1 text-xs text-[var(--erp-muted)]'>Owner: {queue.owner} · SLA: {queue.sla}</p>
                             </div>
-                            <p className='mt-1 text-sm text-[var(--erp-slate)]'>{queue.description}</p>
-                            <p className='mt-1 text-xs text-[var(--erp-muted)]'>Owner: {queue.owner} · SLA: {queue.sla}</p>
-                        </div>
-                        <NavLink
-                            to={queue.to}
-                            className='inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-[var(--erp-line-strong)] px-3 text-sm font-semibold text-[var(--erp-indigo)] hover:bg-[var(--erp-indigo-soft)]'
-                        >
-                            Open queue <ArrowRight aria-hidden='true' size={15} />
-                        </NavLink>
-                    </article>
-                ))}
-            </Surface>
+                            <NavLink
+                                to={queue.to}
+                                className='inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-[var(--erp-line-strong)] px-3 text-sm font-semibold text-[var(--erp-indigo)] hover:bg-[var(--erp-indigo-soft)]'
+                            >
+                                Open queue <ArrowRight aria-hidden='true' size={15} />
+                            </NavLink>
+                        </article>
+                    ))}
+                </Surface>
+            ) : null}
 
             <Surface title='Common actions' description='Start the workflows most often used in this role.' contentClassName='p-3'>
                 <nav aria-label={`${title} quick actions`} className='grid gap-2'>

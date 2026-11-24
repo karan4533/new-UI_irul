@@ -7,6 +7,8 @@ import { toast } from 'react-toastify'
 import { useAuth } from '../../context/AuthContext'
 import { calculateTotalDays, createLeaveRequest, LEAVE_REQUESTS_UPDATED_EVENT, LEAVE_TYPES } from './leaveRequestData'
 import { getLeaveApproverConfig, getLeaveRoutes, getSubmitterProfile, resolveRoleKey } from './leaveRequestConfigs'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
+import { createLeaveRequest as createLeaveRequestApi } from '../../services/api/leaveApiService'
 import IntegrationNotice from '../ui/IntegrationNotice'
 import PageHeader from '../ui/PageHeader'
 import Surface from '../ui/Surface'
@@ -15,7 +17,23 @@ import WorkflowContextBar from '../ui/WorkflowContextBar'
 const inputClass = 'text-sm font-normal text-[#1E1E1E] border border-[#D9D9D9] rounded-md px-2 py-3 w-full'
 const readOnlyInputClass = `${inputClass} bg-[#F9FAFB] cursor-not-allowed`
 
+function toIsoDate(value) {
+    if (!(value instanceof Date) || Number.isNaN(value.getTime())) return ''
+    const y = value.getFullYear()
+    const m = String(value.getMonth() + 1).padStart(2, '0')
+    const d = String(value.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+}
+
+function permissionHours(fromTime, toTime) {
+    const [fromHour, fromMinute] = fromTime.split(':').map(Number)
+    const [toHour, toMinute] = toTime.split(':').map(Number)
+    const minutes = (toHour * 60 + toMinute) - (fromHour * 60 + fromMinute)
+    return minutes / 60
+}
+
 export default function AddLeaveRequestForm({ roleKey: roleKeyProp }) {
+    const live = isLiveApiEnabled()
     const navigate = useNavigate()
     const { role: authRole, name } = useAuth()
     const roleKey = resolveRoleKey(authRole || roleKeyProp)
@@ -28,10 +46,11 @@ export default function AddLeaveRequestForm({ roleKey: roleKeyProp }) {
     const [reason, setReason] = useState('')
     const [fromTime, setFromTime] = useState('09:00')
     const [toTime, setToTime] = useState('10:00')
+    const [saving, setSaving] = useState(false)
 
     const totalDays = useMemo(() => calculateTotalDays(fromDate, toDate), [fromDate, toDate])
 
-    const handleSubmit = () => {
+    const handleSubmit = async () => {
         if (!leaveType) {
             toast.error('Please select a leave type.')
             return
@@ -44,14 +63,33 @@ export default function AddLeaveRequestForm({ roleKey: roleKeyProp }) {
             toast.error('Please select valid from and to dates.')
             return
         }
+
+        let hours = null
         if (leaveType === 'Permission') {
-            const [fromHour, fromMinute] = fromTime.split(':').map(Number)
-            const [toHour, toMinute] = toTime.split(':').map(Number)
-            const minutes = (toHour * 60 + toMinute) - (fromHour * 60 + fromMinute)
-            if (minutes <= 0 || minutes > 120) {
+            hours = permissionHours(fromTime, toTime)
+            if (hours <= 0 || hours > 2) {
                 toast.error('Permission cannot exceed 2 hours.')
                 return
             }
+        }
+
+        if (live) {
+            setSaving(true)
+            const res = await createLeaveRequestApi({
+                leaveType,
+                fromDate: toIsoDate(fromDate),
+                toDate: toIsoDate(toDate),
+                reason: reason.trim(),
+                hours,
+            })
+            setSaving(false)
+            if (!res.success) {
+                toast.error(typeof res.error === 'string' ? res.error : 'Unable to submit leave request to the server.')
+                return
+            }
+            toast.success(`Leave request submitted to ${approverConfig.requestedToLabel}.`)
+            navigate(routes.myList)
+            return
         }
 
         createLeaveRequest(
@@ -68,7 +106,7 @@ export default function AddLeaveRequestForm({ roleKey: roleKeyProp }) {
             },
             roleKey,
         )
-
+        window.dispatchEvent(new Event(LEAVE_REQUESTS_UPDATED_EVENT))
         toast.success(`Leave request submitted to ${approverConfig.requestedToLabel}.`)
         navigate(routes.myList)
     }
@@ -76,7 +114,13 @@ export default function AddLeaveRequestForm({ roleKey: roleKeyProp }) {
     return (
         <section className='space-y-5'>
             <PageHeader title='Apply for leave' description={approverConfig.submitHint} />
-            <IntegrationNotice state='demo' title='Local leave submission' description='This request is stored in this browser. Leave balances, document evidence and staff notifications are not connected.' />
+            <IntegrationNotice
+                state={live ? 'connected' : 'mock'}
+                title={live ? 'Live leave submission' : 'Browser mock leave submission'}
+                description={live
+                    ? 'This request is posted to /api/v1/leave-requests and persists in the database.'
+                    : 'Live API is off. This request is stored only in this browser.'}
+            />
             <WorkflowContextBar owner={approverConfig.requestedToLabel} due={fromDate && toDate ? `${fromDate.toLocaleDateString('en-GB')} to ${toDate.toLocaleDateString('en-GB')}` : 'Select dates'} nextAction='Complete and submit the request' />
             <Surface title='Request information' description='Dates and leave type determine the request sent to the decision owner.' contentClassName='p-4 sm:p-5'>
                 <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 lg:mt-8 mt-2'>
@@ -139,7 +183,7 @@ export default function AddLeaveRequestForm({ roleKey: roleKeyProp }) {
 
             <div className='flex flex-col-reverse gap-2 sm:flex-row sm:justify-end'>
                 <button type='button' onClick={() => navigate(routes.myList)} className='bg-white text-[#515DEF] text-sm px-12 py-2 rounded-md border border-[#515DEF] hover:bg-[#515DEF] hover:text-white transition-all duration-200 cursor-pointer md:w-auto w-full'>Cancel</button>
-                <button type='button' onClick={handleSubmit} className='bg-[#515DEF] text-white text-sm px-12 py-2 rounded-md border border-[#515DEF] hover:opacity-90 transition-all duration-200 cursor-pointer md:w-auto w-full'>Submit Request</button>
+                <button type='button' disabled={saving} onClick={handleSubmit} className='bg-[#515DEF] text-white text-sm px-12 py-2 rounded-md border border-[#515DEF] hover:opacity-90 transition-all duration-200 cursor-pointer md:w-auto w-full disabled:opacity-60'>{saving ? 'Submitting…' : 'Submit Request'}</button>
             </div>
         </section>
     )

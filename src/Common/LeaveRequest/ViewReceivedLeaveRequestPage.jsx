@@ -28,12 +28,19 @@ const Field = ({ label, value }) => (
     </div>
 )
 
+/** Roles that hold FastAPI `leave.decide` for received-leave decisions. */
+const LEAVE_DECIDE_ROLES = new Set([
+    'superadmin', 'admin', 'hr', 'principal', 'coordinator', 'director',
+    'jointdirector', 'jointdirectorassistant', 'prm',
+])
+
 export default function ViewReceivedLeaveRequestPage({ roleKey: roleKeyProp }) {
     const live = isLiveApiEnabled()
     const { id } = useParams()
     const navigate = useNavigate()
     const { role: authRole } = useAuth()
     const roleKey = resolveRoleKey(authRole || roleKeyProp)
+    const canDecide = LEAVE_DECIDE_ROLES.has(String(roleKey || '').toLowerCase().replace(/[-_\s]/g, ''))
     const routes = getLeaveRoutes(roleKey)
     const [request, setRequest] = useState(() => {
         if (live) return null
@@ -144,10 +151,14 @@ export default function ViewReceivedLeaveRequestPage({ roleKey: roleKeyProp }) {
             />
 
             <IntegrationNotice
-                state={live ? 'connected' : 'demo'}
-                title={live ? 'Live leave decision' : 'Browser-stored approval'}
+                state={live ? (canDecide ? 'connected' : 'failed') : 'demo'}
+                title={live
+                    ? (canDecide ? 'Live leave decision' : 'Leave decide blocked for this role')
+                    : 'Browser-stored approval'}
                 description={live
-                    ? 'POST /api/v1/leave-requests/{id}/decide records the approval or rejection on the server.'
+                    ? (canDecide
+                        ? 'POST /api/v1/leave-requests/{id}/decide records the approval or rejection on the server.'
+                        : `Your role (${roleKey}) can view received leave but does not have leave.decide. Approve/Reject controls are hidden — no false success.`)
                     : 'Decisions are saved locally for this prototype. Staff notifications and the production leave API are not connected.'}
             />
 
@@ -173,7 +184,7 @@ export default function ViewReceivedLeaveRequestPage({ roleKey: roleKeyProp }) {
                         </dl>
                     </Surface>
 
-                    {request.status === 'Pending' ? (
+                    {request.status === 'Pending' && canDecide ? (
                         <Surface title={decisionTitle} description='Add context for the requester, then review the confirmation before recording your decision.' contentClassName='p-4 sm:p-5'>
                             <FormField id='approver-remarks' label='Decision remarks' hint='Remarks are shown to the requester and should explain the decision.'>
                                 <textarea
@@ -188,6 +199,10 @@ export default function ViewReceivedLeaveRequestPage({ roleKey: roleKeyProp }) {
                                 <button type='button' onClick={() => setPendingDecision('Rejected')} className='min-h-10 rounded-lg border border-[var(--erp-red)] px-4 text-sm font-semibold text-[var(--erp-red)]'>Reject request</button>
                                 <button type='button' onClick={() => setPendingDecision('Approved')} className='min-h-10 rounded-lg bg-[var(--erp-indigo)] px-4 text-sm font-semibold text-white'>Approve request</button>
                             </div>
+                        </Surface>
+                    ) : request.status === 'Pending' && !canDecide ? (
+                        <Surface title='Decision unavailable' description='This role is not granted leave.decide on the FastAPI permission matrix.' contentClassName='p-4 sm:p-5'>
+                            <p className='text-sm text-[var(--erp-slate)]'>You can review the request details, but Approve/Reject is blocked so the UI cannot imply a successful decision.</p>
                         </Surface>
                     ) : request.approverRemarks ? (
                         <Surface title='Decision remarks' contentClassName='p-4 sm:p-5'>

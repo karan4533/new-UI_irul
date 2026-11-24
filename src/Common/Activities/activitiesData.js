@@ -241,6 +241,7 @@ export const getActivityById = (id) =>
     getActivities().find((item) => item.id === id) ?? null
 
 export const CALENDAR_UPDATED_EVENT = 'schoolerp-calendar-updated'
+export const ACTIVITIES_UPDATED_EVENT = 'schoolerp-activities-updated'
 
 const ACTIVITY_TYPE_LABELS = {
     cultural: 'Cultural',
@@ -262,6 +263,7 @@ export const parseActivityDateToIso = (dateStr) => {
 export const notifyCalendarUpdated = () => {
     if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event(CALENDAR_UPDATED_EVENT))
+        window.dispatchEvent(new Event(ACTIVITIES_UPDATED_EVENT))
     }
 }
 

@@ -4,7 +4,7 @@ import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { Calendar, ChevronLeft, ChevronRight, Download, EllipsisIcon } from 'lucide-react'
 import Dropdown from '../../../Common/CommonComponents/Dropdown'
-import ExportModal from '../../../Common/CommonComponents/ExportModal'
+import SuperAdminExportModal from '../utils/SuperAdminExportModal'
 import {
     PASS_CATEGORIES,
     ROUTE_BASE,
@@ -211,7 +211,22 @@ const GatePassList = () => {
                 </div>
             </div>
 
-            <ExportModal exportModal={exportModal} setExportModal={setExportModal} />
+            <SuperAdminExportModal
+                exportModal={exportModal}
+                setExportModal={setExportModal}
+                title='Export Gate Passes'
+                documentTitle='QMIS Gate Pass Export'
+                exportDescription='Export filtered Super Admin gate-pass records as a valid PDF or CSV.'
+                recordCount={filteredRecords.length}
+                getExportLines={() => filteredRecords.map((row) => [
+                    row.id || row.passId || '',
+                    row.passCategory || '',
+                    row.studentName || row.visitorName || row.name || '',
+                    row.status || '',
+                    row.fromDate || row.outDate || '',
+                    row.toDate || row.inDate || '',
+                ].filter(Boolean).join(' | '))}
+            />
         </section>
     )
 }
