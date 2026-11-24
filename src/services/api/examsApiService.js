@@ -103,3 +103,93 @@ export async function submitExam(examId, options = {}) {
 export async function decideExamApproval(approvalId, { decision, comment } = {}, options = {}) {
     return decideApproval(approvalId, { decision, comment }, options)
 }
+
+function gradeFromPercent(pct) {
+    if (pct == null || Number.isNaN(Number(pct))) return '—'
+    const value = Number(pct)
+    if (value >= 90) return 'A1'
+    if (value >= 80) return 'A2'
+    if (value >= 70) return 'B1'
+    if (value >= 60) return 'B2'
+    if (value >= 50) return 'C1'
+    if (value >= 40) return 'C2'
+    return 'D'
+}
+
+/**
+ * Map GET /api/v1/results/students/{id} into Exam Result list rows + summary.
+ * One UI row per published subject within each exam.
+ */
+export function mapStudentResultsToUi(payload = {}) {
+    const exams = Array.isArray(payload.exams) ? payload.exams : []
+    const rows = []
+    const numericPercents = []
+    let highest = null
+
+    exams.forEach((exam) => {
+        const subjects = Array.isArray(exam.subjects) ? exam.subjects : []
+        subjects.forEach((subject, index) => {
+            const absent = Boolean(subject.absent)
+            const maxMarks = Number(subject.maxMarks ?? 0)
+            const marks = absent ? null : Number(subject.marks)
+            const percent = !absent && maxMarks > 0 && marks != null
+                ? Math.round((marks / maxMarks) * 1000) / 10
+                : null
+            if (percent != null) {
+                numericPercents.push(percent)
+                if (!highest || marks > highest.marks) {
+                    highest = { marks, subject: subject.subject || '—', percent }
+                }
+            }
+            rows.push({
+                id: `${exam.examId || exam.examName || 'exam'}|${subject.subject || index}`,
+                examName: exam.examName || exam.name || '—',
+                subject: subject.subject || '—',
+                term: exam.examType || '',
+                academicYear: '',
+                totalMarks: maxMarks || '—',
+                obtainedMarks: absent ? '—' : (marks ?? '—'),
+                grade: absent ? '—' : gradeFromPercent(percent),
+                percentage: percent == null ? '—' : `${percent}%`,
+                resultStatus: absent ? 'Absent' : (percent != null && percent < 40 ? 'Fail' : 'Pass'),
+                teacherRemarks: '—',
+                examDate: '',
+                examId: exam.examId || '',
+                rank: exam.rank ?? null,
+                source: 'backend',
+            })
+        })
+    })
+
+    const averagePercent = numericPercents.length
+        ? Math.round(numericPercents.reduce((sum, value) => sum + value, 0) / numericPercents.length)
+        : null
+
+    return {
+        studentId: payload.studentId || '',
+        studentName: payload.studentName || '',
+        className: payload.className || '',
+        rows,
+        summary: {
+            examAppeared: exams.length,
+            averagePercent: averagePercent == null ? 0 : averagePercent,
+            highestMark: highest ? highest.marks : '—',
+            highestSubject: highest ? highest.subject : '—',
+            overallGrade: averagePercent == null ? '—' : gradeFromPercent(averagePercent),
+            hasData: rows.length > 0,
+        },
+    }
+}
+
+/** GET /api/v1/results/students/{studentId} — published results for parent/student. */
+export async function getStudentResults(studentId, options = {}) {
+    const blocked = requireLive()
+    if (blocked) return { ...blocked, data: null }
+    if (!studentId) return { success: false, error: 'Student id is required.', data: null }
+    const res = await apiClient.get(
+        `/api/v1/results/students/${encodeURIComponent(studentId)}`,
+        { skipMock: true, ...options },
+    )
+    if (!res.success) return { ...res, data: null }
+    return { ...res, data: mapStudentResultsToUi(res.data || {}) }
+}

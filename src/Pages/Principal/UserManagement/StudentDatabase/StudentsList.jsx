@@ -53,8 +53,6 @@ const StudentsList = () => {
 
     return (
         <section>
-            {source === 'backend' ? (
-            ) : null}
             {source === 'error' ? (
                 <FeedbackState kind='error' title='Students API unavailable' description={error} />
             ) : null}

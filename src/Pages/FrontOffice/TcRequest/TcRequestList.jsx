@@ -78,8 +78,6 @@ const TcRequestList = () => {
                 </p>
             </div>
 
-            {source === 'backend' ? (
-            ) : null}
             {source === 'error' ? (
                 <FeedbackState kind='error' title='TC API unavailable' description={error} />
             ) : null}

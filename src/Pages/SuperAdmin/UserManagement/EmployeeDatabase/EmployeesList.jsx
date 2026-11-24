@@ -66,8 +66,6 @@ const EmployeesList = () => {
 
     return (
         <section>
-            {source === 'backend' ? (
-            ) : null}
             {source === 'error' ? (
                 <FeedbackState kind='error' title='Employees API unavailable' description={error} />
             ) : null}

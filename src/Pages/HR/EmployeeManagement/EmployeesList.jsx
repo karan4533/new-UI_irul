@@ -155,8 +155,6 @@ const EmployeesList = () => {
                 </div>
             </PageIntro>
 
-            {listSource === 'backend' ? (
-            ) : null}
             {listSource === 'error' ? (
                 <FeedbackState kind='error' title='Employees API unavailable' description={listError} />
             ) : null}

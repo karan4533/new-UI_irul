@@ -203,8 +203,6 @@ const EmployeeProfile = () => {
     return (
         <section className='space-y-6'>
             <NavLink to='/hr/employee-management/employees' className='inline-flex items-center gap-2 text-sm text-[#515DEF]'><ArrowLeft size={16} /> Employees</NavLink>
-            {detailSource === 'backend' ? (
-            ) : null}
             <div className='bg-white rounded-2xl shadow-md p-4 flex gap-4 items-center'>
                 <img src={mo_user} alt='' className='w-16 h-16 rounded-full object-cover' />
                 <div>

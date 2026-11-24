@@ -1,66 +1,144 @@
-import React, { useMemo, useState } from 'react'
-import DatePicker from "react-datepicker";
-import "react-datepicker/dist/react-datepicker.css";
-import { CalendarRange, BadgePercent, BookOpenCheck, CircleCheck, ChevronLeft, ChevronRight, Calendar, Download, Star } from "lucide-react"
-import ReactECharts from "echarts-for-react"
-import resultImg from "../../../assets/images/result-img.png"
+import React, { useEffect, useMemo, useState } from 'react'
+import DatePicker from 'react-datepicker'
+import 'react-datepicker/dist/react-datepicker.css'
+import {
+    CalendarRange,
+    BadgePercent,
+    BookOpenCheck,
+    CircleCheck,
+    ChevronLeft,
+    ChevronRight,
+    Calendar,
+    Download,
+    Star,
+} from 'lucide-react'
+import ReactECharts from 'echarts-for-react'
+import resultImg from '../../../assets/images/result-img.png'
 import { useActiveStudent } from '../../../context/ActiveStudentContext'
-import { getStudentResultSummary } from '../../Parent/parentStudentViewData'
-import { getApprovedMarksForStudent } from '../../../Common/MarkEntryApproval/markEntryApprovalData'
+import { getStudentResults } from '../../../services/api/examsApiService.js'
 
-const performanceCategories = [
-    { label: "Excellent", range: "90 - 100%", subjects: 1, color: "#4CAF50" },
-    { label: "Very Good", range: "75 - 89%", subjects: 2, color: "#00B0FF" },
-    { label: "Good", range: "50 - 74%", subjects: 1, color: "#FF9800" },
-    { label: "Need Improvement", range: "<50%", subjects: 0, color: "#F44336" },
-]
+const EMPTY_SUMMARY = {
+    examAppeared: 0,
+    averagePercent: 0,
+    highestMark: '—',
+    highestSubject: '—',
+    overallGrade: '—',
+    hasData: false,
+}
 
-const chartData = performanceCategories
-    .filter((item) => item.subjects > 0)
-    .map((item) => ({ name: item.label, value: item.subjects, color: item.color }))
+function buildPerformanceCategories(rows) {
+    const buckets = [
+        { label: 'Excellent', range: '90 - 100%', min: 90, max: 101, color: '#4CAF50', subjects: 0 },
+        { label: 'Very Good', range: '75 - 89%', min: 75, max: 90, color: '#00B0FF', subjects: 0 },
+        { label: 'Good', range: '50 - 74%', min: 50, max: 75, color: '#FF9800', subjects: 0 },
+        { label: 'Need Improvement', range: '<50%', min: 0, max: 50, color: '#F44336', subjects: 0 },
+    ]
+    rows.forEach((row) => {
+        if (row.resultStatus === 'Absent' || row.obtainedMarks === '—') return
+        const match = String(row.percentage).match(/(\d+(\.\d+)?)/)
+        const pct = match ? Number(match[1]) : null
+        if (pct == null) return
+        const bucket = buckets.find((item) => pct >= item.min && pct < item.max)
+        if (bucket) bucket.subjects += 1
+    })
+    return buckets
+}
 
 const ResultDetails = () => {
-
-    const [selectMonth, setSelectMonth] = useState(new Date());
+    const [selectMonth, setSelectMonth] = useState(null)
     const { activeStudent } = useActiveStudent()
-    const summary = useMemo(
-        () => getStudentResultSummary(activeStudent.id),
-        [activeStudent.id],
-    )
+    const [loading, setLoading] = useState(true)
+    const [error, setError] = useState('')
+    const [rows, setRows] = useState([])
+    const [summary, setSummary] = useState(EMPTY_SUMMARY)
 
-    const approvedResults = useMemo(
-        () => getApprovedMarksForStudent(activeStudent.id),
-        [activeStudent.id],
-    )
+    useEffect(() => {
+        let cancelled = false
+        async function load() {
+            if (!activeStudent?.id) {
+                setRows([])
+                setSummary(EMPTY_SUMMARY)
+                setLoading(false)
+                return
+            }
+            setLoading(true)
+            setError('')
+            const res = await getStudentResults(activeStudent.id)
+            if (cancelled) return
+            if (!res.success) {
+                setRows([])
+                setSummary(EMPTY_SUMMARY)
+                setError(res.error || 'Unable to load published exam results.')
+                setLoading(false)
+                return
+            }
+            setRows(res.data?.rows || [])
+            setSummary(res.data?.summary || EMPTY_SUMMARY)
+            setLoading(false)
+        }
+        load()
+        return () => {
+            cancelled = true
+        }
+    }, [activeStudent?.id])
 
     const bagdeColor = {
-        "Pass": "bg-[#4CAF5033] text-[#4CAF50]",
-        "Fail": "bg-[#FF000033] text-[#FF0000]",
-        "Absent": "bg-[#FF980033] text-[#FF9800]",
+        Pass: 'bg-[#4CAF5033] text-[#4CAF50]',
+        Fail: 'bg-[#FF000033] text-[#FF0000]',
+        Absent: 'bg-[#FF980033] text-[#FF9800]',
     }
 
-    const pieChartOption = useMemo(() => ({
-        series: [{
-            type: "pie",
-            radius: ["64%", "91%"],
-            center: ["50%", "50%"],
-            startAngle: 90,
-            padAngle: 3,
-            silent: true,
-            data: chartData.map((item) => ({
-                value: item.value,
-                name: item.name,
-                itemStyle: { color: item.color },
-            })),
-            label: { show: false },
-            labelLine: { show: false },
-            emphasis: { disabled: true },
-        }],
-    }), [])
+    const filteredRows = useMemo(() => {
+        if (!selectMonth) return rows
+        // Live results payload has no examDate yet — month filter is a no-op until dates exist.
+        return rows
+    }, [rows, selectMonth])
+
+    const performanceCategories = useMemo(
+        () => buildPerformanceCategories(filteredRows),
+        [filteredRows],
+    )
+
+    const chartData = useMemo(
+        () =>
+            performanceCategories
+                .filter((item) => item.subjects > 0)
+                .map((item) => ({ name: item.label, value: item.subjects, color: item.color })),
+        [performanceCategories],
+    )
+
+    const pieChartOption = useMemo(
+        () => ({
+            series: [
+                {
+                    type: 'pie',
+                    radius: ['64%', '91%'],
+                    center: ['50%', '50%'],
+                    startAngle: 90,
+                    padAngle: 3,
+                    silent: true,
+                    data:
+                        chartData.length > 0
+                            ? chartData.map((item) => ({
+                                value: item.value,
+                                name: item.name,
+                                itemStyle: { color: item.color },
+                            }))
+                            : [{ value: 1, name: 'Empty', itemStyle: { color: '#E5E7EB' } }],
+                    label: { show: false },
+                    labelLine: { show: false },
+                    emphasis: { disabled: true },
+                },
+            ],
+        }),
+        [chartData],
+    )
+
+    const encouragementName =
+        activeStudent?.name?.split?.(' ')?.[0] || activeStudent?.firstName || 'Student'
 
     return (
         <section>
-
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='grid grid-cols-1 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4'>
                     <div className='bg-[#F0F8FE] border border-[#D2E2F0] rounded-xl p-4'>
@@ -70,8 +148,10 @@ const ResultDetails = () => {
                             </div>
                             <div className='flex flex-col gap-y-2'>
                                 <h3 className='text-lg font-bold text-[#0C1E5B]'>Exam Appeared</h3>
-                                <span className='text-4xl font-bold text-[#0C1E5B]'>{summary.examAppeared}</span>
-                                <span className='text-sm font-medium text-[#0C1E5B]'>This Term</span>
+                                <span className='text-4xl font-bold text-[#0C1E5B]'>
+                                    {loading ? '—' : summary.examAppeared}
+                                </span>
+                                <span className='text-sm font-medium text-[#0C1E5B]'>Published</span>
                             </div>
                         </div>
                     </div>
@@ -82,8 +162,10 @@ const ResultDetails = () => {
                             </div>
                             <div className='flex flex-col gap-y-2'>
                                 <h3 className='text-lg font-bold text-[#0B6D2C]'>Average Percent</h3>
-                                <span className='text-4xl font-bold text-[#0B6D2C]'>{summary.averagePercent} %</span>
-                                <span className='text-sm font-medium text-[#0B6D2C]'>This Term</span>
+                                <span className='text-4xl font-bold text-[#0B6D2C]'>
+                                    {loading || !summary.hasData ? '—' : `${summary.averagePercent} %`}
+                                </span>
+                                <span className='text-sm font-medium text-[#0B6D2C]'>Published</span>
                             </div>
                         </div>
                     </div>
@@ -94,8 +176,12 @@ const ResultDetails = () => {
                             </div>
                             <div className='flex flex-col gap-y-2'>
                                 <h3 className='text-lg font-bold text-[#980E0F]'>Highest Mark</h3>
-                                <span className='text-4xl font-bold text-[#980E0F]'>{summary.highestMark}</span>
-                                <span className='text-sm font-medium text-[#980E0F]'>{summary.highestSubject}</span>
+                                <span className='text-4xl font-bold text-[#980E0F]'>
+                                    {loading ? '—' : summary.highestMark}
+                                </span>
+                                <span className='text-sm font-medium text-[#980E0F]'>
+                                    {loading ? '—' : summary.highestSubject}
+                                </span>
                             </div>
                         </div>
                     </div>
@@ -106,8 +192,10 @@ const ResultDetails = () => {
                             </div>
                             <div className='flex flex-col gap-y-2'>
                                 <h3 className='text-lg font-bold text-[#2515B4]'>Overall Grade</h3>
-                                <span className='text-4xl font-bold text-[#2515B4]'>{summary.overallGrade}</span>
-                                <span className='text-sm font-medium text-[#2515B4]'>This Term</span>
+                                <span className='text-4xl font-bold text-[#2515B4]'>
+                                    {loading ? '—' : summary.overallGrade}
+                                </span>
+                                <span className='text-sm font-medium text-[#2515B4]'>Published</span>
                             </div>
                         </div>
                     </div>
@@ -118,17 +206,15 @@ const ResultDetails = () => {
                 <div className='grid grid-cols-1 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end'>
                     <div className='flex flex-col gap-y-2'>
                         <label className='text-base font-medium text-[#808080]'>Select Month</label>
-
                         <div className='relative w-full'>
                             <DatePicker
                                 selected={selectMonth}
                                 onChange={(date) => setSelectMonth(date)}
                                 isClearable={true}
-                                showMonthYearDropdown={true}
-                                scrollableMonthYearDropdown={true}
+                                showMonthYearPicker
+                                dateFormat='MM/yyyy'
                                 className='w-full text-sm text-[#808080] border border-[#D9D9D9] rounded-md px-3 py-3 pr-10 focus:outline-none'
                             />
-
                             <Calendar
                                 size={16}
                                 className='absolute right-3 top-1/2 -translate-y-1/2 text-[#808080] pointer-events-none'
@@ -137,72 +223,99 @@ const ResultDetails = () => {
                     </div>
 
                     <div className='flex flex-col gap-y-2'>
-                        <label htmlFor="class" className='text-base font-medium text-[#808080]'>Exams Filter</label>
-                        <select name="" id="" className='text-sm font-normal text-[#808080] border border-[#D9D9D9] rounded-md px-2 py-3 w-full'>
-                            <option value="">All</option>
+                        <label htmlFor='exam-filter' className='text-base font-medium text-[#808080]'>
+                            Exams Filter
+                        </label>
+                        <select
+                            id='exam-filter'
+                            className='text-sm font-normal text-[#808080] border border-[#D9D9D9] rounded-md px-2 py-3 w-full'
+                            disabled
+                        >
+                            <option value=''>All</option>
                         </select>
                     </div>
 
-                    <button className='bg-[#515DEF] text-white flex items-center gap-x-2 justify-center uppercase text-sm px-6 py-3 border border-[#515DEF] rounded-lg hover:opacity-90 transition-all duration-200 cursor-pointer'>
+                    <button
+                        type='button'
+                        disabled
+                        className='bg-[#515DEF]/70 text-white flex items-center gap-x-2 justify-center uppercase text-sm px-6 py-3 border border-[#515DEF] rounded-lg cursor-not-allowed'
+                    >
                         <Download className='w-4 h-4' />
                         Export
                     </button>
 
-                    <button className='bg-[#515DEF] text-white uppercase text-sm px-6 py-3 border border-[#515DEF] rounded-lg hover:opacity-90 transition-all duration-200 cursor-pointer'>
+                    <button
+                        type='button'
+                        onClick={() => setSelectMonth(null)}
+                        className='bg-[#515DEF] text-white uppercase text-sm px-6 py-3 border border-[#515DEF] rounded-lg hover:opacity-90 transition-all duration-200 cursor-pointer'
+                    >
                         Clear Filters
                     </button>
                 </div>
             </div>
 
-
-
             <div className='bg-white rounded-2xl shadow-md p-4 mt-8'>
                 <div className='flex justify-between items-center sm:flex-row flex-col gap-y-2 mb-4'>
                     <h2 className='text-xl font-medium text-black'>Exam Result List</h2>
                 </div>
-                <div className='flex gap-x-2 items-center my-2'>
-                    <select name="" id="" className='px-2 py-1.5 bg-white text-[#515DEF] border border-[#515DEF] rounded-md'>
-                        <option value="10">10</option>
-                        <option value="20">20</option>
-                        <option value="30">30</option>
-                        <option value="40">40</option>
-                        <option value="50">50</option>
-                    </select>
-                    <span className='text-sm font-normal text-[#515DEF]'>Entries Per Page</span>
-                </div>
-                <div className="relative overflow-x-auto">
-                    <table className="w-full text-sm text-left rtl:text-right">
-                        <thead className="text-xs bg-[#EDEEF5] whitespace-nowrap rounded-lg">
+                <div className='relative overflow-x-auto'>
+                    <table className='w-full text-sm text-left rtl:text-right'>
+                        <thead className='text-xs bg-[#EDEEF5] whitespace-nowrap rounded-lg'>
                             <tr className='rounded-lg'>
-                                <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase rounded-s-lg">Exam Name</th>
-                                <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase">Subject</th>
-                                <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase">Total Marks</th>
-                                <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase">Obtained Marks</th>
-                                <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase">Grade</th>
-                                <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase">Percentage</th>
-                                <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase">Result Status</th>
-                                <th className="px-2 py-3.5 text-[#0C1E5B] font-medium uppercase rounded-e-lg">Teacher Remarks</th>
+                                <th className='px-2 py-3.5 text-[#0C1E5B] font-medium uppercase rounded-s-lg'>
+                                    Exam Name
+                                </th>
+                                <th className='px-2 py-3.5 text-[#0C1E5B] font-medium uppercase'>Subject</th>
+                                <th className='px-2 py-3.5 text-[#0C1E5B] font-medium uppercase'>Total Marks</th>
+                                <th className='px-2 py-3.5 text-[#0C1E5B] font-medium uppercase'>
+                                    Obtained Marks
+                                </th>
+                                <th className='px-2 py-3.5 text-[#0C1E5B] font-medium uppercase'>Grade</th>
+                                <th className='px-2 py-3.5 text-[#0C1E5B] font-medium uppercase'>Percentage</th>
+                                <th className='px-2 py-3.5 text-[#0C1E5B] font-medium uppercase'>
+                                    Result Status
+                                </th>
+                                <th className='px-2 py-3.5 text-[#0C1E5B] font-medium uppercase rounded-e-lg'>
+                                    Teacher Remarks
+                                </th>
                             </tr>
                         </thead>
-
                         <tbody>
-                            {approvedResults.length === 0 ? (
+                            {loading ? (
                                 <tr>
-                                    <td colSpan={8} className="px-2 py-8 text-center text-[#667085]">
-                                        No approved exam results are available yet. Results will appear here after the Director approves submitted marks.
+                                    <td colSpan={8} className='px-2 py-8 text-center text-[#667085]'>
+                                        Loading published exam results…
+                                    </td>
+                                </tr>
+                            ) : error ? (
+                                <tr>
+                                    <td colSpan={8} className='px-2 py-8 text-center text-[#980E0F]'>
+                                        {error}
+                                    </td>
+                                </tr>
+                            ) : filteredRows.length === 0 ? (
+                                <tr>
+                                    <td colSpan={8} className='px-2 py-8 text-center text-[#667085]'>
+                                        No approved exam results are available yet. Results will appear here
+                                        after marks are published.
                                     </td>
                                 </tr>
                             ) : (
-                                approvedResults.map((row) => (
-                                    <tr key={row.id} className="border-b text-[#667085] border-[#f2f4f7] hover:bg-[#f2f4f7] rounded-lg">
-                                        <td className="px-2 py-4 rounded-s-lg">{row.examName}</td>
-                                        <td className="px-2 py-4">{row.subject}</td>
-                                        <td className="px-2 py-4">{row.totalMarks}</td>
-                                        <td className="px-2 py-4">{row.obtainedMarks}</td>
-                                        <td className="px-2 py-4">{row.grade}</td>
-                                        <td className="px-2 py-4">{row.percentage}</td>
-                                        <td className="px-2 py-4">
-                                            <span className={`px-2 py-1 rounded-lg text-xs font-semibold whitespace-nowrap ${bagdeColor[row.resultStatus] ?? bagdeColor.Pass}`}>
+                                filteredRows.map((row) => (
+                                    <tr
+                                        key={row.id}
+                                        className='border-b text-[#667085] border-[#f2f4f7] hover:bg-[#f2f4f7] rounded-lg'
+                                    >
+                                        <td className='px-2 py-4 rounded-s-lg'>{row.examName}</td>
+                                        <td className='px-2 py-4'>{row.subject}</td>
+                                        <td className='px-2 py-4'>{row.totalMarks}</td>
+                                        <td className='px-2 py-4'>{row.obtainedMarks}</td>
+                                        <td className='px-2 py-4'>{row.grade}</td>
+                                        <td className='px-2 py-4'>{row.percentage}</td>
+                                        <td className='px-2 py-4'>
+                                            <span
+                                                className={`px-2 py-1 rounded-lg text-xs font-semibold whitespace-nowrap ${bagdeColor[row.resultStatus] ?? bagdeColor.Pass}`}
+                                            >
                                                 {row.resultStatus}
                                             </span>
                                         </td>
@@ -215,26 +328,30 @@ const ResultDetails = () => {
                 </div>
             </div>
 
-            {/* Pagination */}
             <div className='flex justify-between items-center px-4 mt-4'>
                 <p className='text-sm font-medium text-[#515DEF]'>
-                    Showing {approvedResults.length} approved result{approvedResults.length !== 1 ? 's' : ''}
+                    Showing {filteredRows.length} approved result{filteredRows.length !== 1 ? 's' : ''}
                 </p>
-
-                <div className="flex justify-center gap-x-2 flex-wrap">
-                    <button className="size-8 flex justify-center items-center p-2 bg-white text-[#515DEF] border border-[#E2E8F0] hover:bg-[#515DEF] hover:text-white rounded-full cursor-pointer">
+                <div className='flex justify-center gap-x-2 flex-wrap'>
+                    <button
+                        type='button'
+                        className='size-8 flex justify-center items-center p-2 bg-white text-[#515DEF] border border-[#E2E8F0] rounded-full cursor-default'
+                        disabled
+                    >
                         <ChevronLeft size={16} />
                     </button>
-
-                    <button className="size-8 flex justify-center items-center p-2 bg-[#EDEDF5] text-[#515DEF] hover:bg-[#515DEF] hover:text-white border border-[#E2E8F0] rounded-full cursor-pointer">
+                    <button
+                        type='button'
+                        className='size-8 flex justify-center items-center p-2 bg-[#EDEDF5] text-[#515DEF] border border-[#E2E8F0] rounded-full cursor-default'
+                        disabled
+                    >
                         1
                     </button>
-
-                    <button className="size-8 flex justify-center items-center p-2 bg-[#EDEDF5] text-[#515DEF] hover:bg-[#515DEF] hover:text-white border border-[#E2E8F0] rounded-full cursor-pointer">
-                        2
-                    </button>
-
-                    <button className="size-8 flex justify-center items-center p-2 bg-white text-[#515DEF] border border-[#E2E8F0] hover:bg-[#515DEF] hover:text-white rounded-full cursor-pointer">
+                    <button
+                        type='button'
+                        className='size-8 flex justify-center items-center p-2 bg-white text-[#515DEF] border border-[#E2E8F0] rounded-full cursor-default'
+                        disabled
+                    >
                         <ChevronRight size={16} />
                     </button>
                 </div>
@@ -247,12 +364,14 @@ const ResultDetails = () => {
                         <div className='relative w-[180px] h-[180px] shrink-0 mx-auto md:mx-0'>
                             <ReactECharts
                                 option={pieChartOption}
-                                style={{ height: "180px", width: "180px" }}
-                                opts={{ renderer: "svg" }}
+                                style={{ height: '180px', width: '180px' }}
+                                opts={{ renderer: 'svg' }}
                             />
                             <div className='absolute inset-0 flex flex-col items-center justify-center pointer-events-none'>
                                 <span className='text-sm text-[#808080]'>Average</span>
-                                <span className='text-2xl font-bold text-[#0C1E5B]'>80.25 %</span>
+                                <span className='text-2xl font-bold text-[#0C1E5B]'>
+                                    {summary.hasData ? `${summary.averagePercent} %` : '—'}
+                                </span>
                             </div>
                         </div>
 
@@ -269,7 +388,7 @@ const ResultDetails = () => {
                                         </span>
                                     </div>
                                     <span className='text-sm text-[#808080] whitespace-nowrap shrink-0'>
-                                        {item.subjects} Subject{item.subjects !== 1 ? "s" : ""}
+                                        {item.subjects} Subject{item.subjects !== 1 ? 's' : ''}
                                     </span>
                                 </div>
                             ))}
@@ -285,14 +404,14 @@ const ResultDetails = () => {
                         <Star className='w-14 h-14 md:w-16 md:h-16 text-[#0056D2] fill-[#0056D2] shrink-0' />
                         <div>
                             <h3 className='text-xl md:text-2xl lg:text-3xl font-bold text-[#0056D2] leading-tight'>
-                                {summary.examAppeared > 0
-                                    ? `Great Job, ${summary.encouragementName}!`
-                                    : `Hello, ${summary.encouragementName}!`}
+                                {summary.hasData
+                                    ? `Great Job, ${encouragementName}!`
+                                    : `Hello, ${encouragementName}!`}
                             </h3>
                             <p className='text-sm md:text-base text-[#0C1E5B] mt-2 leading-relaxed'>
-                                {summary.examAppeared > 0
-                                    ? 'You are performing well. Keep up the good work and continue to achieve more!'
-                                    : 'Your exam results will appear here once the Director approves submitted marks.'}
+                                {summary.hasData
+                                    ? 'Published results from the school exam register are shown above.'
+                                    : 'Your exam results will appear here once marks are published.'}
                             </p>
                         </div>
                     </div>
@@ -300,9 +419,11 @@ const ResultDetails = () => {
             </div>
 
             <div className='bg-[#F1FCF2] rounded-2xl shadow-md border border-[#D1E7CC] p-4 mt-6'>
-                <span className='text-base text-[#808080]'><strong className='text-[#0B6D2C]'>Note:</strong> For any queries regarding results, please contact your class teacher.</span>
+                <span className='text-base text-[#808080]'>
+                    <strong className='text-[#0B6D2C]'>Note:</strong> For any queries regarding results,
+                    please contact your class teacher.
+                </span>
             </div>
-
         </section>
     )
 }
