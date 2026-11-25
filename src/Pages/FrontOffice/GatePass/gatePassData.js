@@ -236,6 +236,15 @@ export const updateStudentGatePass = (id, payload) => {
     const idx = passes.findIndex((p) => p.id === id || p.gatePassId === id)
     if (idx < 0) return { success: false, message: 'Gate pass not found.' }
 
+    const current = passes[idx]
+    const lockedStatuses = ['Approved', 'Ready for Exit', 'Exit Recorded', 'Returned', 'Rejected', 'Cancelled']
+    if (lockedStatuses.includes(String(current.status || ''))) {
+        return {
+            success: false,
+            message: 'Client rule: gate passes cannot be edited after approval / Security verify. Create a new dated pass if needed.',
+        }
+    }
+
     passes[idx] = {
         ...passes[idx],
         ...payload,

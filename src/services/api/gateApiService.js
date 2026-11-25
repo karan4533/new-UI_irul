@@ -90,6 +90,7 @@ export function mapVisitorToUi(row = {}) {
 }
 
 export function mapGatePassToUi(row = {}) {
+  const status = row.finalStatus || row.status || row.principalApproval || row.principalStatus || ''
   return {
     id: row.id || row.gatePassId || '',
     gatePassId: row.gatePassId || row.id || '',
@@ -99,14 +100,65 @@ export function mapGatePassToUi(row = {}) {
     hostel: row.hostel || row.hostelName || row.blockName || '',
     leaveType: row.leaveType || row.reason || '',
     outDate: row.outDate || row.date || '',
-    outTime: row.outTime || '',
+    outTime: row.outTime || row.expectedDepartureTime || '',
     returnDate: row.returnDate || '',
     parentApproval: row.parentApproval || row.parentStatus || '',
     principalApproval: row.principalApproval || row.principalStatus || row.status || '',
-    gateKeeperStatus: row.gateKeeperStatus || 'Pending',
-    finalStatus: row.finalStatus || row.status || '',
+    gateKeeperStatus: row.gateKeeperStatus || row.securityVerifiedBy || 'Pending',
+    finalStatus: status,
+    securityVerifiedAt: row.securityVerifiedAt || null,
+    securityVerifiedBy: row.securityVerifiedBy || null,
+    selectedApprovers: row.selectedApprovers || [],
+    raw: row,
     source: 'backend',
   }
+}
+
+/**
+ * Client rule: after approvers sanction, Security (Gate Keeper) verifies at the gate.
+ * Uses PUT /front-office/student-gate-passes/{id} (gatekeeper has frontoffice.write).
+ */
+export async function verifyStudentGatePassSecurity(publicId, options = {}) {
+  const blocked = requireLive()
+  if (blocked) return blocked
+  const { getFrontOfficeRecord, updateFrontOfficeRecord } = await import('./frontOfficeApiService.js')
+  const current = await getFrontOfficeRecord('student-gate-passes', publicId, options)
+  if (!current.success) return current
+  const row = current.data || {}
+  const status = String(row.status || row.finalStatus || row.displayStatus || '').toLowerCase()
+  const approved =
+    status.includes('approv') ||
+    status.includes('ready for exit') ||
+    Boolean(row.approvedBy)
+  if (!approved) {
+    return {
+      success: false,
+      error: 'Security can verify only after chosen approvers have sanctioned the pass.',
+      data: null,
+    }
+  }
+  if (row.securityVerifiedAt || status.includes('exit') || status.includes('verified')) {
+    return {
+      success: false,
+      error: 'This gate pass was already verified by Security.',
+      data: mapGatePassToUi(row),
+    }
+  }
+  const now = new Date().toISOString()
+  const verifier = options.verifierName || 'Gate Keeper'
+  const body = {
+    ...row,
+    status: 'Ready for Exit',
+    displayStatus: 'Ready for Exit',
+    finalStatus: 'Ready for Exit',
+    gateKeeperStatus: 'Verified',
+    securityVerifiedAt: now,
+    securityVerifiedBy: verifier,
+    securityVerifyRequired: true,
+  }
+  const saved = await updateFrontOfficeRecord('student-gate-passes', publicId, body, options)
+  if (!saved.success) return saved
+  return { ...saved, data: mapGatePassToUi(saved.data || body) }
 }
 
 async function listCollection(path, mapper, options = {}) {

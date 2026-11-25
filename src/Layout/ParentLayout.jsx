@@ -31,11 +31,18 @@ const ParentLayoutShell = () => {
             routePrefix={PARENT_ROUTE_PREFIX}
         >
             <AppShell roleKey='parent'>
+                <aside className='mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950'>
+                    <p className='font-semibold'>Client rule: no separate parent login</p>
+                    <p className='mt-1 text-xs text-amber-900'>
+                        Parent access is via the student profile only. This /parent workspace is legacy compatibility.
+                        Prefer the student portal created after Finance admission payment — new enrolments do not create parent logins.
+                    </p>
+                </aside>
                 {isLiveApiEnabled() && identitySource === 'backend' ? (
                     <IntegrationNotice
                         state='connected'
-                        title='Live Parent portal'
-                        description={`Child identity from GET /api/v1/parents/me/children (${activeStudent.admissionNumber || activeStudent.id}). LIVE: fees, TC, announcements, calendar, attendance calendar (UUID). BLOCKED: parent escalations. MOCK: Home Fun, Track Bus, hostel/transport payments, dashboard KPIs.`}
+                        title='Legacy parent workspace (live child link)'
+                        description={`Child identity from GET /api/v1/parents/me/children (${activeStudent.admissionNumber || activeStudent.id}). Prefer student-profile access per client workflow.`}
                     />
                 ) : null}
                 {isLiveApiEnabled() && identitySource === 'error' ? (

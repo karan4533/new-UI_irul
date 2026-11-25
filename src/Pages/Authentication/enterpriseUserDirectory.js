@@ -492,14 +492,15 @@ export const ENTERPRISE_USER_DIRECTORY = [
         username: 'parent',
         name: 'Raj Kumar',
         role: ROLES.PARENT,
-        roleLabel: 'Parent / Guardian',
+        roleLabel: 'Parent / Guardian (legacy — prefer student profile)',
         department: 'Parent-Teacher Association',
-        designation: 'Parent Representative (Aarav & Diya)',
+        designation: 'Legacy login — client docs: parent via student profile only',
         reportingTo: 'Principal',
         campus: 'DPS North Campus',
         category: 'Students & Parents',
         avatarColor: '#4F46E5',
         status: 'Active',
+        legacyParentLogin: true,
     },
 ]
 
