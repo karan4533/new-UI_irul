@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react'
+import { useAcademicsLiveCollection } from '../../../../services/api/useAcademicsLiveCollection'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Eye, FileUp, Upload } from 'lucide-react'
 import pdf_icon from '../../../../assets/images/pdf-icon.png'
@@ -239,6 +240,7 @@ const ViewHomeFun = ({ routeBase = DEFAULT_ROUTE_BASE, viewMode = 'teacher' }) =
     const navigate = useNavigate()
     const [studentsModal, setStudentsModal] = useState(null)
     const isStudent = viewMode === 'student'
+    const { loading: liveLoading } = useAcademicsLiveCollection('home-fun')
 
     const record = getHomeFunItemById(id)
     const submissionRecord = record ? getHomeFunSubmissionRecord(record) : null
@@ -266,7 +268,7 @@ const ViewHomeFun = ({ routeBase = DEFAULT_ROUTE_BASE, viewMode = 'teacher' }) =
 
             {!record || (!isStudent && !submissionRecord) ? (
                 <div className='bg-white rounded-2xl shadow-md p-8 text-center text-[#667085]'>
-                    Record not found or could not be loaded.
+                    {liveLoading ? 'Loading…' : 'Record not found or could not be loaded.'}
                 </div>
             ) : (
                 <>

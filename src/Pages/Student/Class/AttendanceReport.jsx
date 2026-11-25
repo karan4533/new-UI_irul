@@ -1,13 +1,45 @@
-import React, { useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Download, Calendar, ChevronLeft, ChevronRight } from 'lucide-react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import ExportModal from '../../../Common/CommonComponents/ExportModal'
 import { useActiveStudent } from '../../../context/ActiveStudentContext'
 import { getStudentAttendanceSummary } from '../../../Common/AttendanceAndLeave/attendanceLeaveData'
+import { IntegrationNotice } from '../../../Common/ui'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { listAttendance } from '../../../services/api/attendanceApiService'
+
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+const toIsoDate = (d) => {
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${d.getFullYear()}-${m}-${day}`
+}
+
+const matchesStudentRow = (row, activeStudent, activeStudentId) => {
+    if (!row) return false
+    const ids = [activeStudentId, activeStudent?.id, activeStudent?.admissionNumber, activeStudent?.admissionNo]
+        .filter(Boolean).map(String)
+    return [row.studentId, row.admissionNumber, row.id].filter(Boolean).map(String).some((v) => ids.includes(v))
+}
+
+const normalizeLiveStatus = (status) => {
+    const raw = String(status || '').toLowerCase()
+    if (raw.includes('absent')) return 'Absent'
+    if (raw.includes('holiday')) return 'Holiday'
+    if (raw.includes('late')) return 'Late Arrival'
+    if (raw.includes('present')) return 'Present'
+    return null // Unmarked / unknown → no evidence, row omitted
+}
 
 const AttendanceReport = () => {
     const { activeStudentId, activeStudent } = useActiveStudent()
+    const live = isLiveApiEnabled()
+    const [liveLogs, setLiveLogs] = useState([])
+    const [liveLoading, setLiveLoading] = useState(Boolean(live))
+    const [liveError, setLiveError] = useState('')
     const [selectMonth, setSelectMonth] = useState(new Date())
     const [statusFilter, setStatusFilter] = useState('ALL')
     const [searchTerm, setSearchTerm] = useState('')
@@ -16,11 +48,62 @@ const AttendanceReport = () => {
     const [exportModal, setExportModal] = useState(false)
 
     const summary = useMemo(() => {
+        if (live) return null
         return getStudentAttendanceSummary(activeStudentId || 'STU-2025-1001')
-    }, [activeStudentId])
+    }, [activeStudentId, live])
 
-    // Generate monthly logs dynamically for the selected month
+    // Live: only days the API actually returned a mark for — no fabricated month days.
+    const loadLiveLogs = useCallback(async (monthDate) => {
+        setLiveLoading(true)
+        setLiveError('')
+        const year = monthDate.getFullYear()
+        const month = monthDate.getMonth()
+        const daysInMonth = new Date(year, month + 1, 0).getDate()
+        const today = new Date()
+        const className = activeStudent?.className || undefined
+        const section = activeStudent?.section || undefined
+        const dates = []
+        for (let d = 1; d <= daysInMonth; d += 1) {
+            const dt = new Date(year, month, d)
+            if (dt > today) break
+            dates.push(dt)
+        }
+        const results = await Promise.all(
+            dates.map((dt) => listAttendance({ date: toIsoDate(dt), className, section }).then((res) => ({ dt, res }))),
+        )
+        const failed = results.find(({ res }) => !res.success)
+        const rows = []
+        results.forEach(({ dt, res }) => {
+            if (!res.success || !Array.isArray(res.data)) return
+            const mine = res.data.find((row) => matchesStudentRow(row, activeStudent, activeStudentId))
+            const status = normalizeLiveStatus(mine?.attendanceStatus)
+            if (!mine || !status) return
+            rows.push({
+                date: `${String(dt.getDate()).padStart(2, '0')} ${MONTH_NAMES[dt.getMonth()]} ${dt.getFullYear()}`,
+                status,
+                day: DAY_NAMES[dt.getDay()],
+                remarks: mine.inOutStatus || '—',
+                timing: '—',
+            })
+        })
+        rows.reverse()
+        setLiveLoading(false)
+        if (failed && rows.length === 0) {
+            setLiveError(typeof failed.res.error === 'string' ? failed.res.error : 'Failed to load attendance.')
+            setLiveLogs([])
+            return
+        }
+        setLiveLogs(rows)
+    }, [activeStudent, activeStudentId])
+
+    useEffect(() => {
+        if (!live) return
+        loadLiveLogs(selectMonth || new Date())
+    }, [live, loadLiveLogs, selectMonth])
+
+    // Generate monthly logs dynamically for the selected month (mock only)
     const attendanceLogs = useMemo(() => {
+        if (live) return liveLogs
         const year = selectMonth.getFullYear()
         const month = selectMonth.getMonth()
         const daysInMonth = new Date(year, month + 1, 0).getDate()
@@ -77,7 +160,7 @@ const AttendanceReport = () => {
             }
         }
         return list
-    }, [selectMonth])
+    }, [live, liveLogs, selectMonth])
 
     const filteredLogs = useMemo(() => {
         return attendanceLogs.filter((item) => {
@@ -116,6 +199,9 @@ const AttendanceReport = () => {
 
     return (
         <section className='space-y-6'>
+            {live && liveError ? (
+                <IntegrationNotice state='failed' title='Attendance report unavailable' description={liveError} />
+            ) : null}
             {/* Filter Card */}
             <div className='bg-white rounded-2xl shadow-md p-5'>
                 <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end'>
@@ -218,6 +304,17 @@ const AttendanceReport = () => {
                         </thead>
 
                         <tbody className='divide-y divide-slate-100 font-medium'>
+                            {paginatedLogs.length === 0 ? (
+                                <tr>
+                                    <td colSpan={5} className='px-4 py-8 text-center text-slate-500'>
+                                        {live && liveLoading
+                                            ? 'Loading attendance…'
+                                            : live
+                                                ? 'No attendance has been recorded for this month.'
+                                                : 'No attendance records match the selected filters.'}
+                                    </td>
+                                </tr>
+                            ) : null}
                             {paginatedLogs.map((row, idx) => (
                                 <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
                                     <td className="px-4 py-3.5 font-bold text-slate-900">{row.date}</td>
@@ -238,7 +335,7 @@ const AttendanceReport = () => {
                 {/* Pagination Controls */}
                 <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 text-xs text-slate-500'>
                     <p>
-                        Showing {(currentPage - 1) * entriesPerPage + 1} to {Math.min(currentPage * entriesPerPage, filteredLogs.length)} of {filteredLogs.length} days
+                        Showing {filteredLogs.length === 0 ? 0 : (currentPage - 1) * entriesPerPage + 1} to {Math.min(currentPage * entriesPerPage, filteredLogs.length)} of {filteredLogs.length} days
                     </p>
 
                     <div className="flex items-center gap-1.5 self-center">

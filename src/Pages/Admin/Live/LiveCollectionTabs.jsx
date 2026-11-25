@@ -41,8 +41,11 @@ const pickKeys = (rows) => {
  *
  * tabs: [{ id, label, collection: 'ops:gate-visitors' | 'front-office:student-gate-passes' }]
  */
-const LiveCollectionTabs = ({ title, description, tabs }) => {
-    const [activeId, setActiveId] = useState(tabs[0]?.id)
+const LiveCollectionTabs = ({ title, description, tabs, defaultTab = null }) => {
+    const [activeId, setActiveId] = useState(() => {
+        if (defaultTab && tabs.some((tab) => tab.id === defaultTab)) return defaultTab
+        return tabs[0]?.id
+    })
     const active = tabs.find((tab) => tab.id === activeId) || tabs[0]
     const [rows, setRows] = useState([])
     const [loading, setLoading] = useState(true)

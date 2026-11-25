@@ -998,9 +998,9 @@ const evaluateStudentGatePassOverdue = (passes) => {
 export const saveStudentGatePasses = (passes) => {
     _memoryStudentGatePasses = Array.isArray(passes) ? passes : []
     if (isLiveApiEnabled()) {
-        studentGatePassLiveStore.write(_memoryStudentGatePasses)
+        const persist = studentGatePassLiveStore.write(_memoryStudentGatePasses)
         notifyMovementSync({ type: 'GATE_PASSES_SAVED' })
-        return
+        return persist
     }
     try {
         if (typeof localStorage !== 'undefined') {
@@ -1012,12 +1012,13 @@ export const saveStudentGatePasses = (passes) => {
         /* ignore */
     }
     notifyMovementSync({ type: 'GATE_PASSES_SAVED' })
+    return Promise.resolve()
 }
 
 /**
  * Step 1: PRM creates and submits a student gate pass request
  */
-export const createStudentGatePassRequest = ({
+export const createStudentGatePassRequest = async ({
     studentId,
     studentName,
     classSection,
@@ -1110,7 +1111,7 @@ export const createStudentGatePassRequest = ({
     }
 
     const updated = [newRequest, ...currentPasses]
-    saveStudentGatePasses(updated)
+    const persistPromise = saveStudentGatePasses(updated)
 
     recordAuditLog({
         actorName: requesterName,
@@ -1154,6 +1155,7 @@ export const createStudentGatePassRequest = ({
         })
     }
 
+    if (persistPromise) await persistPromise
     return newRequest
 }
 

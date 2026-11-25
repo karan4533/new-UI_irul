@@ -63,17 +63,20 @@ export async function getLeaveRequest(requestId, options = {}) {
   return { ...res, data: mapLeaveRequestToUi(res.data || {}) }
 }
 
-export async function createLeaveRequest(body = {}, options = {}) {
+export async function createLeaveRequest(payload = {}, options = {}) {
   const blocked = requireLive()
   if (blocked) return blocked
-  const payload = {
-    leaveType: body.leaveType,
-    fromDate: body.fromDate,
-    toDate: body.toDate,
-    reason: body.reason,
+  const body = {
+    leaveType: payload.leaveType || payload.type || '',
+    fromDate: payload.fromDate || '',
+    toDate: payload.toDate || '',
+    reason: payload.reason || '',
+    totalDays: payload.totalDays ?? null,
+    hours: payload.hours != null && payload.hours !== '' ? Number(payload.hours) : null,
+    requestedTo: payload.requestedTo || null,
+    department: payload.department || null,
   }
-  if (body.hours != null && body.hours !== '') payload.hours = Number(body.hours)
-  const res = await apiClient.post('/api/v1/leave-requests', payload, { skipMock: true, ...options })
+  const res = await apiClient.post('/api/v1/leave-requests', body, { skipMock: true, ...options })
   if (!res.success) return res
   return { ...res, data: mapLeaveRequestToUi(res.data || {}) }
 }
@@ -86,24 +89,6 @@ export async function decideLeaveRequest(requestId, { decision, comment = null }
     { decision, comment },
     { skipMock: true, ...options },
   )
-  if (!res.success) return res
-  return { ...res, data: mapLeaveRequestToUi(res.data || {}) }
-}
-
-export async function createLeaveRequest(payload = {}, options = {}) {
-  const blocked = requireLive()
-  if (blocked) return blocked
-  const body = {
-    leaveType: payload.leaveType || payload.type || '',
-    fromDate: payload.fromDate || '',
-    toDate: payload.toDate || '',
-    reason: payload.reason || '',
-    totalDays: payload.totalDays ?? null,
-    hours: payload.hours ?? null,
-    requestedTo: payload.requestedTo || null,
-    department: payload.department || null,
-  }
-  const res = await apiClient.post('/api/v1/leave-requests', body, { skipMock: true, ...options })
   if (!res.success) return res
   return { ...res, data: mapLeaveRequestToUi(res.data || {}) }
 }

@@ -1,4 +1,5 @@
 import React from 'react'
+import { useAcademicsLiveCollection } from '../../../../services/api/useAcademicsLiveCollection'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import pdf_icon from '../../../../assets/images/pdf-icon.png'
@@ -24,6 +25,7 @@ const Field = ({ label, value }) => (
 const ViewSampleQuestion = ({ routeBase = DEFAULT_ROUTE_BASE }) => {
     const { id } = useParams()
     const navigate = useNavigate()
+    const { loading: liveLoading } = useAcademicsLiveCollection('sample-questions')
     const record = getSampleQuestionById(id)
 
     return (
@@ -41,7 +43,7 @@ const ViewSampleQuestion = ({ routeBase = DEFAULT_ROUTE_BASE }) => {
 
             {!record ? (
                 <div className='bg-white rounded-2xl shadow-md p-8 text-center text-[#667085]'>
-                    Sample questions record not found or could not be loaded.
+                    {liveLoading ? 'Loading…' : 'Sample questions record not found or could not be loaded.'}
                 </div>
             ) : (
                 <>

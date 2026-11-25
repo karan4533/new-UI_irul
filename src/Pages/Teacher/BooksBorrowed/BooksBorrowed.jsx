@@ -1,12 +1,18 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { Calendar, ChevronLeft, ChevronRight, Download, BookmarkPlus, X, CheckCircle2 } from 'lucide-react'
 import ExportModal from '../../../Common/CommonComponents/ExportModal'
-import { BORROWED_BOOKS_LIST, BOOK_STATUSES, statusBadgeColor } from './booksBorrowedData'
+import { getBorrowedBooks, listLiveBorrowedBooks, BOOK_STATUSES, statusBadgeColor } from './booksBorrowedData'
+import AcademicsLiveNotice from '../Components/AcademicsLiveNotice'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 import { submitBookRequest } from '../../Librarian/libraryData'
 
 const BooksBorrowed = () => {
+    const live = isLiveApiEnabled()
+    const [books, setBooks] = useState(() => getBorrowedBooks())
+    const [loading, setLoading] = useState(Boolean(live))
+    const [error, setError] = useState('')
     const [fromDate, setFromDate] = useState(null)
     const [toDate, setToDate] = useState(null)
     const [searchTerm, setSearchTerm] = useState('')
@@ -24,6 +30,27 @@ const BooksBorrowed = () => {
         reason: ''
     })
 
+    useEffect(() => {
+        let cancelled = false
+        async function load() {
+            if (!isLiveApiEnabled()) {
+                setBooks(getBorrowedBooks())
+                setLoading(false)
+                setError('')
+                return
+            }
+            setLoading(true)
+            setError('')
+            const res = await listLiveBorrowedBooks()
+            if (cancelled) return
+            setLoading(false)
+            setBooks(res.data)
+            setError(res.success ? '' : res.error)
+        }
+        load()
+        return () => { cancelled = true }
+    }, [])
+
     const handleClearFilters = () => {
         setSearchTerm('')
         setStatusFilter('All')
@@ -31,20 +58,20 @@ const BooksBorrowed = () => {
         setToDate(null)
     }
 
-    const filteredBooks = BORROWED_BOOKS_LIST.filter((b) => {
+    const filteredBooks = books.filter((b) => {
         const matchesSearch =
             !searchTerm ||
-            b.bookId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            b.bookName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            b.authorName.toLowerCase().includes(searchTerm.toLowerCase())
+            String(b.bookId || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+            String(b.bookName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+            String(b.authorName || '').toLowerCase().includes(searchTerm.toLowerCase())
 
         const matchesStatus = statusFilter === 'All' || b.status === statusFilter
         return matchesSearch && matchesStatus
     })
 
-    const handleRequestSubmit = (e) => {
+    const handleRequestSubmit = async (e) => {
         e.preventDefault()
-        submitBookRequest({
+        const res = await Promise.resolve(submitBookRequest({
             title: reqForm.title,
             author: reqForm.author,
             isbn: reqForm.isbn,
@@ -53,15 +80,20 @@ const BooksBorrowed = () => {
             requestedBy: 'Anita Verma',
             requestedByRole: 'Teacher',
             memberId: 'TEA-1001'
-        })
+        }))
         setRequestModalOpen(false)
-        setReqNotice(`Book request for "${reqForm.title}" submitted to Library Desk.`)
+        setReqNotice(
+            res?.success === false
+                ? `Book request failed: ${res.message}`
+                : `Book request for "${reqForm.title}" submitted to Library Desk.`,
+        )
         setTimeout(() => setReqNotice(''), 4000)
         setReqForm({ title: '', author: '', isbn: '', category: 'Mathematics', reason: '' })
     }
 
     return (
         <section className='space-y-6'>
+            <AcademicsLiveNotice live={live} loading={loading} error={error} label='Borrowed books' endpoint='GET /api/v1/ops/library-issues' />
             {/* Notice */}
             {reqNotice && (
                 <div className='p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-2'>

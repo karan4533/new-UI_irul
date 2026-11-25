@@ -31,8 +31,6 @@ import { CALENDAR_UPDATED_EVENT, getActivityCalendarItems } from '../Activities/
 import { isLiveApiEnabled } from '../../services/api/tokenStore'
 import { createCalendarEvent, listCalendarEvents } from '../../services/api/calendarApiService'
 import FeedbackState from '../ui/FeedbackState'
-import { isLiveApiEnabled } from '../../services/api/tokenStore'
-import { createCalendarEvent, listCalendarEvents } from '../../services/api/calendarApiService'
 import {
     format,
     formatRangeLabel,

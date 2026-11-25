@@ -11,6 +11,7 @@ import {
     filterStudentGatePasses as filterUnifiedStudentGatePasses,
     cancelStudentGatePass,
     getAvailableStudents,
+    hydrateStudentGatePassesFromApi,
     STUDENT_GATE_PASS_STATUSES
 } from '../../../Common/GatePassSecurity/gatePassSecurityData'
 import { isLiveApiEnabled } from '../../../services/api/tokenStore'
@@ -201,7 +202,7 @@ export const getStudentGatePasses = () => getUnifiedStudentGatePasses()
 
 export const getStudentGatePassById = (id) => getUnifiedStudentGatePassById(id)
 
-export const addStudentGatePass = (payload) => {
+export const addStudentGatePass = async (payload) => {
     try {
         const selectedApprovers = Array.isArray(payload.selectedApprovers) && payload.selectedApprovers.length
             ? payload.selectedApprovers
@@ -209,7 +210,10 @@ export const addStudentGatePass = (payload) => {
         if (!selectedApprovers.includes('class_teacher')) {
             selectedApprovers.unshift('class_teacher')
         }
-        const result = createStudentGatePassRequest({
+        if (isLiveApiEnabled()) {
+            await hydrateStudentGatePassesFromApi({ force: true }).catch(() => null)
+        }
+        const result = await createStudentGatePassRequest({
             studentId: payload.studentId,
             studentName: payload.studentName,
             classSection: payload.classSection,
@@ -228,7 +232,7 @@ export const addStudentGatePass = (payload) => {
         })
         return { success: true, record: result }
     } catch (err) {
-        return { success: false, message: err.message }
+        return { success: false, message: err?.message || 'Failed to submit gate pass.' }
     }
 }
 

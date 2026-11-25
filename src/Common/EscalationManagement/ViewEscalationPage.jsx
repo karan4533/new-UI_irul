@@ -46,7 +46,6 @@ const ViewEscalationPage = ({ roleKey }) => {
     const effectiveRoleKey = (roleKey === 'student' && pathnameRole) ? pathnameRole : (roleKey || pathnameRole || 'teacher')
     const roleConfig = getRoleConfig(effectiveRoleKey)
     const { currentUser } = useEscalationContext(effectiveRoleKey)
-    const live = isLiveApiEnabled()
     const { email: authEmail } = useAuth()
     const [revision, setRevision] = useState(0)
     const [liveRecord, setLiveRecord] = useState(null)
@@ -88,30 +87,20 @@ const ViewEscalationPage = ({ roleKey }) => {
 
     const isReceived = useMemo(() => {
         if (!escalation) return false
-        if (live) {
-            const mine = String(escalation.escalatedByEmail || '').toLowerCase() === String(authEmail || '').toLowerCase()
-            return !mine
+        if (isReceivedEscalation(escalation, effectiveRoleKey, currentUser)) return true
+        if (live || escalation.dataSource === 'backend') {
+            const myEmail = String(authEmail || currentUser?.email || '').trim().toLowerCase()
+            const ownerEmail = String(escalation.escalatedToUserEmail || '').trim().toLowerCase()
+            if (myEmail && ownerEmail && myEmail === ownerEmail) return true
+            const raiserEmail = String(escalation.escalatedByEmail || escalation.escalatedBy || '').trim().toLowerCase()
+            if (myEmail && raiserEmail && myEmail === raiserEmail) return false
         }
-        return isReceivedEscalation(escalation, effectiveRoleKey, currentUser)
+        return false
     }, [escalation, effectiveRoleKey, currentUser, live, authEmail])
     const isRaiser = live && Boolean(escalation) && !isReceived
     const statusOptions = live
         ? Array.from(new Set([escalation?.status, ...LIVE_RESOLUTION_STATUSES].filter((status) => status && status !== 'Closed')))
         : RECEIVED_RESOLUTION_STATUSES
-
-    const isReceived = useMemo(() => {
-        if (!escalation) return false
-        if (isReceivedEscalation(escalation, effectiveRoleKey, currentUser)) return true
-        // Live records may use backend role codes / email ownership.
-        if (live || escalation.dataSource === 'backend') {
-            const myEmail = String(currentUser?.email || '').trim().toLowerCase()
-            const ownerEmail = String(escalation.escalatedToUserEmail || '').trim().toLowerCase()
-            if (myEmail && ownerEmail && myEmail === ownerEmail) return true
-            const raiserEmail = String(escalation.escalatedBy || '').trim().toLowerCase()
-            if (myEmail && raiserEmail && myEmail === raiserEmail) return false
-        }
-        return false
-    }, [escalation, effectiveRoleKey, currentUser, live])
 
     const commitLiveStatus = async (nextStatus, note) => {
         setSaving(true)
@@ -129,33 +118,11 @@ const ViewEscalationPage = ({ roleKey }) => {
     }
 
     const commitResolution = () => {
-        if (live) {
+        if (live || escalation?.dataSource === 'backend') {
             commitLiveStatus(resolutionDraft, resolutionRemarks)
             return
         }
         const isTerminal = ['Resolved', 'Rejected'].includes(resolutionDraft)
-
-        if (live || escalation?.dataSource === 'backend') {
-            setSaving(true)
-            const res = await setEscalationStatus(id, {
-                status: resolutionDraft,
-                note: resolutionRemarks.trim() || null,
-            })
-            setSaving(false)
-            if (!res.success) {
-                toast.error(typeof res.error === 'string' ? res.error : 'The escalation status could not be updated on the server.')
-                return
-            }
-            setEscalation(res.data)
-            setResolutionEdit({
-                recordId: id,
-                status: res.data?.status || resolutionDraft,
-                remarks: res.data?.resolutionRemarks || resolutionRemarks.trim(),
-            })
-            setConfirmOpen(false)
-            toast.success(`Escalation moved to ${resolutionDraft.toLowerCase()}.`)
-            return
-        }
 
         const updated = updateEscalation(effectiveRoleKey, id, {
             status: resolutionDraft,

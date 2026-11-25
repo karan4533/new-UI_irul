@@ -19,6 +19,7 @@ import {
     getIssuedBooks,
     getBookRequests,
     saveBookRequests,
+    hydrateBookRequests,
     getCatalogBooks,
     REGISTERED_MEMBERS,
 } from '../libraryData'
@@ -41,18 +42,20 @@ const Dashboard = () => {
     const [catalogBooks, setCatalogBooks] = useState(() => (live ? [] : getCatalogBooks()))
     const [issuedList, setIssuedList] = useState(() => (live ? [] : getIssuedBooks()))
     const [members, setMembers] = useState(() => (live ? [] : REGISTERED_MEMBERS))
-    const [bookRequests, setBookRequests] = useState(getBookRequests())
+    const [bookRequests, setBookRequests] = useState(() => (live ? [] : getBookRequests()))
     const [activeTab, setActiveTab] = useState('overview')
     const [actionNotice, setActionNotice] = useState('')
     const [liveSource, setLiveSource] = useState(live ? 'loading' : 'local')
     const [liveError, setLiveError] = useState('')
     const [saving, setSaving] = useState(false)
+    const [requestsError, setRequestsError] = useState('')
 
     const refreshLive = useCallback(async () => {
         if (!isLiveApiEnabled()) {
             setCatalogBooks(getCatalogBooks())
             setIssuedList(getIssuedBooks())
             setMembers(REGISTERED_MEMBERS)
+            setBookRequests(getBookRequests())
             setLiveSource('local')
             setLiveError('')
             return
@@ -65,11 +68,15 @@ const Dashboard = () => {
             setCatalogBooks([])
             setIssuedList([])
             setMembers([])
+            setBookRequests([])
             return
         }
         setCatalogBooks(res.data.books || [])
         setIssuedList(res.data.issues || [])
         setMembers(res.data.members || [])
+        const reqRes = await hydrateBookRequests()
+        setBookRequests(reqRes.success ? getBookRequests() : [])
+        setRequestsError(reqRes.success ? '' : (typeof reqRes.error === 'string' ? reqRes.error : 'Failed to load library requests.'))
         setLiveSource('backend')
         setLiveError('')
     }, [])
@@ -97,15 +104,29 @@ const Dashboard = () => {
             .map(([name, count]) => ({ name, count: `${count} Title${count === 1 ? '' : 's'}` }))
     }, [catalogBooks])
 
-    const handleApproveRequest = (reqId) => {
+    const handleApproveRequest = async (reqId) => {
         const updated = bookRequests.map((r) =>
             r.id === reqId
                 ? { ...r, status: 'Approved & Reserved', librarianRemarks: 'Approved by Chief Librarian; reserved on Shelf R-01.' }
                 : r
         )
+        if (live) {
+            setSaving(true)
+            const res = await saveBookRequests(updated)
+            setSaving(false)
+            if (!res?.success) {
+                toast.error(res?.error || 'Server rejected book request approval.')
+                await refreshLive()
+                return
+            }
+            setBookRequests(updated)
+            setActionNotice(`Book request #${reqId} approved (server confirmed).`)
+            setTimeout(() => setActionNotice(''), 4000)
+            return
+        }
         setBookRequests(updated)
         saveBookRequests(updated)
-        setActionNotice(`Book request #${reqId} approved locally (no FastAPI book-requests collection).`)
+        setActionNotice(`Book request #${reqId} approved locally (browser demo).`)
         setTimeout(() => setActionNotice(''), 4000)
     }
 
@@ -182,7 +203,7 @@ const Dashboard = () => {
                 <IntegrationNotice
                     state='connected'
                     title='Live library dashboard'
-                    description='Catalog, circulation, overdue, and member KPIs hydrate from GET /api/v1/ops/library-books|issues|members. Mark Returned persists via full-collection PUT. Book requisitions and SMS reminders remain browser MOCK (no FastAPI collection/gateway).'
+                    description='Catalog, circulation, overdue, and member KPIs hydrate from GET /api/v1/ops/library-books|issues|members. Mark Returned persists via full-collection PUT. Book requisitions hydrate from GET /api/v1/ops/library-requests (empty is OK). SMS reminders remain UI-only (no gateway).'
                 />
             ) : liveSource === 'error' ? (
                 <IntegrationNotice
@@ -449,7 +470,7 @@ const Dashboard = () => {
                                     ...cat,
                                     color: 'bg-slate-50 text-slate-700',
                                 }))
-                                : [
+                                : live ? [] : [
                                     { name: 'Science & Physics', count: '480 Titles', color: 'bg-blue-50 text-blue-700' },
                                     { name: 'Mathematics', count: '320 Titles', color: 'bg-purple-50 text-purple-700' },
                                     { name: 'Literature & Fiction', count: '290 Titles', color: 'bg-rose-50 text-rose-700' },
@@ -473,11 +494,19 @@ const Dashboard = () => {
 
             {activeTab === 'requests' && (
                 <div className='space-y-4'>
-                    <IntegrationNotice
-                        state='mock'
-                        title='Book requisitions — LOCAL ONLY / MOCK'
-                        description='No FastAPI library-requests collection. Approve/reserve stays in browser localStorage only.'
-                    />
+                    {live ? (
+                        <IntegrationNotice
+                            state={requestsError ? 'failed' : 'connected'}
+                            title={requestsError ? 'Book requisitions unavailable' : 'Book requisitions — live'}
+                            description={requestsError || 'Queue loaded from GET /api/v1/ops/library-requests; approvals persist via full-collection PUT. An empty queue means no requests on the server.'}
+                        />
+                    ) : (
+                        <IntegrationNotice
+                            state='mock'
+                            title='Book requisitions — browser demo'
+                            description='Demo requisition queue stored in browser localStorage. Enable live API for library-requests.'
+                        />
+                    )}
                     <div className='bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden'>
                         <div className='p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2'>
                             <div>
@@ -506,6 +535,13 @@ const Dashboard = () => {
                                     </tr>
                                 </thead>
                                 <tbody className='divide-y divide-slate-100'>
+                                    {bookRequests.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={7} className='px-4 py-8 text-center text-xs text-slate-500'>
+                                                {liveSource === 'loading' ? 'Loading book requests…' : 'No book requisitions in the queue.'}
+                                            </td>
+                                        </tr>
+                                    ) : null}
                                     {bookRequests.map((req) => (
                                         <tr key={req.id} className='hover:bg-slate-50/50'>
                                             <td className='px-4 py-3.5 font-bold text-slate-800'>{req.id}</td>
@@ -539,6 +575,7 @@ const Dashboard = () => {
                                                 {req.status === 'Pending Review' ? (
                                                     <button
                                                         type='button'
+                                                        disabled={saving}
                                                         onClick={() => handleApproveRequest(req.id)}
                                                         className='inline-flex items-center gap-1 px-3 py-1.5 bg-[#515DEF] hover:bg-[#434ecb] text-white text-xs font-bold rounded-lg shadow-xs transition-all'
                                                     >

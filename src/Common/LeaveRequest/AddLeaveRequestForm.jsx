@@ -13,8 +13,6 @@ import IntegrationNotice from '../ui/IntegrationNotice'
 import PageHeader from '../ui/PageHeader'
 import Surface from '../ui/Surface'
 import WorkflowContextBar from '../ui/WorkflowContextBar'
-import { createLeaveRequest as createLeaveRequestApi } from '../../services/api/leaveApiService'
-import { isLiveApiEnabled } from '../../services/api/tokenStore'
 
 const inputClass = 'text-sm font-normal text-[#1E1E1E] border border-[#D9D9D9] rounded-md px-2 py-3 w-full'
 const readOnlyInputClass = `${inputClass} bg-[#F9FAFB] cursor-not-allowed`
@@ -51,9 +49,6 @@ export default function AddLeaveRequestForm({ roleKey: roleKeyProp }) {
     const [saving, setSaving] = useState(false)
 
     const totalDays = useMemo(() => calculateTotalDays(fromDate, toDate), [fromDate, toDate])
-
-    const live = isLiveApiEnabled()
-    const [submitting, setSubmitting] = useState(false)
 
     const handleSubmit = async () => {
         if (!leaveType) {
@@ -92,17 +87,18 @@ export default function AddLeaveRequestForm({ roleKey: roleKeyProp }) {
         }
 
         if (live) {
-            setSubmitting(true)
+            setSaving(true)
             const res = await createLeaveRequestApi({
                 leaveType: payload.leaveType,
-                fromDate: fromDate instanceof Date ? fromDate.toISOString().slice(0, 10) : payload.fromDate,
-                toDate: toDate instanceof Date ? toDate.toISOString().slice(0, 10) : payload.toDate,
+                fromDate: toIsoDate(fromDate) || payload.fromDate,
+                toDate: toIsoDate(toDate) || payload.toDate,
                 reason: payload.reason,
                 totalDays: payload.totalDays,
+                hours,
                 department: payload.department,
                 requestedTo: payload.requestedTo,
             })
-            setSubmitting(false)
+            setSaving(false)
             if (!res.success) {
                 toast.error(typeof res.error === 'string' ? res.error : 'Leave request could not be submitted.')
                 return
@@ -190,7 +186,7 @@ export default function AddLeaveRequestForm({ roleKey: roleKeyProp }) {
 
             <div className='flex flex-col-reverse gap-2 sm:flex-row sm:justify-end'>
                 <button type='button' onClick={() => navigate(routes.myList)} className='bg-white text-[#515DEF] text-sm px-12 py-2 rounded-md border border-[#515DEF] hover:bg-[#515DEF] hover:text-white transition-all duration-200 cursor-pointer md:w-auto w-full'>Cancel</button>
-                <button type='button' disabled={submitting} onClick={handleSubmit} className='bg-[#515DEF] text-white text-sm px-12 py-2 rounded-md border border-[#515DEF] hover:opacity-90 transition-all duration-200 cursor-pointer md:w-auto w-full disabled:opacity-50'>{submitting ? 'Submitting…' : 'Submit Request'}</button>
+                <button type='button' disabled={saving} onClick={handleSubmit} className='bg-[#515DEF] text-white text-sm px-12 py-2 rounded-md border border-[#515DEF] hover:opacity-90 transition-all duration-200 cursor-pointer md:w-auto w-full disabled:opacity-50'>{saving ? 'Submitting…' : 'Submit Request'}</button>
             </div>
         </section>
     )

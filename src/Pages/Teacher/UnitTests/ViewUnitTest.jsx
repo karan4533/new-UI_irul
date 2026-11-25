@@ -4,6 +4,7 @@ import { ArrowLeft } from 'lucide-react'
 import pdf_icon from '../../../assets/images/pdf-icon.png'
 import UnitTestForm from './Components/UnitTestForm'
 import { formatTestDate, getUnitTestById, ROUTE_BASE } from './unitTestsData'
+import { useAcademicsLiveCollection } from '../../../services/api/useAcademicsLiveCollection'
 
 const Section = ({ title, children }) => (
     <div className='bg-white rounded-2xl shadow-md p-4'>
@@ -24,6 +25,7 @@ const Field = ({ label, value }) => (
 const ViewUnitTest = () => {
     const { id } = useParams()
     const navigate = useNavigate()
+    useAcademicsLiveCollection('unit-tests')
     const record = getUnitTestById(id)
 
     return (

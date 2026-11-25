@@ -1,4 +1,9 @@
-export const TEACHER_TIMETABLE_INFO = {
+import { canUseAcademicsApi } from '../../../services/api/academicsApiService.js'
+import { readAcademicsCollection } from '../../../services/api/academicsLiveCollection.js'
+
+const LIVE_COLLECTION = 'class-timetables'
+
+export const DEFAULT_TEACHER_TIMETABLE_INFO = {
     employeeId: 'TEA-1001',
     teacherName: 'Anita Verma',
     subject: 'Mathematics',
@@ -6,7 +11,7 @@ export const TEACHER_TIMETABLE_INFO = {
 
 export const WEEKLY_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
-export const TIME_SLOTS = [
+export const DEFAULT_TIME_SLOTS = [
     { time: '09:00 AM -\n09:45 AM', label: '09:00 AM - 09:45 AM' },
     { time: '09:45 AM -\n10:30 AM', label: '09:45 AM - 10:30 AM' },
     { time: '10:45 AM -\n11:30 AM', label: '10:45 AM - 11:30 AM' },
@@ -14,7 +19,7 @@ export const TIME_SLOTS = [
     { time: '01:15 PM -\n02:00 PM', label: '01:15 PM - 02:00 PM' },
 ]
 
-export const WEEKLY_SCHEDULE = {
+export const DEFAULT_WEEKLY_SCHEDULE = {
     '09:00 AM - 09:45 AM': {
         Monday: { subject: 'Mathematics', className: '10-A' },
         Tuesday: { subject: 'Mathematics', className: '10-B' },
@@ -71,7 +76,7 @@ export const SUBJECT_COLORS = {
     'Co-Curricular / Clubs': 'bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-100',
 }
 
-export const ALLOTTED_CLASS_INFO = {
+export const DEFAULT_ALLOTTED_CLASS_INFO = {
     className: 'Class 10-A',
     classTeacher: 'Anita Verma',
     room: 'Room 304, Secondary Wing',
@@ -79,7 +84,7 @@ export const ALLOTTED_CLASS_INFO = {
     academicYear: '2026-27'
 }
 
-export const ALLOTTED_CLASS_SCHEDULE = {
+export const DEFAULT_ALLOTTED_CLASS_SCHEDULE = {
     '09:00 AM - 09:45 AM': {
         Monday: { subject: 'Mathematics', teacher: 'Anita Verma', room: '304' },
         Tuesday: { subject: 'English', teacher: 'Sandy Selva', room: '304' },
@@ -120,4 +125,94 @@ export const ALLOTTED_CLASS_SCHEDULE = {
         Friday: { subject: 'Co-Curricular / Clubs', teacher: 'Club In-Charge', room: 'Activity Hall' },
         Saturday: { subject: 'Mathematics', teacher: 'Anita Verma', room: '304' },
     },
+}
+
+const EMPTY_TEACHER_INFO = { employeeId: '', teacherName: '', subject: '' }
+const EMPTY_ALLOTTED_INFO = { className: '', classTeacher: '', room: '', totalStudents: 0, academicYear: '' }
+
+/** Mock-only demo values; empty shells when live. */
+export const getTeacherTimetableInfo = () => (canUseAcademicsApi() ? EMPTY_TEACHER_INFO : DEFAULT_TEACHER_TIMETABLE_INFO)
+export const getAllottedClassInfo = () => (canUseAcademicsApi() ? EMPTY_ALLOTTED_INFO : DEFAULT_ALLOTTED_CLASS_INFO)
+
+const toMinutes = (value) => {
+    const text = String(value || '').trim()
+    const match = text.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i)
+    if (!match) return null
+    let hours = Number(match[1])
+    const minutes = Number(match[2])
+    const meridiem = match[3]?.toUpperCase()
+    if (meridiem === 'PM' && hours < 12) hours += 12
+    if (meridiem === 'AM' && hours === 12) hours = 0
+    return hours * 60 + minutes
+}
+
+const to12Hour = (value) => {
+    const total = toMinutes(value)
+    if (total === null) return String(value || '')
+    const hours24 = Math.floor(total / 60)
+    const minutes = total % 60
+    const meridiem = hours24 >= 12 ? 'PM' : 'AM'
+    const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12
+    return `${String(hours12).padStart(2, '0')}:${String(minutes).padStart(2, '0')} ${meridiem}`
+}
+
+const normalize = (value) => String(value || '').trim().toLowerCase()
+
+const classLabelOf = (timetable, timeline) => {
+    const className = String(timeline.className || timetable.className || '').replace(/^(grade|class)\s*/i, '').trim()
+    const section = String(timeline.section || timetable.section || '').trim()
+    return [className, section].filter(Boolean).join('-')
+}
+
+/**
+ * Best-effort mapping of live /academics/class-timetables rows into the weekly grid shape.
+ * Returns { timeSlots, schedule } — both empty when nothing matches.
+ */
+export const buildLiveWeeklyView = (timetables, { mode = 'teacher', teacherName = '', teacherEmail = '' } = {}) => {
+    const nameKey = normalize(teacherName)
+    const emailKey = normalize(teacherEmail)
+    const slotMap = new Map()
+    const schedule = {}
+
+    ;(Array.isArray(timetables) ? timetables : []).forEach((timetable) => {
+        const ownerMatches = (nameKey && normalize(timetable.ownerTeacherName) === nameKey)
+            || (emailKey && normalize(timetable.ownerTeacherEmail) === emailKey)
+        const timelines = Array.isArray(timetable.timelines) ? timetable.timelines : []
+        timelines.forEach((timeline) => {
+            if (!timeline || !timeline.day || !timeline.startTime || !timeline.endTime) return
+            const teacherMatches = (nameKey && normalize(timeline.teacher) === nameKey)
+                || (emailKey && normalize(timeline.teacherEmail) === emailKey)
+            if (mode === 'teacher' ? !teacherMatches : !ownerMatches) return
+
+            const start = to12Hour(timeline.startTime)
+            const end = to12Hour(timeline.endTime)
+            const label = `${start} - ${end}`
+            if (!slotMap.has(label)) {
+                slotMap.set(label, { time: `${start} -\n${end}`, label, sortKey: toMinutes(timeline.startTime) ?? 0 })
+            }
+            schedule[label] = schedule[label] || {}
+            schedule[label][timeline.day] = {
+                subject: timeline.subject || '',
+                className: classLabelOf(timetable, timeline),
+                teacher: timeline.teacher || '',
+                room: timeline.room || '',
+            }
+        })
+    })
+
+    const timeSlots = [...slotMap.values()]
+        .sort((a, b) => a.sortKey - b.sortKey)
+        .map(({ time, label }) => ({ time, label }))
+    return { timeSlots, schedule }
+}
+
+/** Live: readAcademicsCollection('class-timetables') mapped to a weekly view. Mock: demo grids. */
+export const getWeeklyView = (mode, identity = {}) => {
+    if (canUseAcademicsApi()) {
+        return buildLiveWeeklyView(readAcademicsCollection(LIVE_COLLECTION), { mode, ...identity })
+    }
+    return {
+        timeSlots: DEFAULT_TIME_SLOTS,
+        schedule: mode === 'teacher' ? DEFAULT_WEEKLY_SCHEDULE : DEFAULT_ALLOTTED_CLASS_SCHEDULE,
+    }
 }

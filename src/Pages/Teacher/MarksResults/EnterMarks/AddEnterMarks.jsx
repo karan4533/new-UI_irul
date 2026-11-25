@@ -1,12 +1,19 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import EnterMarksForm from './Components/EnterMarksForm'
-import { addMarksEntry } from './enterMarksData'
+import { addMarksEntry, MARKS_ENTRY_LIVE_UNAVAILABLE } from './enterMarksData'
+import { FeedbackState } from '../../../../Common/ui'
+import { isLiveApiEnabled } from '../../../../services/api/tokenStore'
 
 const AddEnterMarks = () => {
     const navigate = useNavigate()
+    const [error, setError] = useState('')
 
     const handleSave = (values) => {
+        if (isLiveApiEnabled()) {
+            setError(MARKS_ENTRY_LIVE_UNAVAILABLE)
+            return
+        }
         addMarksEntry(values)
         navigate('/teacher/marks-results/enter-marks')
     }
@@ -15,6 +22,7 @@ const AddEnterMarks = () => {
         <section>
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <h2 className='text-xl font-semibold text-black'>Enter Marks Information</h2>
+                {error ? <FeedbackState compact kind='error' title='Marks not saved' description={error} className='mt-4' /> : null}
                 <EnterMarksForm onSubmit={handleSave} />
             </div>
 

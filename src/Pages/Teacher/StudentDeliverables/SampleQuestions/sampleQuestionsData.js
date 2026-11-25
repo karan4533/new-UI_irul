@@ -1,4 +1,8 @@
 import { CLASSES, SECTIONS, SUBJECTS } from '../../AssignedClass/assignedClassData'
+import { canUseAcademicsApi } from '../../../../services/api/academicsApiService.js'
+import { readAcademicsCollection, writeAcademicsCollection } from '../../../../services/api/academicsLiveCollection.js'
+
+const LIVE_COLLECTION = 'sample-questions'
 
 const STORAGE_KEY = 'teacher-student-deliverables-sample-questions'
 
@@ -8,6 +12,9 @@ export const DEFAULT_ROUTE_BASE = ROUTE_BASE
 const DEFAULT_SAMPLE_QUESTIONS = []
 
 export const getSampleQuestions = () => {
+    if (canUseAcademicsApi()) {
+        return readAcademicsCollection(LIVE_COLLECTION) // [] until hydrated
+    }
     try {
         const stored = localStorage.getItem(STORAGE_KEY)
         if (stored) return JSON.parse(stored)
@@ -18,6 +25,10 @@ export const getSampleQuestions = () => {
 }
 
 export const saveSampleQuestions = (records) => {
+    if (canUseAcademicsApi()) {
+        writeAcademicsCollection(LIVE_COLLECTION, records)
+        return
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(records))
 }
 

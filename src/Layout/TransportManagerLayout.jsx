@@ -12,7 +12,7 @@ const TransportManagerLayout = () => {
                 <IntegrationNotice
                     state='connected'
                     title='Live Transport Manager workspace'
-                    description='LIVE: drivers, vehicles, routes, student assignments, duties, maintenance, expenses ledger, driver fuel/maintenance approvals (/api/v1/ops/transport-*). MOCK: GPS/ProTrack Track Bus, budget helper, NOC, fake /api/v1/transport/*. No admin-user management.'
+                    description='LIVE: drivers, vehicles, routes, student assignments, duties, maintenance, expenses, ProTrack365 Track Bus (/api/v1/ops/transport-* + /api/v1/protrack). Remaining mock: budget helper / NOC where no API exists.'
                 />
             ) : null}
             <TransportManagerRoutes />

@@ -1,5 +1,5 @@
 import React from 'react'
-import NotificationsListView from '../../../Common/Notifications/NotificationsListView'
+import StaffNotificationsPage from '../../../Common/Notifications/StaffNotificationsPage'
 import {
     NOTIFICATION_TYPES,
     STUDENT_NOTIFICATIONS,
@@ -7,8 +7,9 @@ import {
 } from './notificationsData'
 
 const NotificationsList = () => (
-    <NotificationsListView
-        notifications={STUDENT_NOTIFICATIONS}
+    <StaffNotificationsPage
+        title='Notifications'
+        fallback={STUDENT_NOTIFICATIONS}
         notificationTypes={NOTIFICATION_TYPES}
         typeBadgeColor={typeBadgeColor}
     />

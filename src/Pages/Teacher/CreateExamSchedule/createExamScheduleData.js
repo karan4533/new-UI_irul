@@ -1,4 +1,6 @@
 import { CLASSES, SECTIONS, SUBJECTS } from '../AssignedClass/assignedClassData'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore.js'
+import { createExam, listExams } from '../../../services/api/examsApiService.js'
 
 export const APPROVAL_STATUSES = ['Approved', 'Pending', 'Rejected']
 
@@ -8,6 +10,7 @@ export const approvalBadgeColor = {
     Approved: 'bg-[#4CAF5033] text-[#4CAF50]',
     Pending: 'bg-[#FF980033] text-[#FF9800]',
     Rejected: 'bg-[#FF000033] text-[#FF0000]',
+    Denied: 'bg-[#FF000033] text-[#FF0000]',
 }
 
 const STORAGE_KEY = 'teacher-exam-schedules'
@@ -205,11 +208,31 @@ const DEFAULT_EXAM_SCHEDULE_LIST = [
     },
 ].map(withTimetable)
 
+const isLive = () => isLiveApiEnabled()
+
+const mapLiveExam = (exam = {}) => withTimetable({
+    ...exam,
+    classLabel: exam.classLabel || exam.className || '',
+    teacherName: exam.teacherName || exam.submittedBy || '',
+    subjects: Array.isArray(exam.subjects) ? exam.subjects : [],
+})
+
+/** Live-only: GET /api/v1/exams → schedule rows (empty until API returns; never seeded). */
+export const listLiveExamSchedules = async () => {
+    const res = await listExams()
+    if (!res.success) {
+        return { success: false, error: typeof res.error === 'string' ? res.error : 'Failed to load exam schedules.', data: [] }
+    }
+    return { success: true, data: (Array.isArray(res.data) ? res.data : []).map(mapLiveExam) }
+}
+
 export const saveExamSchedules = (schedules) => {
+    if (isLive()) return
     localStorage.setItem(STORAGE_KEY, JSON.stringify(schedules))
 }
 
 export const getExamSchedules = () => {
+    if (isLive()) return [] // live list comes from listLiveExamSchedules()
     try {
         const stored = localStorage.getItem(STORAGE_KEY)
         if (stored) {
@@ -226,7 +249,22 @@ export const getExamSchedules = () => {
     return seeded
 }
 
+const toIsoDate = (value) => {
+    const [day, month, year] = String(value || '').split('-')
+    return day && month && year ? `${year}-${month}-${day}` : ''
+}
+
+/** Live: POST /api/v1/exams (returns a promise). Mock: localStorage record. */
 export const addExamSchedule = (payload) => {
+    if (isLive()) {
+        return createExam({
+            name: payload.examName,
+            examType: payload.examType || 'MIDTERM',
+            className: payload.section ? `${payload.className}-${payload.section}` : payload.className,
+            startDateIso: toIsoDate(payload.examDate),
+            endDateIso: toIsoDate(payload.endDate),
+        })
+    }
     const list = getExamSchedules()
     const maxId = list.reduce((max, item) => {
         const num = parseInt(String(item.examId).replace('EXM-', ''), 10)

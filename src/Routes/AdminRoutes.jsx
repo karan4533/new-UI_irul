@@ -7,6 +7,10 @@ import LiveCollectionTabs from '../Pages/Admin/Live/LiveCollectionTabs'
 import LiveDocuments from '../Pages/Admin/Documents/LiveDocuments'
 import LiveReportsAnalytics from '../Pages/Admin/Reports/LiveReportsAnalytics'
 import LiveReportCards from '../Pages/Admin/Reports/LiveReportCards'
+import LiveStaffDirectory from '../Pages/Admin/FrontOffice/LiveStaffDirectory'
+import LiveExamDetailsList from '../Pages/Admin/ExamDetails/LiveExamDetailsList'
+import LiveSubjects from '../Pages/Admin/Subjects/LiveSubjects'
+import DemoUnavailable from '../Pages/Admin/DemoUnavailable'
 import { EnterpriseOperationsRoutes } from './EnterpriseOperationsRoutes'
 import AdmissionList from '../Pages/Admin/FrontOffice/AdminssionList/AdminssionList'
 import AdmissionEnquiry from '../Pages/Admin/FrontOffice/AdmissionEnquiry/AdmissionEnquiry'
@@ -106,6 +110,14 @@ const HOSTEL_TABS = [
     { id: 'payments', label: 'Hostel payments', collection: 'ops:hostel-payments' },
 ]
 
+const TRANSPORT_TABS = [
+    { id: 'vehicles', label: 'Vehicles', collection: 'ops:transport-vehicles' },
+    { id: 'routes', label: 'Routes', collection: 'ops:transport-routes' },
+    { id: 'drivers', label: 'Drivers', collection: 'ops:transport-drivers' },
+    { id: 'assignments', label: 'Student assignments', collection: 'ops:transport-student-assignments' },
+    { id: 'duties', label: 'Duties', collection: 'ops:transport-duties' },
+]
+
 const AdminRoutes = () => {
     const live = isLiveApiEnabled()
     return (
@@ -129,6 +141,20 @@ const AdminRoutes = () => {
                     <Route path='/admin/documents/edit-student-documents/:id' element={<Navigate to='/admin/documents/student-documents' replace />} />
                     <Route path='/admin/documents/add-employee-documents' element={<Navigate to='/admin/documents/employee-documents' replace />} />
                     <Route path='/admin/documents/edit-employee-documents/:id' element={<Navigate to='/admin/documents/employee-documents' replace />} />
+                    <Route path='/admin/exam-details/exam-details-list' element={<LiveExamDetailsList />} />
+                    <Route path='/admin/class/subjects' element={<LiveSubjects />} />
+                    <Route path='/admin/front-office/teachers-list' element={<LiveStaffDirectory title='Teachers' description='Teachers from the HR employee portal.' matchers={['teacher', 'faculty', 'educator']} />} />
+                    <Route path='/admin/front-office/librarian-list' element={<LiveStaffDirectory title='Librarians' description='Library staff from the HR employee portal.' matchers={['librarian', 'library']} />} />
+                    <Route path='/admin/front-office/driver-list' element={<LiveStaffDirectory title='Drivers' description='Transport drivers from the HR employee portal.' matchers={['driver', 'transport']} />} />
+                    <Route path='/admin/front-office/add-teacher' element={<Navigate to='/admin/user-management/employee-database' replace />} />
+                    <Route path='/admin/front-office/add-librarian' element={<Navigate to='/admin/user-management/employee-database' replace />} />
+                    <Route path='/admin/front-office/add-driver' element={<Navigate to='/admin/user-management/employee-database' replace />} />
+                    <Route path='/admin/class/online-class' element={<DemoUnavailable title='Online class is not in live Admin' description='No campus online-class API. Use Class Details / Timetable for live academic scheduling.' links={[{ to: '/admin/class/class-details', label: 'Open class details' }, { to: '/admin/class/timetable-list', label: 'Open timetable' }]} />} />
+                    <Route path='/admin/class/add-online-class' element={<Navigate to='/admin/class/online-class' replace />} />
+                    <Route path='/admin/class/extended-class' element={<DemoUnavailable title='Extended class is not in live Admin' description='No campus extended-class API. Use Class Details for live class/section masters.' links={[{ to: '/admin/class/class-details', label: 'Open class details' }]} />} />
+                    <Route path='/admin/class/add-extended-class' element={<Navigate to='/admin/class/extended-class' replace />} />
+                    <Route path='/admin/student/class-fee-details' element={<DemoUnavailable title='Class fee matrix is not in live Admin' description='Fee masters live under Finance. Use Admin Expenses / Account Head fee screens.' links={[{ to: '/admin/expenses', label: 'Open expenses workspace' }, { to: '/admin/dashboard', label: 'Admin dashboard' }]} />} />
+                    <Route path='/admin/student/add-class-fee-details' element={<Navigate to='/admin/student/class-fee-details' replace />} />
                 </>
             ) : null}
 
@@ -138,12 +164,12 @@ const AdminRoutes = () => {
             <Route path="/admin/front-office/admission-enquiry" element={<AdmissionEnquiry />} />
             <Route path="/admin/front-office/admission-enquiry/view/:id" element={<ViewAdmissionEnquiry />} />
             <Route path="/admin/front-office/view-admission-enquiry/:id" element={<ViewAdmissionEnquiry />} />
-            <Route path="/admin/front-office/teachers-list" element={<TeachersList />} />
-            <Route path="/admin/front-office/add-teacher" element={<AddTeacher />} />
-            <Route path="/admin/front-office/librarian-list" element={<LibrarianList />} />
-            <Route path="/admin/front-office/add-librarian" element={<AddLibrarian />} />
-            <Route path="/admin/front-office/driver-list" element={<DriverList />} />
-            <Route path="/admin/front-office/add-driver" element={<AddDriverList />} />
+            {!live ? <Route path="/admin/front-office/teachers-list" element={<TeachersList />} /> : null}
+            {!live ? <Route path="/admin/front-office/add-teacher" element={<AddTeacher />} /> : null}
+            {!live ? <Route path="/admin/front-office/librarian-list" element={<LibrarianList />} /> : null}
+            {!live ? <Route path="/admin/front-office/add-librarian" element={<AddLibrarian />} /> : null}
+            {!live ? <Route path="/admin/front-office/driver-list" element={<DriverList />} /> : null}
+            {!live ? <Route path="/admin/front-office/add-driver" element={<AddDriverList />} /> : null}
 
             {/* Attendance */}
             <Route path="/admin/attendance/students-list" element={isLiveApiEnabled() ? <AttendanceAndLeaveWorkspace defaultTab="overview" /> : <StudentsList />} />
@@ -159,21 +185,32 @@ const AdminRoutes = () => {
             <Route path="/admin/academic/teacher-allocation/edit/:employeeId" element={<EditTeacherAllocation />} />
             <Route path="/admin/class/class-details" element={<ClassDetails />} />
             <Route path="/admin/class/add-class-details" element={<AddClassDetails />} />
-            <Route path="/admin/class/online-class" element={<OnlineClass />} />
-            <Route path="/admin/class/add-online-class" element={<AddOnlineClass />} />
-            <Route path="/admin/class/extended-class" element={<ExtendedClass />} />
-            <Route path="/admin/class/add-extended-class" element={<AddExtendedClass />} />
+            {!live ? <Route path="/admin/class/online-class" element={<OnlineClass />} /> : null}
+            {!live ? <Route path="/admin/class/add-online-class" element={<AddOnlineClass />} /> : null}
+            {!live ? <Route path="/admin/class/extended-class" element={<ExtendedClass />} /> : null}
+            {!live ? <Route path="/admin/class/add-extended-class" element={<AddExtendedClass />} /> : null}
             <Route path="/admin/class/timetable-list" element={<TimeTable />} />
             <Route path="/admin/class/add-timetable" element={<AddTimeTable />} />
-            <Route path="/admin/class/subjects" element={<Subjects />} />
+            {!live ? <Route path="/admin/class/subjects" element={<Subjects />} /> : null}
             <Route path="/admin/class/add-subjects" element={<AddSubjects />} />
             {!live ? <Route path="/admin/student-evaluation/report-cards" element={<ReportCardGenerator />} /> : null}
 
-            {/* Library Details */}
-            <Route path="/admin/library-details/book-list" element={<BookList />} />
-            <Route path="/admin/library-details/add-book" element={<AddBooks />} />
-            <Route path="/admin/library-details/issued-book" element={<IssuedBooks />} />
-            <Route path="/admin/library-details/add-issued-book" element={<AddIssueBook />} />
+            {/* Library Details — live mode points Admin at librarian workspace SoT */}
+            {live ? (
+                <>
+                    <Route path="/admin/library-details/book-list" element={<DemoUnavailable title='Use live library workspace' description='Admin library demo lists are not the campus SoT. Open the librarian portal modules or keep book inventory via ops library collections from that role.' links={[{ to: '/admin/dashboard', label: 'Admin dashboard' }]} />} />
+                    <Route path="/admin/library-details/add-book" element={<Navigate to='/admin/library-details/book-list' replace />} />
+                    <Route path="/admin/library-details/issued-book" element={<DemoUnavailable title='Use live issued-books flow' description='Issued books are managed live in the Librarian portal.' links={[{ to: '/admin/dashboard', label: 'Admin dashboard' }]} />} />
+                    <Route path="/admin/library-details/add-issued-book" element={<Navigate to='/admin/library-details/issued-book' replace />} />
+                </>
+            ) : (
+                <>
+                    <Route path="/admin/library-details/book-list" element={<BookList />} />
+                    <Route path="/admin/library-details/add-book" element={<AddBooks />} />
+                    <Route path="/admin/library-details/issued-book" element={<IssuedBooks />} />
+                    <Route path="/admin/library-details/add-issued-book" element={<AddIssueBook />} />
+                </>
+            )}
 
             {/* Student & User Management */}
             <Route path="/admin/user-management/student-database" element={<AdminStudentDatabaseList />} />
@@ -181,8 +218,8 @@ const AdminRoutes = () => {
             <Route path="/admin/user-management/employee-database" element={<AdminEmployeeDatabaseList />} />
             <Route path="/admin/user-management/employee-database/view/:id" element={<AdminViewEmployeeDatabase />} />
             <Route path="/admin/student/student-details" element={<Navigate to="/admin/user-management/student-database" replace />} />
-            <Route path="/admin/student/class-fee-details" element={<ClassFeeDetails />} />
-            <Route path="/admin/student/add-class-fee-details" element={<AddClassFeeDetails />} />
+            {!live ? <Route path="/admin/student/class-fee-details" element={<ClassFeeDetails />} /> : null}
+            {!live ? <Route path="/admin/student/add-class-fee-details" element={<AddClassFeeDetails />} /> : null}
             <Route path="/admin/student/parent-details" element={<Navigate to="/admin/user-management/student-database" replace />} />
             <Route path="/admin/student/student-transfer" element={<StudentTransfer />} />
             <Route path="/admin/student/add-student-transfer" element={<AddStudentTransfer />} />
@@ -213,16 +250,30 @@ const AdminRoutes = () => {
             <Route path="/admin/documents/edit-employee-documents/:id" element={<EditEmployeeDocuments />} />
 
             {/* Transport */}
-            <Route path="/admin/transport/vehicle-details" element={<VehicleDetailsList />} />
-            <Route path="/admin/transport/add-vehicle-details" element={<AddVehicleDetails />} />
-            <Route path="/admin/transport/route-details" element={<RouteDetailsList />} />
-            <Route path="/admin/transport/add-route-details" element={<AddRouteDetails />} />
-            <Route path='/admin/transport/route-data-list' element={<RouteDataList />} />
-            <Route path='/admin/transport/assigned-route-list' element={<AssignedRouteList />} />
-            <Route path='/admin/transport/assign-route' element={<AssignRoute />} />
+            {live ? (
+                <>
+                    <Route path="/admin/transport/vehicle-details" element={<LiveCollectionTabs title='Transport' description='Campus transport vehicles, routes, drivers and assignments.' tabs={TRANSPORT_TABS} />} />
+                    <Route path="/admin/transport/add-vehicle-details" element={<Navigate to='/admin/transport/vehicle-details' replace />} />
+                    <Route path="/admin/transport/route-details" element={<LiveCollectionTabs title='Transport routes' description='Live transport routes and related ops collections.' tabs={TRANSPORT_TABS} defaultTab='routes' />} />
+                    <Route path="/admin/transport/add-route-details" element={<Navigate to='/admin/transport/route-details' replace />} />
+                    <Route path='/admin/transport/route-data-list' element={<LiveCollectionTabs title='Transport route data' description='Live transport routes.' tabs={TRANSPORT_TABS} defaultTab='routes' />} />
+                    <Route path='/admin/transport/assigned-route-list' element={<LiveCollectionTabs title='Student transport assignments' description='Live student-to-route assignments.' tabs={TRANSPORT_TABS} defaultTab='assignments' />} />
+                    <Route path='/admin/transport/assign-route' element={<Navigate to='/admin/transport/assigned-route-list' replace />} />
+                </>
+            ) : (
+                <>
+                    <Route path="/admin/transport/vehicle-details" element={<VehicleDetailsList />} />
+                    <Route path="/admin/transport/add-vehicle-details" element={<AddVehicleDetails />} />
+                    <Route path="/admin/transport/route-details" element={<RouteDetailsList />} />
+                    <Route path="/admin/transport/add-route-details" element={<AddRouteDetails />} />
+                    <Route path='/admin/transport/route-data-list' element={<RouteDataList />} />
+                    <Route path='/admin/transport/assigned-route-list' element={<AssignedRouteList />} />
+                    <Route path='/admin/transport/assign-route' element={<AssignRoute />} />
+                </>
+            )}
 
             {/* Exam Details */}
-            <Route path='/admin/exam-details/exam-details-list' element={<ExamDetailsList />} />
+            {!live ? <Route path='/admin/exam-details/exam-details-list' element={<ExamDetailsList />} /> : null}
             <Route path='/admin/exam-details/add-exam-details' element={<AddExamDetails />} />
 
             {/* Centralized Finance & Expenses Integration (Document 7: Finance owns ledgers, Admin owns governance) */}

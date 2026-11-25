@@ -1,6 +1,10 @@
 import { CLASSES, SECTIONS, SUBJECTS } from '../../AssignedClass/assignedClassData.js'
 import { SUBMISSIONS_LIST } from './homeFunSubmissionsData.js'
 import { getStoredSubmissions } from '../../../Student/StudentDeliverables/studentHomeFunSubmissions.js'
+import { canUseAcademicsApi } from '../../../../services/api/academicsApiService.js'
+import { readAcademicsCollection, writeAcademicsCollection } from '../../../../services/api/academicsLiveCollection.js'
+
+const LIVE_COLLECTION = 'home-fun'
 
 const STORAGE_KEY = 'teacher-home-fun-deliverables'
 
@@ -31,6 +35,9 @@ const parseListDate = (value) => {
 }
 
 export const getHomeFunItems = () => {
+    if (canUseAcademicsApi()) {
+        return readAcademicsCollection(LIVE_COLLECTION) // [] until hydrated
+    }
     try {
         const stored = localStorage.getItem(STORAGE_KEY)
         if (stored) return JSON.parse(stored)
@@ -41,6 +48,10 @@ export const getHomeFunItems = () => {
 }
 
 export const saveHomeFunItems = (items) => {
+    if (canUseAcademicsApi()) {
+        writeAcademicsCollection(LIVE_COLLECTION, items)
+        return
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(items))
 }
 
@@ -54,7 +65,8 @@ export const getHomeFunSubmissionRecord = (record) => {
     if (!record) return null
 
     const classSection = `${record.className || '10'}-${record.section || 'A'}`
-    const matched = SUBMISSIONS_LIST.find(
+    const live = canUseAcademicsApi()
+    const matched = live ? null : SUBMISSIONS_LIST.find(
         (item) =>
             item.assignmentId === record.assignmentId
             || item.assignmentTitle === record.assignmentTitle,
@@ -66,7 +78,7 @@ export const getHomeFunSubmissionRecord = (record) => {
     const lateList = [...(baseDetails.late || [])]
 
     // Merge live stored student submissions
-    const stored = getStoredSubmissions().filter(
+    const stored = (live ? [] : getStoredSubmissions()).filter(
         (sub) => (record.assignmentId && sub.assignmentId === record.assignmentId) ||
                  (record.assignmentTitle && sub.assignmentTitle === record.assignmentTitle)
     )

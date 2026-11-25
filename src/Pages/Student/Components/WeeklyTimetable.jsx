@@ -3,6 +3,9 @@ import { addDays, addWeeks, format, isToday, startOfWeek, subWeeks } from "date-
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { getPeriodSubject, getPeriodTeacher } from "../../../Common/ClassTimetable/classTimetableUtils";
 import TimetablePeriodCell from "../../../Common/ClassTimetable/TimetablePeriodCell";
+import { useAcademicsLiveCollection } from "../../../services/api/useAcademicsLiveCollection";
+import { useAuth } from "../../../context/AuthContext";
+import { STUDENT_TIMETABLE_COLLECTION, getLiveStudentWeeklyView } from "./studentTimetableLive";
 
 /**
  * WeeklyTimetable Component
@@ -79,12 +82,19 @@ const DEFAULT_SUBJECT_COLORS = {
 
 export default function WeeklyTimetable({
     days = DEFAULT_DAYS,
-    timeSlots = DEFAULT_TIME_SLOTS,
-    schedule = DEFAULT_SCHEDULE,
+    timeSlots: timeSlotsProp,
+    schedule: scheduleProp,
     subjectColors = DEFAULT_SUBJECT_COLORS,
     weekDate: initialWeekDate = new Date(),
     showWeekNavigation = true,
 }) {
+    const { user } = useAuth();
+    const { live, loading, error, version } = useAcademicsLiveCollection(STUDENT_TIMETABLE_COLLECTION);
+    // Live: derive grid from academics `class-timetables`; never fall back to DEFAULT_SCHEDULE.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const liveView = useMemo(() => (live ? getLiveStudentWeeklyView(user) : null), [live, user, version]);
+    const timeSlots = timeSlotsProp ?? (live ? liveView?.timeSlots ?? [] : DEFAULT_TIME_SLOTS);
+    const schedule = scheduleProp ?? (live ? liveView?.schedule ?? {} : DEFAULT_SCHEDULE);
     const [hoveredCell, setHoveredCell] = useState(null);
     const [currentWeekDate, setCurrentWeekDate] = useState(initialWeekDate);
 
@@ -128,6 +138,16 @@ export default function WeeklyTimetable({
                     </button>
                 </div>
             )}
+            {live && error ? (
+                <p className="px-4 py-3 text-sm text-rose-700 bg-rose-50 border-b border-rose-200" role="alert">
+                    Could not load class timetable: {error}
+                </p>
+            ) : null}
+            {live && !error && timeSlots.length === 0 ? (
+                <p className="px-4 py-6 text-sm text-center text-gray-500">
+                    {loading ? 'Loading class timetable…' : 'No approved class timetable has been published for your class yet.'}
+                </p>
+            ) : null}
             <div className="overflow-x-auto">
                 <table className="w-full min-w-[700px] border-collapse">
                     <thead>

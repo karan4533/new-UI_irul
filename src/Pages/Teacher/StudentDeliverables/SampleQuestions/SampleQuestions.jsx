@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { useAcademicsLiveCollection } from '../../../../services/api/useAcademicsLiveCollection'
 import { NavLink, useLocation } from 'react-router-dom'
+import AcademicsLiveNotice from '../../Components/AcademicsLiveNotice'
 import { ChevronLeft, ChevronRight, Download, EllipsisIcon, Plus } from 'lucide-react'
 import Dropdown from '../../../../Common/CommonComponents/Dropdown'
 import ExportModal from '../../../../Common/CommonComponents/ExportModal'
@@ -274,21 +276,25 @@ const SampleQuestionsList = ({ items, routeBase, viewMode }) => {
 const SampleQuestions = ({ routeBase = DEFAULT_ROUTE_BASE, viewMode = 'teacher' }) => {
     const location = useLocation()
     const [items, setItems] = useState(() => getSampleQuestions())
+    // Live: hydrate academics `sample-questions` on mount (student portal reuses this teacher screen).
+    const { live, loading, error, version: liveVersion } = useAcademicsLiveCollection('sample-questions', location.key)
 
     useEffect(() => {
         setItems(getSampleQuestions())
-    }, [location.key])
+    }, [location.key, liveVersion])
 
     if (items.length === 0) {
         return (
             <section>
-                <SampleQuestionsEmpty routeBase={routeBase} viewMode={viewMode} />
+                <AcademicsLiveNotice live={live} loading={loading} error={error} label='Sample questions' endpoint='GET /api/v1/academics/sample-questions' />
+                {live && loading ? null : <SampleQuestionsEmpty routeBase={routeBase} viewMode={viewMode} />}
             </section>
         )
     }
 
     return (
         <section>
+            <AcademicsLiveNotice live={live} loading={loading} error={error} label='Sample questions' endpoint='GET /api/v1/academics/sample-questions' />
             <SampleQuestionsList items={items} routeBase={routeBase} viewMode={viewMode} />
         </section>
     )

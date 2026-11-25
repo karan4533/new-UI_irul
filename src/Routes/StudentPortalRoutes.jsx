@@ -39,6 +39,10 @@ import LostAndFoundWorkspace from '../Common/LostAndFound/LostAndFoundWorkspace'
 import ReportCardGenerator from '../Common/Academic/ReportCardGenerator'
 import StudentProfileView from '../Pages/Student/Profile/StudentProfileView'
 import AttendanceAndLeaveWorkspace from '../Common/AttendanceAndLeave/AttendanceAndLeaveWorkspace'
+import MyLeaveRequestsList from '../Common/LeaveRequest/MyLeaveRequestsList'
+import AddLeaveRequestForm from '../Common/LeaveRequest/AddLeaveRequestForm'
+import ViewMyLeaveRequestPage from '../Common/LeaveRequest/ViewMyLeaveRequestPage'
+import { isLiveApiEnabled } from '../services/api/tokenStore'
 
 const StudentPortalRoutes = ({
     routePrefix,
@@ -55,6 +59,7 @@ const StudentPortalRoutes = ({
     trackBusWithRouteDetails = false,
 }) => {
     const DashboardComponent = dashboardComponent ?? StudentDashboard
+    const leaveRoleKey = routePrefix.replace('/', '') === 'parent' ? 'parent' : 'student'
 
     return (
         <ReactRoutes>
@@ -70,9 +75,27 @@ const StudentPortalRoutes = ({
             <Route path={`${routePrefix}/class/timetable-list`} element={<TimeTableDetails weeklyOnly={timetableWeeklyOnly} />} />
             <Route path={`${routePrefix}/class/attendance-list`} element={<AttendanceDetails />} />
             <Route path={`${routePrefix}/class/attendance-report`} element={<AttendanceReport />} />
-            <Route path={`${routePrefix}/apply-leave`} element={<AttendanceAndLeaveWorkspace userRole={routePrefix.replace('/', '') === 'parent' ? 'parent' : 'student'} roleOverride={routePrefix.replace('/', '') === 'parent' ? 'parent' : 'student'} defaultTab="my-leave" />} />
-            {routePrefix !== '/student' && (
-                <Route path="/student/apply-leave" element={<AttendanceAndLeaveWorkspace userRole="student" roleOverride="student" defaultTab="my-leave" />} />
+            {/* Live: formal leave module (student/parent roleKey). Mock keeps the demo workspace. */}
+            {isLiveApiEnabled() ? (
+                <>
+                    <Route path={`${routePrefix}/apply-leave`} element={<MyLeaveRequestsList roleKey={leaveRoleKey} />} />
+                    <Route path={`${routePrefix}/apply-leave/add`} element={<AddLeaveRequestForm roleKey={leaveRoleKey} />} />
+                    <Route path={`${routePrefix}/apply-leave/view/:id`} element={<ViewMyLeaveRequestPage roleKey={leaveRoleKey} />} />
+                    {routePrefix !== '/student' && (
+                        <>
+                            <Route path="/student/apply-leave" element={<MyLeaveRequestsList roleKey="student" />} />
+                            <Route path="/student/apply-leave/add" element={<AddLeaveRequestForm roleKey="student" />} />
+                            <Route path="/student/apply-leave/view/:id" element={<ViewMyLeaveRequestPage roleKey="student" />} />
+                        </>
+                    )}
+                </>
+            ) : (
+                <>
+                    <Route path={`${routePrefix}/apply-leave`} element={<AttendanceAndLeaveWorkspace userRole={leaveRoleKey} roleOverride={leaveRoleKey} defaultTab="my-leave" />} />
+                    {routePrefix !== '/student' && (
+                        <Route path="/student/apply-leave" element={<AttendanceAndLeaveWorkspace userRole="student" roleOverride="student" defaultTab="my-leave" />} />
+                    )}
+                </>
             )}
 
             <Route path={`${routePrefix}/student-evaluation/exam-result`} element={<ResultDetails />} />

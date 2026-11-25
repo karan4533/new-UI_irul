@@ -1,13 +1,20 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import ExamScheduleForm from './Components/ExamScheduleForm'
+import { FeedbackState } from '../../../Common/ui'
 import { addExamSchedule } from './createExamScheduleData'
 
 const AddExamSchedule = () => {
     const navigate = useNavigate()
+    const [error, setError] = useState('')
 
-    const handleSave = (values) => {
-        addExamSchedule(values)
+    const handleSave = async (values) => {
+        setError('')
+        const result = await addExamSchedule(values)
+        if (result && result.success === false) {
+            setError(typeof result.error === 'string' ? result.error : 'Could not create exam schedule.')
+            return
+        }
         navigate('/teacher/examination/create-schedule')
     }
 
@@ -15,6 +22,7 @@ const AddExamSchedule = () => {
         <section>
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <h2 className='text-xl font-semibold text-black'>Create Exam Schedule Information</h2>
+                {error ? <FeedbackState compact kind='error' title='Exam schedule not saved' description={error} className='mt-4' /> : null}
                 <ExamScheduleForm onSubmit={handleSave} />
             </div>
 

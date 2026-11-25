@@ -2,6 +2,7 @@ import React from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import { getOnlineClassById, statusBadgeColor } from './onlineClassData'
+import { useAcademicsLiveCollection } from '../../../services/api/useAcademicsLiveCollection'
 
 const Section = ({ title, children }) => (
     <div className='bg-white rounded-2xl shadow-md p-4'>
@@ -22,6 +23,7 @@ const Field = ({ label, value }) => (
 const ViewOnlineClass = () => {
     const { id } = useParams()
     const navigate = useNavigate()
+    useAcademicsLiveCollection('online-classes')
     const record = getOnlineClassById(id)
 
     return (

@@ -1,16 +1,17 @@
-import React, { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { Calendar, Users, GraduationCap, ShieldCheck } from 'lucide-react'
 import TeacherWeeklyTimetable from './Components/TeacherWeeklyTimetable'
 import TimetableChangePanel from '../../../Common/ClassTimetable/TimetableChangePanel'
 import { useAuth } from '../../../context/AuthContext'
+import AcademicsLiveNotice from '../Components/AcademicsLiveNotice'
+import { useAcademicsLiveCollection } from '../../../services/api/useAcademicsLiveCollection'
 import {
-    TEACHER_TIMETABLE_INFO,
-    WEEKLY_SCHEDULE,
-    ALLOTTED_CLASS_INFO,
-    ALLOTTED_CLASS_SCHEDULE,
+    getTeacherTimetableInfo,
+    getAllottedClassInfo,
+    getWeeklyView,
 } from './classRoutineData'
 
-const COORDINATOR_SUPERVISED_CLASSES = [
+const DEMO_COORDINATOR_SUPERVISED_CLASSES = [
     { id: '10-A', name: 'Grade 10 - Section A', teacher: 'Anita Verma', room: 'Room 304', students: 42 },
     { id: '10-B', name: 'Grade 10 - Section B', teacher: 'Mr. Ravi Kumar', room: 'Room 305', students: 40 },
     { id: '9-A', name: 'Grade 9 - Section A', teacher: 'Ms. Anitha Verma', room: 'Room 204', students: 38 },
@@ -21,6 +22,22 @@ const COORDINATOR_SUPERVISED_CLASSES = [
 
 const ClassRoutine = () => {
     const { user } = useAuth()
+    const { live, loading, error, version } = useAcademicsLiveCollection('class-timetables')
+    const TEACHER_TIMETABLE_INFO = getTeacherTimetableInfo()
+    const ALLOTTED_CLASS_INFO = getAllottedClassInfo()
+    const COORDINATOR_SUPERVISED_CLASSES = live
+        ? [{ id: '', name: 'No supervised class', teacher: '—', room: '—', students: 0 }]
+        : DEMO_COORDINATOR_SUPERVISED_CLASSES
+    const myView = useMemo(
+        () => getWeeklyView('teacher', { teacherName: user?.name || '', teacherEmail: user?.email || '' }),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [user?.name, user?.email, version],
+    )
+    const classView = useMemo(
+        () => getWeeklyView('class', { teacherName: user?.name || '', teacherEmail: user?.email || '' }),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [user?.name, user?.email, version],
+    )
     const roleKey = (user?.role || '').toLowerCase()
     const isCoordinator = roleKey.includes('coordinator')
     const isPrincipal = roleKey.includes('principal') || roleKey.includes('director') || roleKey.includes('admin')
@@ -32,6 +49,7 @@ const ClassRoutine = () => {
 
     return (
         <section className='space-y-6'>
+            <AcademicsLiveNotice live={live} loading={loading} error={error} label='Class timetables' endpoint='GET /api/v1/academics/class-timetables' />
             {/* Header & Role Scope Context */}
             <div className='bg-white rounded-2xl shadow-sm border border-slate-100 p-5'>
                 <div className='flex flex-col md:flex-row md:items-center justify-between gap-4'>
@@ -52,10 +70,12 @@ const ClassRoutine = () => {
                         </div>
                         <p className='text-sm text-slate-500 mt-1'>
                             {activeTab === 'my-schedule'
-                                ? `Personal teaching schedule for ${user?.name || TEACHER_TIMETABLE_INFO.teacherName} (${TEACHER_TIMETABLE_INFO.employeeId})`
+                                ? `Personal teaching schedule for ${user?.name || TEACHER_TIMETABLE_INFO.teacherName}${TEACHER_TIMETABLE_INFO.employeeId ? ` (${TEACHER_TIMETABLE_INFO.employeeId})` : ''}`
                                 : isCoordinator
                                 ? `Supervised wing class routine: ${activeSupervisedClass.name} (Mentor: ${activeSupervisedClass.teacher} • ${activeSupervisedClass.room})`
-                                : `Allotted class routine for ${ALLOTTED_CLASS_INFO.className} (Class Teacher: ${ALLOTTED_CLASS_INFO.classTeacher} • ${ALLOTTED_CLASS_INFO.room} • ${ALLOTTED_CLASS_INFO.totalStudents} Students)`}
+                                : (ALLOTTED_CLASS_INFO.className
+                                    ? `Allotted class routine for ${ALLOTTED_CLASS_INFO.className} (Class Teacher: ${ALLOTTED_CLASS_INFO.classTeacher} • ${ALLOTTED_CLASS_INFO.room} • ${ALLOTTED_CLASS_INFO.totalStudents} Students)`
+                                    : 'Class routine from live class timetables you own.')}
                         </p>
                     </div>
 
@@ -83,7 +103,7 @@ const ClassRoutine = () => {
                             }`}
                         >
                             <Users size={16} />
-                            {isCoordinator ? 'Supervised Wing Classes' : `Allotted Class (${ALLOTTED_CLASS_INFO.className})`}
+                            {isCoordinator ? 'Supervised Wing Classes' : (ALLOTTED_CLASS_INFO.className ? `Allotted Class (${ALLOTTED_CLASS_INFO.className})` : 'Allotted Class')}
                         </button>
                     </div>
                 </div>
@@ -111,19 +131,21 @@ const ClassRoutine = () => {
             </div>
 
             <TimetableChangePanel
-                requestedBy={user?.name || TEACHER_TIMETABLE_INFO.teacherName}
+                requestedBy={user?.name || TEACHER_TIMETABLE_INFO.teacherName || 'Teacher'}
                 requestedByRole={isCoordinator ? 'Academic Coordinator' : 'Class Teacher'}
             />
 
             {activeTab === 'my-schedule' ? (
                 <TeacherWeeklyTimetable
-                    schedule={WEEKLY_SCHEDULE}
+                    schedule={myView.schedule}
+                    timeSlots={myView.timeSlots}
                     mode='teacher'
                     teacherName={user?.name || TEACHER_TIMETABLE_INFO.teacherName}
                 />
             ) : (
                 <TeacherWeeklyTimetable
-                    schedule={ALLOTTED_CLASS_SCHEDULE}
+                    schedule={classView.schedule}
+                    timeSlots={classView.timeSlots}
                     mode='class'
                     teacherName={user?.name || TEACHER_TIMETABLE_INFO.teacherName}
                 />

@@ -41,7 +41,6 @@ const ViewApproval = () => {
     const [validationMessage, setValidationMessage] = useState('')
     const [confirmationMessage, setConfirmationMessage] = useState('')
     const [loading, setLoading] = useState(Boolean(live))
-    const [saving, setSaving] = useState(false)
 
     useEffect(() => {
         if (!isLiveApiEnabled()) {

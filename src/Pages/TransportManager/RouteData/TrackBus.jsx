@@ -1,11 +1,18 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, RefreshCw } from 'lucide-react'
 import BusTrackingMap from './Components/BusTrackingMap'
 import { FeedbackState, IntegrationNotice } from '../../../Common/ui'
+import useProtrackLive from '../../../Common/Transport/useProtrackLive'
+import {
+    SCHOOL_CAMPUS,
+    parseMapLatLng,
+    resolveDestinationPosition,
+} from '../../../Common/Transport/schoolCampusLocation'
 import { isLiveApiEnabled } from '../../../services/api/tokenStore'
-import { listTransportRoutes } from '../../../services/api/transportApiService'
+import { listTransportRoutes, listTransportVehicles } from '../../../services/api/transportApiService'
 import { getRouteById } from '../RouteManagement/routeManagementData'
+import { VEHICLES } from '../VehicleManagement/vehicleManagementData'
 
 const Field = ({ label, value }) => (
     <div className='flex flex-col gap-y-1'>
@@ -14,39 +21,55 @@ const Field = ({ label, value }) => (
     </div>
 )
 
-const TRACKING_PRESETS = [
-    { busIndex: 54, stats: { progress: '~55%', distanceLeft: '3.2 km', eta: '~8 min', speed: '32 km/h' } },
-    { busIndex: 38, stats: { progress: '~40%', distanceLeft: '4.1 km', eta: '~11 min', speed: '28 km/h' } },
-    { busIndex: 62, stats: { progress: '~65%', distanceLeft: '2.4 km', eta: '~6 min', speed: '35 km/h' } },
-    { busIndex: 28, stats: { progress: '~30%', distanceLeft: '5.0 km', eta: '~14 min', speed: '26 km/h' } },
-]
+const plateKey = (value) => String(value || '').replace(/[\s-]/g, '').toUpperCase()
 
 const TrackBus = () => {
     const { id } = useParams()
     const navigate = useNavigate()
-    const live = isLiveApiEnabled()
+    const apiLive = isLiveApiEnabled()
     const [route, setRoute] = useState(null)
-    const [loading, setLoading] = useState(Boolean(live))
+    const [vehicle, setVehicle] = useState(null)
+    const [loading, setLoading] = useState(Boolean(apiLive))
     const [error, setError] = useState('')
 
     const load = useCallback(async () => {
         if (!isLiveApiEnabled()) {
-            setRoute(getRouteById(id))
+            const localRoute = getRouteById(id)
+            setRoute(localRoute || null)
+            const vehicles = VEHICLES
+            setVehicle(
+                vehicles.find((row) => (
+                    (localRoute?.vehicleId && row.id === localRoute.vehicleId)
+                    || plateKey(row.vehicleNumber) === plateKey(localRoute?.vehicleNumber)
+                )) || null,
+            )
             setLoading(false)
-            setError('')
+            setError(localRoute ? '' : 'Route not found.')
             return
         }
         setLoading(true)
         setError('')
-        const res = await listTransportRoutes()
+        const [routesRes, vehiclesRes] = await Promise.all([
+            listTransportRoutes(),
+            listTransportVehicles(),
+        ])
         setLoading(false)
-        if (!res.success) {
+        if (!routesRes.success) {
             setRoute(null)
-            setError(typeof res.error === 'string' ? res.error : 'Failed to load routes.')
+            setVehicle(null)
+            setError(typeof routesRes.error === 'string' ? routesRes.error : 'Failed to load routes.')
             return
         }
-        const found = (res.data || []).find((row) => String(row.id) === String(id)) || null
+        const found = (routesRes.data || []).find((row) => String(row.id) === String(id)) || null
+        const vehicles = vehiclesRes.success && Array.isArray(vehiclesRes.data) ? vehiclesRes.data : []
+        const matchedVehicle = found
+            ? vehicles.find((row) => (
+                (found.vehicleId && String(row.id) === String(found.vehicleId))
+                || plateKey(row.vehicleNumber) === plateKey(found.vehicleNumber)
+            )) || null
+            : null
         setRoute(found)
+        setVehicle(matchedVehicle)
         if (!found) setError('Route not found on the server.')
     }, [id])
 
@@ -54,7 +77,25 @@ const TrackBus = () => {
         load()
     }, [load])
 
-    const trackingPreset = TRACKING_PRESETS[(parseInt(String(route?.id || '1').split('-').pop() || '1', 10) - 1) % TRACKING_PRESETS.length]
+    const preferredImei = route?.imei || route?.gpsImei || vehicle?.imei || vehicle?.gpsImei || ''
+    const preferredPlate = route?.vehicleNumber || vehicle?.vehicleNumber || ''
+    const gps = useProtrackLive({
+        panel: 'admin',
+        preferredImei,
+        preferredPlate,
+    })
+
+    const hasLiveGps = Boolean(gps.livePosition)
+    const stats = useMemo(() => (
+        hasLiveGps
+            ? gps.stats
+            : {
+                progress: '—',
+                distanceLeft: gps.loading ? 'Loading ProTrack…' : 'Waiting for GPS fix',
+                eta: '—',
+                speed: '—',
+            }
+    ), [gps.loading, gps.stats, hasLiveGps])
 
     return (
         <section className='space-y-6'>
@@ -67,25 +108,35 @@ const TrackBus = () => {
                     <ArrowLeft size={18} />
                     Back to Route Data
                 </button>
+                <button
+                    type='button'
+                    onClick={() => gps.refresh()}
+                    className='inline-flex items-center gap-2 text-sm text-[#515DEF] border border-[#D9D9D9] rounded-md px-4 py-2 cursor-pointer'
+                >
+                    <RefreshCw size={16} /> Refresh GPS
+                </button>
             </div>
 
-            <IntegrationNotice
-                state='mock'
-                title='ProTrack GPS not configured — fail closed'
-                description='Map position, ETA and speed below are demonstration presets. No live GPS telemetry is read or written.'
-            />
-            {error && live ? (
-                <IntegrationNotice state='failed' title='Could not load route metadata' description={error} />
-            ) : null}
-            {live && route && !error ? (
+            {apiLive ? (
                 <IntegrationNotice
-                    state='connected'
-                    title='Route metadata from live ops'
-                    description='Route fields come from GET /api/v1/ops/transport-routes; map motion remains mock.'
+                    state={gps.error && !hasLiveGps ? 'failed' : hasLiveGps ? 'connected' : gps.loading ? 'syncing' : 'connected'}
+                    title={hasLiveGps ? 'ProTrack365 live GPS' : gps.loading ? 'Connecting to ProTrack365' : 'ProTrack365 GPS'}
+                    description={
+                        hasLiveGps
+                            ? `Polling /api/v1/protrack/track for IMEI ${gps.imei || preferredImei}.`
+                            : (gps.error || 'Map shows live fix when IMEI/plate matches a ProTrack device. Demo geometry is never labeled live.')
+                    }
                 />
-            ) : null}
+            ) : (
+                <IntegrationNotice
+                    state='mock'
+                    title='Live API off'
+                    description='Enable VITE_USE_MOCK=false to poll ProTrack365 through FastAPI.'
+                />
+            )}
 
-            {loading ? <FeedbackState kind='loading' title='Loading route' description='Fetching route details…' /> : null}
+            {error ? <IntegrationNotice state='failed' title='Route metadata unavailable' description={error} /> : null}
+            {loading ? <FeedbackState kind='loading' title='Loading route' description='Fetching route and vehicle details…' /> : null}
 
             {!loading && !route ? (
                 <div className='bg-white rounded-2xl shadow-md p-8 text-center text-[#667085]'>
@@ -102,6 +153,16 @@ const TrackBus = () => {
                             {route.distance ? ` · ${route.distance}` : ''}
                             {route.estimatedTime ? ` · ${route.estimatedTime}` : ''}
                         </p>
+                        {gps.imei ? (
+                            <p className='text-sm text-[#667085] mt-3'>
+                                Mapped ProTrack IMEI: {gps.imei}
+                                {route.vehicleNumber ? ` · plate ${route.vehicleNumber}` : ''}
+                            </p>
+                        ) : (
+                            <p className='text-sm text-[#667085] mt-3'>
+                                Store a verified IMEI (or matching plate) on this route/vehicle before live tracking can poll.
+                            </p>
+                        )}
                     </div>
 
                     <div className='bg-white rounded-2xl shadow-md p-4'>
@@ -113,10 +174,17 @@ const TrackBus = () => {
                             <Field label='Driver Contact' value={route.driverContact} />
                             <Field label='Start Location' value={route.startLocation} />
                             <Field label='End Location' value={route.endLocation} />
-                            <Field label='Pick Up Time' value={route.pickUpTime} />
-                            <Field label='Drop Time' value={route.dropTime} />
-                            <Field label='Total Stops' value={route.totalStops} />
-                            <Field label='Support Staff' value={route.supportStaff} />
+                            <Field label='IMEI' value={gps.imei || preferredImei || '—'} />
+                            <Field
+                                label='GPS Status'
+                                value={
+                                    hasLiveGps
+                                        ? gps.liveStatusLabel || 'Live fix'
+                                        : gps.loading
+                                            ? 'Loading…'
+                                            : (gps.error || 'Waiting for ProTrack fix')
+                                }
+                            />
                         </div>
                     </div>
 
@@ -128,12 +196,19 @@ const TrackBus = () => {
                             driverContact={route.driverContact}
                             startLocation={route.startLocation}
                             startSubtitle='Pickup Point'
-                            endLocation={route.endLocation}
+                            endLocation={route.endLocation || SCHOOL_CAMPUS.name}
                             endSubtitle='School Campus'
-                            busLabel={route.vehicleId || route.vehicleNumber}
-                            stats={trackingPreset.stats}
-                            busIndex={trackingPreset.busIndex}
-                            trackingMode='demo'
+                            startPosition={parseMapLatLng(route.startLat, route.startLng)}
+                            endPosition={resolveDestinationPosition({
+                                endLat: route.endLat,
+                                endLng: route.endLng,
+                                endLocation: route.endLocation || SCHOOL_CAMPUS.name,
+                            })}
+                            busLabel={route.vehicleNumber || route.vehicleId}
+                            stats={stats}
+                            livePosition={gps.livePosition}
+                            liveStatusLabel={gps.liveStatusLabel}
+                            trackingMode={hasLiveGps ? 'live' : 'waiting'}
                         />
                     </div>
                 </>

@@ -1,5 +1,7 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
+import AcademicsLiveNotice from '../Components/AcademicsLiveNotice'
+import { useAcademicsLiveCollection } from '../../../services/api/useAcademicsLiveCollection'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { Calendar, ChevronLeft, ChevronRight, EllipsisIcon, Plus, Download, CheckCircle2, Eye, Edit2, Trash2, X } from 'lucide-react'
@@ -25,7 +27,12 @@ const ExtraClass = ({ canCreate = true, listPath = null, addPath = null }) => {
     )
     const effectiveAddPath = addPath || `${basePath}/add`
 
+    const { live, loading, error, version } = useAcademicsLiveCollection('extra-classes', location.pathname)
     const [classesList, setClassesList] = useState(getExtraClasses)
+
+    useEffect(() => {
+        setClassesList(getExtraClasses())
+    }, [location.pathname, version])
     const [searchTerm, setSearchTerm] = useState('')
     const [selectedSubject, setSelectedSubject] = useState('')
     const [selectedClass, setSelectedClass] = useState('')
@@ -75,6 +82,7 @@ const ExtraClass = ({ canCreate = true, listPath = null, addPath = null }) => {
 
     return (
         <section>
+            <AcademicsLiveNotice live={live} loading={loading} error={error} label='Extra classes' endpoint='GET /api/v1/academics/extra-classes' />
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='flex justify-between md:items-center sm:items-stretch md:flex-row sm:flex-col flex-col gap-y-4'>
                     <button

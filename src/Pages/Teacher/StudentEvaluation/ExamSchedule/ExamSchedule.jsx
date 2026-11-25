@@ -1,8 +1,10 @@
-import React, { useState, useMemo } from 'react'
+import React, { useEffect, useState, useMemo } from 'react'
 import { Calendar, Search, Filter, BookOpen, Clock, Eye, X, CheckCircle2, AlertCircle } from 'lucide-react'
 import { toast } from 'react-toastify'
 import ExamTimeTableModal from '../../../Teacher/CreateExamSchedule/Components/ExamTimeTableModal'
-import { buildTimetableFromSubjects } from '../../../Teacher/CreateExamSchedule/createExamScheduleData'
+import { buildTimetableFromSubjects, listLiveExamSchedules } from '../../../Teacher/CreateExamSchedule/createExamScheduleData'
+import AcademicsLiveNotice from '../../Components/AcademicsLiveNotice'
+import { isLiveApiEnabled } from '../../../../services/api/tokenStore'
 
 const STORAGE_KEY = 'schoolerp_evaluation_exam_schedules_v1'
 
@@ -80,6 +82,7 @@ const DEFAULT_EVAL_SCHEDULES = [
 ]
 
 const loadSchedules = () => {
+    if (isLiveApiEnabled()) return [] // live: listExams() only, never DEFAULT_EVAL_SCHEDULES
     try {
         const stored = localStorage.getItem(STORAGE_KEY)
         if (stored) return JSON.parse(stored)
@@ -93,16 +96,44 @@ const statusBadgeClasses = {
     'Pending': 'bg-amber-50 text-amber-700 border-amber-200',
     'In Progress': 'bg-blue-50 text-blue-700 border-blue-200',
     'Completed': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    'Approved': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    'Denied': 'bg-rose-50 text-rose-700 border-rose-200',
 }
 
 const ExamSchedule = () => {
+    const live = isLiveApiEnabled()
     const [schedules, setSchedules] = useState(loadSchedules)
+    const [loading, setLoading] = useState(Boolean(live))
+    const [error, setError] = useState('')
+
+    useEffect(() => {
+        let cancelled = false
+        async function load() {
+            if (!isLiveApiEnabled()) return
+            setLoading(true)
+            setError('')
+            const res = await listLiveExamSchedules()
+            if (cancelled) return
+            setLoading(false)
+            setSchedules(res.data.map((item) => ({
+                ...item,
+                status: item.approvalStatus || 'Pending',
+            })))
+            setError(res.success ? '' : res.error)
+        }
+        load()
+        return () => { cancelled = true }
+    }, [])
     const [search, setSearch] = useState('')
     const [selectedGrade, setSelectedGrade] = useState('All')
     const [selectedStatus, setSelectedStatus] = useState('All')
     const [modalExam, setModalExam] = useState(null)
 
     const handleStatusChange = (examId, newStatus) => {
+        if (live) {
+            toast.info('Exam status is managed through the approval workflow when live.')
+            return
+        }
         const next = schedules.map((item) => {
             if (item.examId === examId || item.id === examId) {
                 return { ...item, status: newStatus }
@@ -123,10 +154,10 @@ const ExamSchedule = () => {
             if (search.trim()) {
                 const q = search.toLowerCase()
                 const match =
-                    item.examId.toLowerCase().includes(q) ||
-                    item.examName.toLowerCase().includes(q) ||
-                    item.teacherName.toLowerCase().includes(q) ||
-                    item.classLabel.toLowerCase().includes(q)
+                    String(item.examId || '').toLowerCase().includes(q) ||
+                    String(item.examName || '').toLowerCase().includes(q) ||
+                    String(item.teacherName || '').toLowerCase().includes(q) ||
+                    String(item.classLabel || '').toLowerCase().includes(q)
                 if (!match) return false
             }
             if (selectedGrade !== 'All' && item.className !== selectedGrade) return false
@@ -151,6 +182,7 @@ const ExamSchedule = () => {
 
     return (
         <section className='space-y-6'>
+            <AcademicsLiveNotice live={live} loading={loading} error={error} label='Exam schedules' endpoint='GET /api/v1/exams' />
             {/* Header with Stats */}
             <div className='bg-white rounded-2xl shadow-md p-6 border border-slate-100'>
                 <div className='flex flex-col md:flex-row md:items-center justify-between gap-4'>
@@ -260,6 +292,11 @@ const ExamSchedule = () => {
                                         {item.teacherName}
                                     </td>
                                     <td className='px-4 py-4 whitespace-nowrap'>
+                                        {live ? (
+                                            <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold border ${statusBadgeClasses[item.status] || 'bg-slate-100 text-slate-700 border-slate-200'}`}>
+                                                {item.status}
+                                            </span>
+                                        ) : (
                                         <select
                                             value={item.status}
                                             onChange={(e) => handleStatusChange(item.examId, e.target.value)}
@@ -269,6 +306,7 @@ const ExamSchedule = () => {
                                             <option value='In Progress'>In Progress</option>
                                             <option value='Completed'>Completed</option>
                                         </select>
+                                        )}
                                     </td>
                                     <td className='px-4 py-4 text-center whitespace-nowrap'>
                                         <button

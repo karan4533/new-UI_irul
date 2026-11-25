@@ -18,8 +18,9 @@ import {
     Send,
     Edit3
 } from 'lucide-react'
-import { DataTable, StatusBadge } from '../../Common/ui'
+import { DataTable, FeedbackState, IntegrationNotice, StatusBadge } from '../../Common/ui'
 import { proService } from '../../services/modules/proService'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
 
 const DATA_CATEGORIES = [
     'ALL',
@@ -35,7 +36,9 @@ const STATUSES = ['ALL', 'Submitted', 'In Review', 'Imported', 'Verified', 'Retu
 
 const ProErpDataHandover = () => {
     const [handovers, setHandovers] = useState([])
+    const live = isLiveApiEnabled()
     const [loading, setLoading] = useState(true)
+    const [error, setError] = useState('')
     const [searchQuery, setSearchQuery] = useState('')
     const [categoryFilter, setCategoryFilter] = useState('ALL')
     const [statusFilter, setStatusFilter] = useState('ALL')
@@ -64,6 +67,7 @@ const ProErpDataHandover = () => {
 
     const loadData = async () => {
         setLoading(true)
+        setError('')
         try {
             const res = await proService.getErpHandovers({
                 status: statusFilter,
@@ -74,9 +78,14 @@ const ProErpDataHandover = () => {
             })
             if (res.success && Array.isArray(res.data)) {
                 setHandovers(res.data)
+            } else {
+                setHandovers([])
+                if (live) setError(typeof res.error === 'string' ? res.error : 'Failed to load ERP handovers.')
             }
         } catch (err) {
             console.error('Failed to load ERP handovers:', err)
+            setHandovers([])
+            if (live) setError(err?.message || 'Failed to load ERP handovers.')
         } finally {
             setLoading(false)
         }
@@ -144,7 +153,7 @@ const ProErpDataHandover = () => {
                 })
                 loadData()
             } else {
-                alert(`Error: ${res.error?.message || 'Failed to register handover'}`)
+                alert(`Error: ${(typeof res.error === 'string' ? res.error : res.error?.message) || 'Failed to register handover'}`)
             }
         } catch (err) {
             console.error('Handover registration failed:', err)
@@ -171,6 +180,8 @@ const ProErpDataHandover = () => {
                 setStatusUpdateModal(null)
                 setStatusRemarks('')
                 loadData()
+            } else {
+                alert(`Error: ${(typeof res.error === 'string' ? res.error : res.error?.message) || 'Status update failed.'}`)
             }
         } catch (err) {
             console.error('Failed to update handover status:', err)
@@ -390,6 +401,27 @@ const ProErpDataHandover = () => {
                 )}
             </div>
 
+            {live && !error && !loading ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='ERP handovers are live'
+                    description='GET/PUT /api/v1/ops/pro-erp-handovers. No demo rows or localStorage fallback on failure.'
+                />
+            ) : null}
+            {!live ? (
+                <IntegrationNotice
+                    state='mock'
+                    title='Demo mode'
+                    description='Live API is disabled; handovers are stored in the local demo adapter only.'
+                />
+            ) : null}
+            {error ? (
+                <>
+                    <IntegrationNotice state='failed' title='ERP handovers API failed' description={error} />
+                    <FeedbackState kind='error' title='ERP handovers unavailable' description={error} />
+                </>
+            ) : null}
+
             {/* Metric KPI Cards */}
             <div className='grid grid-cols-2 sm:grid-cols-4 gap-4'>
                 <div className='bg-white rounded-2xl p-4 border border-slate-200 shadow-xs'>
@@ -500,7 +532,13 @@ const ProErpDataHandover = () => {
                     <DataTable
                         columns={columns}
                         data={handovers}
-                        emptyMessage='No data handovers found matching current filters.'
+                        emptyMessage={
+                            error
+                                ? 'Could not load handovers from the server.'
+                                : live
+                                  ? 'No ERP handovers recorded yet. Register a handover batch to get started.'
+                                  : 'No data handovers found matching current filters.'
+                        }
                     />
                 </div>
             </div>

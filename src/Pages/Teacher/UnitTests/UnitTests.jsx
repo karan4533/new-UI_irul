@@ -1,5 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
+import AcademicsLiveNotice from '../Components/AcademicsLiveNotice'
+import { useAcademicsLiveCollection } from '../../../services/api/useAcademicsLiveCollection'
+import { canUseAcademicsApi } from '../../../services/api/academicsApiService'
 import {
     ChevronLeft,
     ChevronRight,
@@ -56,6 +59,7 @@ const UnitTests = () => {
     const canDelete = canRoleDelete(role)
     const isTeacher = role === 'teacher'
 
+    const { live, loading, error, version } = useAcademicsLiveCollection('unit-tests')
     const [allTests, setAllTests] = useState([])
     const [filters, setFilters] = useState(emptyFilters)
     const [exportModal, setExportModal] = useState(false)
@@ -69,12 +73,12 @@ const UnitTests = () => {
 
     useEffect(() => {
         setAllTests(getUnitTests())
-    }, [])
+    }, [version])
 
     // Restrict visibility: Teachers only see their own tests (Anita Verma / Mathematics)
     // Higher roles (Coordinator, Principal, Director, Admin) see all tests
     const roleScopedTests = useMemo(() => {
-        if (isTeacher) {
+        if (isTeacher && !canUseAcademicsApi()) {
             return allTests.filter(
                 (test) => test.teacher === 'Anita Verma' || test.subject === 'Mathematics'
             )
@@ -96,7 +100,7 @@ const UnitTests = () => {
     const handleOpenMarkEntry = (test) => {
         setMarkEntryModalTest(test)
         setStudentScores(
-            DEFAULT_STUDENT_MARKS.map((s) => ({
+            (canUseAcademicsApi() ? [] : DEFAULT_STUDENT_MARKS).map((s) => ({
                 ...s,
                 marks: test.marksEntered ? s.marks : ''
             }))
@@ -132,6 +136,7 @@ const UnitTests = () => {
 
     return (
         <section className='space-y-6'>
+            <AcademicsLiveNotice live={live} loading={loading} error={error} label='Unit tests' endpoint='GET /api/v1/academics/unit-tests' />
             {/* Header / Scope Banner */}
             <div className='bg-white rounded-2xl shadow-sm border border-slate-100 p-5'>
                 <div className='flex flex-col md:flex-row md:items-center justify-between gap-4'>

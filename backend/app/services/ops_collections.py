@@ -18,6 +18,7 @@ COLLECTIONS: dict[str, str] = {
     "library-books": "LBK",
     "library-issues": "LIS",
     "library-members": "LMB",
+    "library-requests": "LRQ",
     # Gate
     "gate-visitors": "GVS",
     "gate-registers": "GRG",
@@ -115,6 +116,8 @@ COLLECTIONS: dict[str, str] = {
     "cctv-footage-requests": "CFR",
     "cctv-camera-status": "CCS",
     "pro-gov-cases": "PGC",
+    "pro-erp-handovers": "PEH",
+    "pro-daily-updates": "PDU",
 }
 
 _ADMINS = {"admin", "superadmin", "managing_director"}
@@ -161,6 +164,9 @@ _STAR_OF_MONTH = {"teacher", "coordinator", "principal", "director"} | _ADMINS
 
 
 def _writers_for(collection: str) -> set[str]:
+    if collection == "library-requests":
+        # Students/staff may submit requisitions; librarian/admin decide status.
+        return _LIBRARY | {"teacher", "coordinator", "student", "parent", "prm", "pro"}
     if collection.startswith("library-"):
         return _LIBRARY
     if collection.startswith("gate-"):

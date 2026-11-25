@@ -1,3 +1,6 @@
+import { isLiveApiEnabled } from '../../../services/api/tokenStore.js'
+import { listLibraryIssues } from '../../../services/api/libraryApiService.js'
+
 export const BOOK_STATUSES = ['Borrowed', 'Overdue', 'Returned']
 
 export const statusBadgeColor = {
@@ -6,7 +9,7 @@ export const statusBadgeColor = {
     Returned: 'bg-[#4CAF5033] text-[#4CAF50]',
 }
 
-export const BORROWED_BOOKS_LIST = [
+export const DEFAULT_BORROWED_BOOKS_LIST = [
     {
         id: 'BR-1001',
         bookId: 'BK-2041',
@@ -80,3 +83,31 @@ export const BORROWED_BOOKS_LIST = [
         status: 'Returned',
     },
 ]
+
+/** Mock: demo history. Live: [] until listLiveBorrowedBooks() resolves. */
+export const getBorrowedBooks = () => (isLiveApiEnabled() ? [] : DEFAULT_BORROWED_BOOKS_LIST)
+
+export const mapIssueToBorrowedBook = (row = {}) => {
+    const statusRaw = String(row.status || 'Issued')
+    let status = 'Borrowed'
+    if (/overdue/i.test(statusRaw) || Number(row.daysOverdue) > 0) status = 'Overdue'
+    if (/return/i.test(statusRaw) || row.returnDate) status = 'Returned'
+    return {
+        id: row.id || '',
+        bookId: row.bookId || '—',
+        bookName: row.bookTitle || row.bookName || '—',
+        authorName: row.author || row.authorName || '—',
+        issuedDate: row.issuedDate || '—',
+        returnDate: row.returnDate || row.dueDate || '—',
+        status,
+    }
+}
+
+/** Live-only: GET /api/v1/ops/library-issues via listLibraryIssues. */
+export const listLiveBorrowedBooks = async () => {
+    const res = await listLibraryIssues()
+    if (!res.success) {
+        return { success: false, error: typeof res.error === 'string' ? res.error : 'Failed to load library issues.', data: [] }
+    }
+    return { success: true, data: (Array.isArray(res.data) ? res.data : []).map(mapIssueToBorrowedBook) }
+}

@@ -24,7 +24,6 @@ import {
     getAuthorizedStaffDirectory,
     ID_PROOF_TYPES,
 } from '../GatePassSecurity/gatePassSecurityData'
-import { isLiveApiEnabled } from '../../services/api/tokenStore'
 
 export default function VisitorsWorkspace({ roleOverride = null }) {
     const { role: authRole, name: authName } = useAuth()
@@ -42,8 +41,6 @@ export default function VisitorsWorkspace({ roleOverride = null }) {
     const [dateFilter, setDateFilter] = useState('Today') // 'Today', 'All Dates'
     const [currentTime, setCurrentTime] = useState(Date.now())
     const [notification, setNotification] = useState('')
-    const [liveLoading, setLiveLoading] = useState(Boolean(live))
-    const [liveError, setLiveError] = useState('')
 
     // Modal State
     const [isModalOpen, setIsModalOpen] = useState(false)

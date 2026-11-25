@@ -30,17 +30,17 @@ import {
     Paperclip,
     Trash2
 } from 'lucide-react'
-import { toast } from 'react-toastify'
 import { useAuth } from '../../context/AuthContext'
 import { getProfileLabel } from '../../Pages/Authentication/profileOptions'
 import { IntegrationNotice } from '../ui'
 import { isLiveApiEnabled } from '../../services/api/tokenStore'
 import {
-    listTasks,
-    createTask,
-    setTaskStatus,
+    listTasks as listLiveTasks,
+    createTask as createLiveTask,
+    getTask as getLiveTask,
+    setTaskStatus as setLiveTaskStatus,
     listTaskAssignees,
-    mapUiTaskStatusToBackend,
+    toBackendTaskStatus as mapUiTaskStatusToBackend,
 } from '../../services/api/taskApiService'
 import {
     getAllTasks,
@@ -67,14 +67,6 @@ import {
 } from './taskManagementData'
 import { ENTERPRISE_EMPLOYEES } from '../AttendanceAndLeave/attendanceLeaveData'
 import FeedbackState from '../ui/FeedbackState'
-import { isLiveApiEnabled } from '../../services/api/tokenStore'
-import {
-    createTask as createLiveTask,
-    getTask as getLiveTask,
-    listTaskAssignees,
-    listTasks as listLiveTasks,
-    setTaskStatus as setLiveTaskStatus,
-} from '../../services/api/taskApiService'
 
 const liveErrorMessage = (res, fallback) => (typeof res?.error === 'string' && res.error ? res.error : fallback)
 
@@ -137,10 +129,6 @@ export default function EnterpriseTaskWorkspace({ defaultTab = 'received', initi
     const [activeTab, setActiveTab] = useState(defaultTab === 'created' ? 'created' : 'received')
     const [refreshKey, setRefreshKey] = useState(0)
     const [bannerMessage, setBannerMessage] = useState('')
-    const [liveMineTasks, setLiveMineTasks] = useState([])
-    const [liveAssignedTasks, setLiveAssignedTasks] = useState([])
-    const [liveSource, setLiveSource] = useState(live ? 'syncing' : 'mock')
-    const [liveError, setLiveError] = useState('')
 
     // Modals
     const [isCreateOpen, setIsCreateOpen] = useState(initialCreateOpen)
@@ -218,14 +206,12 @@ export default function EnterpriseTaskWorkspace({ defaultTab = 'received', initi
 
     // Tasks queries
     const receivedTasks = useMemo(() => {
-        if (live) return liveMineTasks
         void refreshKey
         if (live) return liveReceived
         return getMyTasks(activeRole, currentUserId)
     }, [activeRole, currentUserId, refreshKey, live, liveReceived])
 
     const createdTasks = useMemo(() => {
-        if (live) return liveAssignedTasks
         void refreshKey
         if (live) return liveCreated
         return getTasksAssignedByMe(activeRole, currentUserId)
@@ -379,24 +365,24 @@ export default function EnterpriseTaskWorkspace({ defaultTab = 'received', initi
             </div>
 
             <IntegrationNotice
-                state={liveSource === 'connected' ? 'connected' : liveSource === 'failed' ? 'failed' : live ? 'syncing' : 'mock'}
+                state={!live ? 'mock' : liveError ? 'failed' : liveLoading ? 'syncing' : 'connected'}
                 title={
-                    liveSource === 'connected'
-                        ? 'Live task queue'
-                        : liveSource === 'failed'
+                    !live
+                        ? 'Browser mock tasks'
+                        : liveError
                             ? 'Task API unavailable'
-                            : live
+                            : liveLoading
                                 ? 'Loading tasks'
-                                : 'Browser mock tasks'
+                                : 'Live task queue'
                 }
                 description={
-                    liveSource === 'connected'
-                        ? 'GET/POST /api/v1/tasks · status updates use Incomplete | In Progress | Completed.'
-                        : liveSource === 'failed'
+                    !live
+                        ? 'Live API is off. Tasks are stored only in this browser.'
+                        : liveError
                             ? (liveError || 'Could not reach /api/v1/tasks.')
-                            : live
+                            : liveLoading
                                 ? 'Fetching mine and assigned boxes…'
-                                : 'Live API is off. Tasks are stored only in this browser.'
+                                : 'GET/POST /api/v1/tasks · status updates use Incomplete | In Progress | Completed.'
                 }
             />
 

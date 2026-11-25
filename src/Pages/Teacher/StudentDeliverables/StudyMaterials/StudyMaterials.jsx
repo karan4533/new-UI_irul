@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { useAcademicsLiveCollection } from '../../../../services/api/useAcademicsLiveCollection'
 import { NavLink, useLocation } from 'react-router-dom'
+import AcademicsLiveNotice from '../../Components/AcademicsLiveNotice'
 import { ChevronLeft, ChevronRight, Download, EllipsisIcon, Plus } from 'lucide-react'
 import Dropdown from '../../../../Common/CommonComponents/Dropdown'
 import ExportModal from '../../../../Common/CommonComponents/ExportModal'
@@ -282,21 +284,25 @@ const StudyMaterialsList = ({ items, routeBase, viewMode }) => {
 const StudyMaterials = ({ routeBase = DEFAULT_ROUTE_BASE, viewMode = 'teacher' }) => {
     const location = useLocation()
     const [items, setItems] = useState(() => getStudyMaterials())
+    // Live: hydrate academics `study-materials` on mount (student portal reuses this teacher screen).
+    const { live, loading, error, version: liveVersion } = useAcademicsLiveCollection('study-materials', location.key)
 
     useEffect(() => {
         setItems(getStudyMaterials())
-    }, [location.key])
+    }, [location.key, liveVersion])
 
     if (items.length === 0) {
         return (
             <section>
-                <StudyMaterialsEmpty routeBase={routeBase} viewMode={viewMode} />
+                <AcademicsLiveNotice live={live} loading={loading} error={error} label='Study materials' endpoint='GET /api/v1/academics/study-materials' />
+                {live && loading ? null : <StudyMaterialsEmpty routeBase={routeBase} viewMode={viewMode} />}
             </section>
         )
     }
 
     return (
         <section>
+            <AcademicsLiveNotice live={live} loading={loading} error={error} label='Study materials' endpoint='GET /api/v1/academics/study-materials' />
             <StudyMaterialsList items={items} routeBase={routeBase} viewMode={viewMode} />
         </section>
     )

@@ -1,14 +1,15 @@
 import { useMemo, useState } from 'react'
 import { addDays, addWeeks, format, isToday, startOfWeek, subWeeks } from 'date-fns'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { WEEKLY_DAYS, TIME_SLOTS, WEEKLY_SCHEDULE, SUBJECT_COLORS, TEACHER_TIMETABLE_INFO } from '../classRoutineData'
+import { WEEKLY_DAYS, DEFAULT_TIME_SLOTS, DEFAULT_WEEKLY_SCHEDULE, SUBJECT_COLORS, DEFAULT_TEACHER_TIMETABLE_INFO } from '../classRoutineData'
 import TimetablePeriodCell from '../../../../Common/ClassTimetable/TimetablePeriodCell'
 
 const TeacherWeeklyTimetable = ({
     weekDate = new Date(),
-    schedule = WEEKLY_SCHEDULE,
+    schedule = DEFAULT_WEEKLY_SCHEDULE,
+    timeSlots = DEFAULT_TIME_SLOTS,
     mode = 'teacher',
-    teacherName = TEACHER_TIMETABLE_INFO.teacherName
+    teacherName = DEFAULT_TEACHER_TIMETABLE_INFO.teacherName
 }) => {
     const [hoveredCell, setHoveredCell] = useState(null)
     const [currentWeekDate, setCurrentWeekDate] = useState(weekDate)
@@ -85,7 +86,7 @@ const TeacherWeeklyTimetable = ({
                         </tr>
                     </thead>
                     <tbody>
-                        {TIME_SLOTS.map((slot, rowIdx) => (
+                        {timeSlots.map((slot, rowIdx) => (
                             <tr key={slot.label}>
                                 <td className='border-r border-b border-slate-100 px-4 py-6 text-center align-middle bg-white'>
                                     <span className='text-xs font-semibold text-[#515DEF] leading-relaxed whitespace-pre-line'>
@@ -124,6 +125,13 @@ const TeacherWeeklyTimetable = ({
                                 })}
                             </tr>
                         ))}
+                        {timeSlots.length === 0 ? (
+                            <tr>
+                                <td colSpan={WEEKLY_DAYS.length + 1} className='px-4 py-10 text-center text-sm text-slate-500'>
+                                    No timetable periods found.
+                                </td>
+                            </tr>
+                        ) : null}
                     </tbody>
                 </table>
             </div>

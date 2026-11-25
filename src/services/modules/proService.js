@@ -9,6 +9,11 @@ import { apiClient } from '../api/apiClient.js';
 import { mockAdapter } from '../api/mockAdapter.js';
 import { validateRequired } from '../models/index.js';
 import { createSuccessResponse, createErrorResponse } from '../api/responseEnvelope.js';
+import { isLiveApiEnabled } from '../api/tokenStore.js';
+
+const LIVE_HANDOVERS_PATH = '/api/v1/ops/pro-erp-handovers';
+const LIVE_DAILY_UPDATES_PATH = '/api/v1/ops/pro-daily-updates';
+const VALID_HANDOVER_STATUSES = ['Submitted', 'In Review', 'Imported', 'Verified', 'Returned for Revision'];
 
 const INITIAL_ERP_HANDOVERS_SEED = [
   {
@@ -115,6 +120,253 @@ const ensureProStores = () => {
       mockAdapter.stores['pro_daily_updates'] = mockAdapter.loadStore('pro_daily_updates', INITIAL_DAILY_UPDATES_SEED);
     }
   }
+};
+
+// ----------------------------------------------------------------------------
+// Pure helpers shared by live (FastAPI ops) and demo (mockAdapter) paths
+// ----------------------------------------------------------------------------
+
+const filterHandovers = (list, params = {}) => {
+  let handovers = Array.isArray(list) ? list : [];
+  if (params.status && params.status !== 'ALL') {
+    handovers = handovers.filter((h) => h.status === params.status);
+  }
+  if (params.dataCategory && params.dataCategory !== 'ALL') {
+    handovers = handovers.filter((h) => h.dataCategory === params.dataCategory);
+  }
+  if (params.fromDate || params.toDate) {
+    handovers = handovers.filter((h) => {
+      const itemDate = h.date || '';
+      if (params.fromDate && itemDate < params.fromDate) return false;
+      if (params.toDate && itemDate > params.toDate) return false;
+      return true;
+    });
+  }
+  if (params.search) {
+    const q = params.search.toLowerCase().trim();
+    handovers = handovers.filter(
+      (h) =>
+        h.batchId?.toLowerCase().includes(q) ||
+        h.description?.toLowerCase().includes(q) ||
+        h.dataCategory?.toLowerCase().includes(q) ||
+        h.handoverBy?.toLowerCase().includes(q) ||
+        h.receivedBy?.toLowerCase().includes(q)
+    );
+  }
+  return handovers;
+};
+
+const filterDailyUpdates = (list, params = {}) => {
+  let updates = Array.isArray(list) ? list : [];
+  if (params.officer && params.officer !== 'ALL') {
+    updates = updates.filter(
+      (u) => u.officerId === params.officer || String(u.officerName || '').includes(params.officer)
+    );
+  }
+  if (params.authority && params.authority !== 'ALL') {
+    updates = updates.filter((u) => {
+      if (Array.isArray(u.authoritiesVisited)) {
+        return u.authoritiesVisited.some((a) => a.includes(params.authority));
+      }
+      return String(u.authoritiesVisited).includes(params.authority);
+    });
+  }
+  if (params.status && params.status !== 'ALL') {
+    updates = updates.filter((u) => u.status === params.status);
+  }
+  if (params.fromDate || params.toDate) {
+    updates = updates.filter((u) => {
+      const itemDate = u.date || '';
+      if (params.fromDate && itemDate < params.fromDate) return false;
+      if (params.toDate && itemDate > params.toDate) return false;
+      return true;
+    });
+  }
+  if (params.search) {
+    const q = params.search.toLowerCase().trim();
+    updates = updates.filter(
+      (u) =>
+        u.officerName?.toLowerCase().includes(q) ||
+        u.licensingMatter?.toLowerCase().includes(q) ||
+        u.meetingSummary?.toLowerCase().includes(q) ||
+        u.documentsHandled?.toLowerCase().includes(q) ||
+        (Array.isArray(u.authoritiesVisited)
+          ? u.authoritiesVisited.join(' ').toLowerCase().includes(q)
+          : String(u.authoritiesVisited).toLowerCase().includes(q))
+    );
+  }
+  return updates;
+};
+
+const matchesHandoverId = (h, id) => String(h.id) === String(id) || h.batchId === id;
+
+const liveErrorMessage = (res, fallback) =>
+  res && typeof res.error === 'string' && res.error ? res.error : fallback;
+
+const uniqueId = (prefix, existing, min, span) => {
+  const year = new Date().getFullYear();
+  const taken = new Set(existing.map((row) => String(row.id)));
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const id = `${prefix}-${year}-${Math.floor(min + Math.random() * span)}`;
+    if (!taken.has(id)) return id;
+  }
+  return `${prefix}-${year}-${Date.now().toString(36).toUpperCase()}`;
+};
+
+/** GET a whole live ops collection. Never falls back to mock data. */
+const fetchLiveCollection = async (path, label) => {
+  const res = await apiClient.get(path, { skipMock: true });
+  if (!res || !res.success) {
+    return { error: liveErrorMessage(res, `Could not load ${label}.`) };
+  }
+  return { rows: Array.isArray(res.data) ? res.data : [] };
+};
+
+/** PUT the full collection (replace). */
+const replaceLiveCollection = async (path, rows, label) => {
+  const res = await apiClient.put(path, rows, { skipMock: true });
+  if (!res || !res.success) {
+    return { error: liveErrorMessage(res, `Could not save ${label}.`) };
+  }
+  return { rows: Array.isArray(res.data) ? res.data : rows };
+};
+
+const liveHandovers = {
+  async list(params = {}) {
+    const loaded = await fetchLiveCollection(LIVE_HANDOVERS_PATH, 'ERP handovers');
+    if (loaded.error) return createErrorResponse(loaded.error, []);
+    const filtered = filterHandovers(loaded.rows, params);
+    return createSuccessResponse(filtered, { total: filtered.length });
+  },
+
+  async getById(id) {
+    const loaded = await fetchLiveCollection(LIVE_HANDOVERS_PATH, 'ERP handovers');
+    if (loaded.error) return createErrorResponse(loaded.error);
+    const item = loaded.rows.find((h) => matchesHandoverId(h, id));
+    if (!item) return createErrorResponse(`ERP handover batch ${id} not found.`);
+    return createSuccessResponse(item);
+  },
+
+  async create(data) {
+    const loaded = await fetchLiveCollection(LIVE_HANDOVERS_PATH, 'ERP handovers');
+    if (loaded.error) return createErrorResponse(loaded.error);
+    const now = new Date().toISOString();
+    const id = uniqueId('HANDOVER', loaded.rows, 10, 90);
+    const year = new Date().getFullYear();
+    const newHandover = {
+      id,
+      batchId: data.batchId || `ERP-BATCH-${year}-${id.split('-').pop()}`,
+      date: data.date || now.split('T')[0],
+      dataCategory: data.dataCategory,
+      description: data.description,
+      handoverBy: data.handoverBy,
+      receivedBy: data.receivedBy,
+      recordCount: Number(data.recordCount) || 1,
+      status: data.status || 'Submitted',
+      attachment: data.attachment || null,
+      remarks: data.remarks || '',
+      revisionNotes: data.revisionNotes || '',
+      createdAt: now,
+      updatedAt: now,
+    };
+    const saved = await replaceLiveCollection(LIVE_HANDOVERS_PATH, [newHandover, ...loaded.rows], 'ERP handovers');
+    if (saved.error) return createErrorResponse(saved.error);
+    return createSuccessResponse(saved.rows.find((h) => String(h.id) === id) || newHandover);
+  },
+
+  async update(id, data) {
+    const loaded = await fetchLiveCollection(LIVE_HANDOVERS_PATH, 'ERP handovers');
+    if (loaded.error) return createErrorResponse(loaded.error);
+    const index = loaded.rows.findIndex((h) => matchesHandoverId(h, id));
+    if (index === -1) return createErrorResponse(`ERP handover batch ${id} not found.`);
+    const updated = { ...loaded.rows[index], ...data, updatedAt: new Date().toISOString() };
+    const next = [...loaded.rows];
+    next[index] = updated;
+    const saved = await replaceLiveCollection(LIVE_HANDOVERS_PATH, next, 'ERP handovers');
+    if (saved.error) return createErrorResponse(saved.error);
+    return createSuccessResponse(saved.rows.find((h) => String(h.id) === String(updated.id)) || updated);
+  },
+
+  async remove(id) {
+    const loaded = await fetchLiveCollection(LIVE_HANDOVERS_PATH, 'ERP handovers');
+    if (loaded.error) return createErrorResponse(loaded.error);
+    const index = loaded.rows.findIndex((h) => matchesHandoverId(h, id));
+    if (index === -1) return createErrorResponse(`ERP handover batch ${id} not found.`);
+    const removed = loaded.rows[index];
+    const next = loaded.rows.filter((_, i) => i !== index);
+    const saved = await replaceLiveCollection(LIVE_HANDOVERS_PATH, next, 'ERP handovers');
+    if (saved.error) return createErrorResponse(saved.error);
+    return createSuccessResponse(removed);
+  },
+};
+
+const liveDailyUpdates = {
+  async list(params = {}) {
+    const loaded = await fetchLiveCollection(LIVE_DAILY_UPDATES_PATH, 'daily work updates');
+    if (loaded.error) return createErrorResponse(loaded.error, []);
+    const filtered = filterDailyUpdates(loaded.rows, params);
+    return createSuccessResponse(filtered, { total: filtered.length });
+  },
+
+  async getById(id) {
+    const loaded = await fetchLiveCollection(LIVE_DAILY_UPDATES_PATH, 'daily work updates');
+    if (loaded.error) return createErrorResponse(loaded.error);
+    const item = loaded.rows.find((u) => String(u.id) === String(id));
+    if (!item) return createErrorResponse(`Daily work update ${id} not found.`);
+    return createSuccessResponse(item);
+  },
+
+  async create(data) {
+    const loaded = await fetchLiveCollection(LIVE_DAILY_UPDATES_PATH, 'daily work updates');
+    if (loaded.error) return createErrorResponse(loaded.error);
+    const now = new Date().toISOString();
+    const id = uniqueId('DWU', loaded.rows, 100, 900);
+    const newUpdate = {
+      id,
+      date: data.date,
+      officerId: data.officerId || 'PRO-EMP-01',
+      officerName: data.officerName,
+      authoritiesVisited: Array.isArray(data.authoritiesVisited)
+        ? data.authoritiesVisited
+        : [data.authoritiesVisited],
+      licensingMatter: data.licensingMatter,
+      meetingSummary: data.meetingSummary,
+      documentsHandled: data.documentsHandled || 'General documentation',
+      nextFollowUpDate: data.nextFollowUpDate || null,
+      status: data.status || 'Completed',
+      remarks: data.remarks || '',
+      createdAt: now,
+      updatedAt: now,
+    };
+    const saved = await replaceLiveCollection(LIVE_DAILY_UPDATES_PATH, [newUpdate, ...loaded.rows], 'daily work updates');
+    if (saved.error) return createErrorResponse(saved.error);
+    return createSuccessResponse(saved.rows.find((u) => String(u.id) === id) || newUpdate);
+  },
+
+  async update(id, data) {
+    const loaded = await fetchLiveCollection(LIVE_DAILY_UPDATES_PATH, 'daily work updates');
+    if (loaded.error) return createErrorResponse(loaded.error);
+    const index = loaded.rows.findIndex((u) => String(u.id) === String(id));
+    if (index === -1) return createErrorResponse(`Daily work update ${id} not found.`);
+    const updated = { ...loaded.rows[index], ...data, updatedAt: new Date().toISOString() };
+    const next = [...loaded.rows];
+    next[index] = updated;
+    const saved = await replaceLiveCollection(LIVE_DAILY_UPDATES_PATH, next, 'daily work updates');
+    if (saved.error) return createErrorResponse(saved.error);
+    return createSuccessResponse(saved.rows.find((u) => String(u.id) === String(updated.id)) || updated);
+  },
+
+  async remove(id) {
+    const loaded = await fetchLiveCollection(LIVE_DAILY_UPDATES_PATH, 'daily work updates');
+    if (loaded.error) return createErrorResponse(loaded.error);
+    const index = loaded.rows.findIndex((u) => String(u.id) === String(id));
+    if (index === -1) return createErrorResponse(`Daily work update ${id} not found.`);
+    const removed = loaded.rows[index];
+    const next = loaded.rows.filter((_, i) => i !== index);
+    const saved = await replaceLiveCollection(LIVE_DAILY_UPDATES_PATH, next, 'daily work updates');
+    if (saved.error) return createErrorResponse(saved.error);
+    return createSuccessResponse(removed);
+  },
 };
 
 export const proService = {
@@ -254,37 +506,14 @@ export const proService = {
   // ==========================================================================
 
   async getErpHandovers(params = {}) {
+    if (isLiveApiEnabled()) return liveHandovers.list(params);
     ensureProStores();
-    let handovers = mockAdapter.stores['pro_erp_handovers'] || [];
-    if (params.status && params.status !== 'ALL') {
-      handovers = handovers.filter((h) => h.status === params.status);
-    }
-    if (params.dataCategory && params.dataCategory !== 'ALL') {
-      handovers = handovers.filter((h) => h.dataCategory === params.dataCategory);
-    }
-    if (params.fromDate || params.toDate) {
-      handovers = handovers.filter((h) => {
-        const itemDate = h.date || '';
-        if (params.fromDate && itemDate < params.fromDate) return false;
-        if (params.toDate && itemDate > params.toDate) return false;
-        return true;
-      });
-    }
-    if (params.search) {
-      const q = params.search.toLowerCase().trim();
-      handovers = handovers.filter(
-        (h) =>
-          h.batchId?.toLowerCase().includes(q) ||
-          h.description?.toLowerCase().includes(q) ||
-          h.dataCategory?.toLowerCase().includes(q) ||
-          h.handoverBy?.toLowerCase().includes(q) ||
-          h.receivedBy?.toLowerCase().includes(q)
-      );
-    }
+    const handovers = filterHandovers(mockAdapter.stores['pro_erp_handovers'] || [], params);
     return createSuccessResponse(handovers, { total: handovers.length });
   },
 
   async getErpHandoverById(id) {
+    if (isLiveApiEnabled()) return liveHandovers.getById(id);
     ensureProStores();
     const handovers = mockAdapter.stores['pro_erp_handovers'] || [];
     const item = handovers.find((h) => String(h.id) === String(id) || h.batchId === id);
@@ -295,7 +524,6 @@ export const proService = {
   },
 
   async createErpHandover(data = {}) {
-    ensureProStores();
     const validation = validateRequired(data, [
       'dataCategory',
       'description',
@@ -305,6 +533,8 @@ export const proService = {
     if (!validation.valid) {
       return createErrorResponse(validation.errors);
     }
+    if (isLiveApiEnabled()) return liveHandovers.create(data);
+    ensureProStores();
 
     const year = new Date().getFullYear();
     const seq = Math.floor(10 + Math.random() * 90);
@@ -331,13 +561,13 @@ export const proService = {
   },
 
   async updateErpHandover(id, data = {}) {
-    ensureProStores();
-    const VALID_HANDOVER_STATUSES = ['Submitted', 'In Review', 'Imported', 'Verified', 'Returned for Revision'];
     if (data.status && !VALID_HANDOVER_STATUSES.includes(data.status)) {
       return createErrorResponse(
         `Invalid handover status: '${data.status}'. Permissible statuses: ${VALID_HANDOVER_STATUSES.join(', ')}`
       );
     }
+    if (isLiveApiEnabled()) return liveHandovers.update(id, data);
+    ensureProStores();
 
     const handovers = mockAdapter.stores['pro_erp_handovers'] || [];
     const index = handovers.findIndex((h) => String(h.id) === String(id) || h.batchId === id);
@@ -356,6 +586,7 @@ export const proService = {
   },
 
   async deleteErpHandover(id) {
+    if (isLiveApiEnabled()) return liveHandovers.remove(id);
     ensureProStores();
     const handovers = mockAdapter.stores['pro_erp_handovers'] || [];
     const index = handovers.findIndex((h) => String(h.id) === String(id) || h.batchId === id);
@@ -372,49 +603,14 @@ export const proService = {
   // ==========================================================================
 
   async getDailyWorkUpdates(params = {}) {
+    if (isLiveApiEnabled()) return liveDailyUpdates.list(params);
     ensureProStores();
-    let updates = mockAdapter.stores['pro_daily_updates'] || [];
-    if (params.officer && params.officer !== 'ALL') {
-      updates = updates.filter(
-        (u) => u.officerId === params.officer || u.officerName.includes(params.officer)
-      );
-    }
-    if (params.authority && params.authority !== 'ALL') {
-      updates = updates.filter((u) => {
-        if (Array.isArray(u.authoritiesVisited)) {
-          return u.authoritiesVisited.some((a) => a.includes(params.authority));
-        }
-        return String(u.authoritiesVisited).includes(params.authority);
-      });
-    }
-    if (params.status && params.status !== 'ALL') {
-      updates = updates.filter((u) => u.status === params.status);
-    }
-    if (params.fromDate || params.toDate) {
-      updates = updates.filter((u) => {
-        const itemDate = u.date || '';
-        if (params.fromDate && itemDate < params.fromDate) return false;
-        if (params.toDate && itemDate > params.toDate) return false;
-        return true;
-      });
-    }
-    if (params.search) {
-      const q = params.search.toLowerCase().trim();
-      updates = updates.filter(
-        (u) =>
-          u.officerName?.toLowerCase().includes(q) ||
-          u.licensingMatter?.toLowerCase().includes(q) ||
-          u.meetingSummary?.toLowerCase().includes(q) ||
-          u.documentsHandled?.toLowerCase().includes(q) ||
-          (Array.isArray(u.authoritiesVisited)
-            ? u.authoritiesVisited.join(' ').toLowerCase().includes(q)
-            : String(u.authoritiesVisited).toLowerCase().includes(q))
-      );
-    }
+    const updates = filterDailyUpdates(mockAdapter.stores['pro_daily_updates'] || [], params);
     return createSuccessResponse(updates, { total: updates.length });
   },
 
   async getDailyWorkUpdateById(id) {
+    if (isLiveApiEnabled()) return liveDailyUpdates.getById(id);
     ensureProStores();
     const updates = mockAdapter.stores['pro_daily_updates'] || [];
     const item = updates.find((u) => String(u.id) === String(id));
@@ -425,7 +621,6 @@ export const proService = {
   },
 
   async createDailyWorkUpdate(data = {}) {
-    ensureProStores();
     const validation = validateRequired(data, [
       'date',
       'officerName',
@@ -436,6 +631,8 @@ export const proService = {
     if (!validation.valid) {
       return createErrorResponse(validation.errors);
     }
+    if (isLiveApiEnabled()) return liveDailyUpdates.create(data);
+    ensureProStores();
 
     const year = new Date().getFullYear();
     const seq = Math.floor(100 + Math.random() * 900);
@@ -463,6 +660,7 @@ export const proService = {
   },
 
   async updateDailyWorkUpdate(id, data = {}) {
+    if (isLiveApiEnabled()) return liveDailyUpdates.update(id, data);
     ensureProStores();
     const updates = mockAdapter.stores['pro_daily_updates'] || [];
     const index = updates.findIndex((u) => String(u.id) === String(id));
@@ -481,6 +679,7 @@ export const proService = {
   },
 
   async deleteDailyWorkUpdate(id) {
+    if (isLiveApiEnabled()) return liveDailyUpdates.remove(id);
     ensureProStores();
     const updates = mockAdapter.stores['pro_daily_updates'] || [];
     const index = updates.findIndex((u) => String(u.id) === String(id));
@@ -560,7 +759,7 @@ export const proService = {
   },
 
   async getComplianceStats() {
-    ensureProStores();
+    if (!isLiveApiEnabled()) ensureProStores();
     const [corr, permits, inspections, handovers, dailyUpdates] = await Promise.all([
       this.getCorrespondence(),
       this.getPermits(),

@@ -212,10 +212,9 @@ const AddIssueBook = () => {
         }
     }
 
-    const handleRequisitionSubmit = (e) => {
+    const handleRequisitionSubmit = async (e) => {
         e.preventDefault()
-        // Book requests have no FastAPI collection — intentional browser mock (honest).
-        submitBookRequest({
+        const res = await Promise.resolve(submitBookRequest({
             title: reqForm.title,
             author: reqForm.author,
             isbn: reqForm.isbn,
@@ -224,12 +223,18 @@ const AddIssueBook = () => {
             requestedBy: selectedMember?.name,
             requestedByRole: selectedMember?.role || selectedMember?.memberType,
             memberId: selectedMember?.id
-        })
+        }))
         setRequestModalOpen(false)
-        setNotification({
-            type: 'success',
-            message: `Book request for "${reqForm.title}" saved in browser mock queue (no library-requests API).`
-        })
+        if (res?.success === false) {
+            setNotification({ type: 'error', message: `Book request failed: ${res.message}` })
+        } else {
+            setNotification({
+                type: 'success',
+                message: isLiveApiEnabled()
+                    ? `Book request for "${reqForm.title}" saved to library-requests.`
+                    : `Book request for "${reqForm.title}" saved in browser mock queue.`
+            })
+        }
         setReqForm({ title: '', author: '', isbn: '', category: 'Science', reason: '' })
     }
 

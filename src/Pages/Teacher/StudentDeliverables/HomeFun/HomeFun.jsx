@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { useAcademicsLiveCollection } from '../../../../services/api/useAcademicsLiveCollection'
 import { NavLink, useLocation } from 'react-router-dom'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
@@ -24,6 +25,7 @@ import {
     getStudentSubmissionStatus,
 } from '../../../Student/StudentDeliverables/studentHomeFunSubmissions'
 import { useActiveStudent } from '../../../../context/ActiveStudentContext'
+import AcademicsLiveNotice from '../../Components/AcademicsLiveNotice'
 
 const studentStatusBadgeColor = {
     Submitted: 'bg-[#4CAF5033] text-[#4CAF50]',
@@ -368,14 +370,17 @@ const HomeFunList = ({ items, routeBase, viewMode }) => {
 const HomeFun = ({ routeBase = DEFAULT_ROUTE_BASE, viewMode = 'teacher' }) => {
     const location = useLocation()
     const [items, setItems] = useState(() => getHomeFunItems())
+    // Live: hydrate academics `home-fun` on mount (student portal reuses this teacher screen).
+    const { live, loading, error, version: liveVersion } = useAcademicsLiveCollection('home-fun', location.pathname)
 
     useEffect(() => {
         setItems(getHomeFunItems())
-    }, [location.pathname])
+    }, [location.pathname, liveVersion])
 
     return (
         <section>
-            {items.length === 0 ? (
+            <AcademicsLiveNotice live={live} loading={loading} error={error} label='Assignments & homework' endpoint='GET /api/v1/academics/home-fun' />
+            {live && loading ? null : items.length === 0 ? (
                 <HomeFunEmpty routeBase={routeBase} viewMode={viewMode} />
             ) : (
                 <HomeFunList items={items} routeBase={routeBase} viewMode={viewMode} />

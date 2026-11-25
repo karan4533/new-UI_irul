@@ -1,4 +1,8 @@
 import AttendanceAndLeaveWorkspace from '../Common/AttendanceAndLeave/AttendanceAndLeaveWorkspace'
+import MyLeaveRequestsList from '../Common/LeaveRequest/MyLeaveRequestsList'
+import AddLeaveRequestForm from '../Common/LeaveRequest/AddLeaveRequestForm'
+import ViewMyLeaveRequestPage from '../Common/LeaveRequest/ViewMyLeaveRequestPage'
+import { isLiveApiEnabled } from '../services/api/tokenStore'
 import { EnterpriseOperationsRoutes } from './EnterpriseOperationsRoutes'
 import React from 'react'
 import { Navigate, Route, Routes as ReactRoutes } from 'react-router-dom'
@@ -56,8 +60,17 @@ const LibrarianRoutes = () => {
 
             {/* Attendance */}
             <Route path="/librarian/attendance" element={<Navigate to="/librarian/attendance/my-attendance" replace />} />
-            <Route path="/librarian/attendance-and-leave" element={<AttendanceAndLeaveWorkspace defaultTab="overview" />} />
-            <Route path="/librarian/attendance/my-attendance" element={<AttendanceAndLeaveWorkspace defaultTab="records" />} />
+            {/* Live: formal leave module. Mock keeps the demo workspace (and Enterprise leave stubs). */}
+            <Route path="/librarian/attendance-and-leave" element={isLiveApiEnabled() ? <Navigate to="/librarian/leave-request/my-requests" replace /> : <AttendanceAndLeaveWorkspace defaultTab="overview" />} />
+            <Route path="/librarian/attendance/my-attendance" element={isLiveApiEnabled() ? <Navigate to="/librarian/leave-request/my-requests" replace /> : <AttendanceAndLeaveWorkspace defaultTab="records" />} />
+            {isLiveApiEnabled() ? (
+                <>
+                    <Route path="/librarian/leave-request" element={<Navigate to="/librarian/leave-request/my-requests" replace />} />
+                    <Route path="/librarian/leave-request/my-requests" element={<MyLeaveRequestsList roleKey="librarian" />} />
+                    <Route path="/librarian/leave-request/my-requests/add" element={<AddLeaveRequestForm roleKey="librarian" />} />
+                    <Route path="/librarian/leave-request/my-requests/view/:id" element={<ViewMyLeaveRequestPage roleKey="librarian" />} />
+                </>
+            ) : null}
 
             {/* Communication */}
             <Route path="/librarian/communication" element={<Navigate to="/librarian/communication/inbox" replace />} />

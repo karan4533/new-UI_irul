@@ -119,6 +119,60 @@ export function replaceLibraryMembers(rows, options = {}) {
   return replaceCollection('/api/v1/ops/library-members', rows, options)
 }
 
+export function mapRequestToUi(row = {}) {
+  return {
+    id: row.id || '',
+    bookTitle: row.bookTitle || row.title || '',
+    title: row.bookTitle || row.title || '',
+    author: row.author || '',
+    isbn: row.isbn || '',
+    category: row.category || row.department || 'General',
+    requesterId: row.requesterId || row.memberId || '',
+    requesterName: row.requesterName || row.requestedBy || '',
+    requestedBy: row.requestedBy || row.requesterName || '',
+    requesterType: row.requesterType || row.requestedByRole || 'Staff',
+    requestedByRole: row.requestedByRole || row.requesterType || 'Staff',
+    memberId: row.memberId || row.requesterId || '',
+    classSection: row.classSection || '',
+    department: row.department || row.category || '',
+    purpose: row.purpose || row.reason || '',
+    reason: row.reason || row.purpose || '',
+    priority: row.priority || 'Standard',
+    requestDate: row.requestDate || '',
+    status: row.status || 'Pending Review',
+    adminRemarks: row.adminRemarks || row.librarianRemarks || '',
+    librarianRemarks: row.librarianRemarks || row.adminRemarks || '',
+    source: 'backend',
+  }
+}
+
+export function listLibraryRequests(options = {}) {
+  return listCollection('/api/v1/ops/library-requests', mapRequestToUi, options)
+}
+
+export function replaceLibraryRequests(rows, options = {}) {
+  return replaceCollection('/api/v1/ops/library-requests', rows, options)
+}
+
+export async function upsertLibraryRequest(row, options = {}) {
+  const listed = await listLibraryRequests(options)
+  if (!listed.success) return listed
+  const rows = Array.isArray(listed.data) ? [...listed.data] : []
+  const next = mapRequestToUi(row)
+  if (!next.id) next.id = `LRQ-${String(rows.length + 1).padStart(4, '0')}`
+  const idx = rows.findIndex((item) => String(item.id) === String(next.id))
+  if (idx >= 0) rows[idx] = { ...rows[idx], ...next }
+  else rows.unshift(next)
+  const saved = await replaceLibraryRequests(rows, options)
+  if (!saved.success) return saved
+  const mapped = (saved.data || []).map(mapRequestToUi)
+  return {
+    ...saved,
+    data: mapped.find((item) => String(item.id) === String(next.id)) || next,
+    rows: mapped,
+  }
+}
+
 /** Load all three library collections for the workspace (sequential to avoid flaky parallel fetch). */
 export async function loadLibraryWorkspace() {
   const blocked = requireLive()

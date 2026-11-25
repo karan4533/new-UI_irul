@@ -1,4 +1,5 @@
 import React from 'react'
+import { useAcademicsLiveCollection } from '../../../../services/api/useAcademicsLiveCollection'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import pdf_icon from '../../../../assets/images/pdf-icon.png'
@@ -30,6 +31,7 @@ const fileIcon = (fileType) => {
 const ViewStudyMaterial = ({ routeBase = DEFAULT_ROUTE_BASE }) => {
     const { id } = useParams()
     const navigate = useNavigate()
+    const { loading: liveLoading } = useAcademicsLiveCollection('study-materials')
     const record = getStudyMaterialById(id)
 
     return (
@@ -47,7 +49,7 @@ const ViewStudyMaterial = ({ routeBase = DEFAULT_ROUTE_BASE }) => {
 
             {!record ? (
                 <div className='bg-white rounded-2xl shadow-md p-8 text-center text-[#667085]'>
-                    Study material record not found or could not be loaded.
+                    {liveLoading ? 'Loading…' : 'Study material record not found or could not be loaded.'}
                 </div>
             ) : (
                 <>

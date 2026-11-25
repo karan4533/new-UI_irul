@@ -1,14 +1,22 @@
 import AttendanceAndLeaveWorkspace from '../Common/AttendanceAndLeave/AttendanceAndLeaveWorkspace'
+import MyLeaveRequestsList from '../Common/LeaveRequest/MyLeaveRequestsList'
+import ReceivedLeaveRequestsList from '../Common/LeaveRequest/ReceivedLeaveRequestsList'
+import LiveCollectionTabs from '../Pages/Admin/Live/LiveCollectionTabs'
 import { EnterpriseOperationsRoutes } from './EnterpriseOperationsRoutes'
 import React from 'react'
 import { Navigate, Route, Routes as ReactRoutes, useParams } from 'react-router-dom'
+import { isLiveApiEnabled } from '../services/api/tokenStore'
+
+const GATE_MGR_ATTENDANCE_TABS = [
+    { id: 'team', label: 'Team attendance', collection: 'ops:gate-team-attendance' },
+    { id: 'duties', label: 'Duty assignments', collection: 'ops:gate-duty-assignments' },
+    { id: 'biometric', label: 'Biometric punches', collection: 'ops:biometric-attendance' },
+]
 import Dashboard from '../Pages/GateKeeperManager/Dashboard/Dashboard'
 import AssignDutyList from '../Pages/GateKeeperManager/AssignDuty/AssignDutyList'
 import AssignDuty from '../Pages/GateKeeperManager/AssignDuty/AssignDuty'
-import MyLeaveRequests from '../Pages/GateKeeperManager/LeaveRequest/MyLeaveRequests'
 import AddLeaveRequest from '../Pages/GateKeeperManager/LeaveRequest/AddLeaveRequest'
 import ViewMyLeaveRequest from '../Pages/GateKeeperManager/LeaveRequest/ViewMyLeaveRequest'
-import ReceivedLeaveRequests from '../Pages/GateKeeperManager/LeaveRequest/ReceivedLeaveRequests'
 import ViewReceivedLeaveRequest from '../Pages/GateKeeperManager/LeaveRequest/ViewReceivedLeaveRequest'
 import IncidentsList from '../Pages/GateKeeperManager/IncidentManagement/IncidentsList'
 import GatekeeperAnnouncementList from '../Pages/GateKeeperManager/GatekeeperAnnouncement/GatekeeperAnnouncementList'
@@ -30,16 +38,17 @@ const LegacyLeaveApprovalViewRedirect = () => {
 }
 
 const GateKeeperManagerRoutes = () => {
+    const live = isLiveApiEnabled()
     return (
         <ReactRoutes>
             <Route path="/gatekeeper-manager/dashboard" element={<Dashboard />} />
             <Route path="/gatekeeper-manager/assign-duty-list" element={<AssignDutyList />} />
             <Route path="/gatekeeper-manager/assign-duty" element={<AssignDuty />} />
             <Route path="/gatekeeper-manager/leave-request" element={<Navigate to="/gatekeeper-manager/leave-request/my-requests" replace />} />
-            <Route path="/gatekeeper-manager/leave-request/my-requests" element={<AttendanceAndLeaveWorkspace defaultTab="my-leaves" />} />
+            <Route path="/gatekeeper-manager/leave-request/my-requests" element={live ? <MyLeaveRequestsList roleKey='gatekeepermanager' /> : <AttendanceAndLeaveWorkspace defaultTab="my-leaves" />} />
             <Route path="/gatekeeper-manager/leave-request/my-requests/add" element={<AddLeaveRequest />} />
             <Route path="/gatekeeper-manager/leave-request/my-requests/view/:id" element={<ViewMyLeaveRequest />} />
-            <Route path="/gatekeeper-manager/leave-request/received" element={<AttendanceAndLeaveWorkspace defaultTab="received-leaves" />} />
+            <Route path="/gatekeeper-manager/leave-request/received" element={live ? <ReceivedLeaveRequestsList roleKey='gatekeepermanager' description='Leave requests submitted for Gatekeeper Manager approval.' /> : <AttendanceAndLeaveWorkspace defaultTab="received-leaves" />} />
             <Route path="/gatekeeper-manager/leave-request/received/view/:id" element={<ViewReceivedLeaveRequest />} />
             <Route path="/gatekeeper-manager/leave-approval-list" element={<Navigate to="/gatekeeper-manager/leave-request/received" replace />} />
             <Route path="/gatekeeper-manager/leave-approval-list/view/:id" element={<LegacyLeaveApprovalViewRedirect />} />
@@ -48,9 +57,24 @@ const GateKeeperManagerRoutes = () => {
             <Route path="/gatekeeper-manager/add-gatekeeper-broadcast" element={<AddGatekeeperAnnouncement />} />
             <Route path="/gatekeeper-manager/gatekeeper-broadcast-list/view/:id" element={<ViewGatekeeperAnnouncement />} />
             <Route path="/gatekeeper-manager/attendance" element={<Navigate to="/gatekeeper-manager/attendance/my-attendance" replace />} />
-            <Route path="/gatekeeper-manager/attendance-and-leave" element={<AttendanceAndLeaveWorkspace defaultTab="overview" />} />
-            <Route path="/gatekeeper-manager/attendance/my-attendance" element={<AttendanceAndLeaveWorkspace defaultTab="records" />} />
-            <Route path="/gatekeeper-manager/attendance/gatekeepers-attendance" element={<GatekeepersAttendance />} />
+            <Route
+                path="/gatekeeper-manager/attendance-and-leave"
+                element={live
+                    ? <LiveCollectionTabs title='Gatekeeper attendance' description='Live team attendance, duty assignments and biometric punches.' tabs={GATE_MGR_ATTENDANCE_TABS} />
+                    : <AttendanceAndLeaveWorkspace defaultTab="overview" />}
+            />
+            <Route
+                path="/gatekeeper-manager/attendance/my-attendance"
+                element={live
+                    ? <LiveCollectionTabs title='My attendance' description='Live gate team attendance and biometric punches.' tabs={GATE_MGR_ATTENDANCE_TABS} />
+                    : <AttendanceAndLeaveWorkspace defaultTab="records" />}
+            />
+            <Route
+                path="/gatekeeper-manager/attendance/gatekeepers-attendance"
+                element={live
+                    ? <LiveCollectionTabs title='Gatekeepers attendance' description='Live team attendance register.' tabs={GATE_MGR_ATTENDANCE_TABS} defaultTab='team' />
+                    : <GatekeepersAttendance />}
+            />
             <Route path="/gatekeeper-manager/academic-calendar" element={<AcademicCalendar />} />
             <Route path="/gatekeeper-manager/notifications" element={<Notifications />} />
             {TaskManagementRoutes({ basePath: '/gatekeeper-manager' })}

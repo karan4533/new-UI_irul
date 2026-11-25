@@ -2,6 +2,28 @@ import React, { useState, useMemo } from 'react'
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { Calendar, ChevronLeft, ChevronRight, Video, ExternalLink } from "lucide-react";
+import { IntegrationNotice } from '../../../Common/ui'
+import { useAcademicsLiveCollection } from '../../../services/api/useAcademicsLiveCollection'
+import { getOnlineClasses } from '../../Teacher/OnlineClass/onlineClassData'
+
+const liveStatusToStudent = (status) => {
+    const key = String(status || '').toLowerCase()
+    if (key === 'completed') return 'Completed'
+    if (key === 'live') return 'Live'
+    return 'Upcoming'
+}
+
+const mapLiveRow = (row) => ({
+    id: row.id || row.onlineClassId,
+    className: row.classSection || [row.className, row.section].filter(Boolean).join('-') || '—',
+    subject: row.subject || '—',
+    teacher: row.teacherName || row.teacher || '—',
+    date: row.date || '—',
+    startTime: row.startTime || '',
+    endTime: row.endTime || '',
+    link: row.meetingLink || row.link || '',
+    status: liveStatusToStudent(row.status),
+})
 
 const INITIAL_CLASSES = [
     {
@@ -55,6 +77,13 @@ const OnlineClassDetails = () => {
     const [statusFilter, setStatusFilter] = useState('ALL')
     const [fromDate, setFromDate] = useState(new Date());
     const [toDate, setToDate] = useState(new Date());
+    const { live, loading, error, version } = useAcademicsLiveCollection('online-classes')
+    // Live: rows come only from academics `online-classes` (empty until hydrated); no demo seeds.
+    const sourceClasses = useMemo(
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        () => (live ? getOnlineClasses().map(mapLiveRow) : INITIAL_CLASSES),
+        [live, version],
+    )
 
     const bagdeColor = {
         "Completed": "bg-slate-100 text-slate-700 border-slate-200",
@@ -63,22 +92,25 @@ const OnlineClassDetails = () => {
     }
 
     const filteredClasses = useMemo(() => {
-        return INITIAL_CLASSES.filter((c) => {
+        return sourceClasses.filter((c) => {
             if (statusFilter !== 'ALL' && c.status !== statusFilter) return false
             if (searchTerm.trim()) {
                 const q = searchTerm.toLowerCase()
                 return (
-                    c.subject.toLowerCase().includes(q) ||
-                    c.className.toLowerCase().includes(q) ||
-                    c.teacher.toLowerCase().includes(q)
+                    String(c.subject).toLowerCase().includes(q) ||
+                    String(c.className).toLowerCase().includes(q) ||
+                    String(c.teacher).toLowerCase().includes(q)
                 )
             }
             return true
         })
-    }, [searchTerm, statusFilter])
+    }, [sourceClasses, searchTerm, statusFilter])
 
     return (
         <section>
+            {live && error ? (
+                <IntegrationNotice state='failed' title='Online classes unavailable' description={error} className='mb-4' />
+            ) : null}
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='flex justify-between md:items-center sm:items-stretch md:flex-row sm:flex-col flex-col gap-y-4'>
                     <button
@@ -180,6 +212,13 @@ const OnlineClassDetails = () => {
                         </thead>
 
                         <tbody className='divide-y divide-slate-100'>
+                            {filteredClasses.length === 0 ? (
+                                <tr>
+                                    <td colSpan={7} className='px-3 py-8 text-center text-sm text-slate-500'>
+                                        {live && loading ? 'Loading online classes…' : 'No online classes scheduled.'}
+                                    </td>
+                                </tr>
+                            ) : null}
                             {filteredClasses.map((item) => {
                                 const isLive = item.status === 'Live'
                                 return (

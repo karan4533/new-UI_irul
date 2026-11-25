@@ -34,11 +34,9 @@ const AddEscalationPage = ({ roleKey }) => {
         [roleConfig?.escalatesToRoleKey],
     )
 
-    const live = isLiveApiEnabled()
     const [form, setForm] = useState(() => emptyEscalationForm(live ? '' : defaultRecipientId))
     const [recipientOptions, setRecipientOptions] = useState(undefined)
     const [recipientError, setRecipientError] = useState('')
-    const [submitting, setSubmitting] = useState(false)
 
     useEffect(() => {
         if (!live) return undefined
@@ -68,19 +66,19 @@ const AddEscalationPage = ({ roleKey }) => {
         }
 
         if (live) {
-            setSubmitting(true)
+            setSaving(true)
             const res = await raiseEscalation({
                 description: form.description,
                 fullDescription: form.fullDescription,
                 remarks: form.remarks,
                 recipientUserId: form.recipientUserId || null,
             })
-            setSubmitting(false)
+            setSaving(false)
             if (!res.success) {
                 toast.error(typeof res.error === 'string' ? res.error : 'Escalation could not be raised.')
                 return
             }
-            toast.success(`Escalation ${res.data.displayId} routed to ${roleConfig.escalatesTo}.`)
+            toast.success(`Escalation ${res.data?.displayId || ''} routed to ${roleConfig.escalatesTo}.`)
             navigate(roleConfig.routeBase)
             return
         }
@@ -125,7 +123,7 @@ const AddEscalationPage = ({ roleKey }) => {
                 </button>
                 <button
                     type='submit'
-                    disabled={submitting}
+                    disabled={saving}
                     className='bg-[#515DEF] text-white text-sm text-center px-12 py-2 rounded-md border border-[#515DEF] hover:opacity-90 transition-all duration-200 cursor-pointer md:w-auto w-full'
                 >
                     {saving ? 'Raising…' : 'Raise escalation'}

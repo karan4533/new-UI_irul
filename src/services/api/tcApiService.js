@@ -123,16 +123,26 @@ export async function rejectTcRequestAtPrm(ref, remarks = '', options = {}) {
   return { ...res, data: mapTcRequestToUi(res.data || {}) }
 }
 
-/** POST /api/v1/tc-requests — file a TC request (tc.write). `studentRef` is an admission number or student id. */
-export async function createTcRequest(
-  { studentRef, reason, transferTo, lastDateOfAttendance = null, requestedBy = null } = {},
-  options = {},
-) {
+/**
+ * Advance PRM review → next campus stage.
+ * Backend has no dedicated /advance route; PRM uses /forward.
+ */
+export async function advanceTcRequest(ref, remarks = '', options = {}) {
+  return forwardTcRequest(ref, remarks, options)
+}
+
+/** POST /api/v1/tc-requests/{ref}/noc — department NOC decision */
+export async function updateTcNoc(ref, { decision = 'approve', remarks = '', status } = {}, options = {}) {
   const blocked = requireLive()
   if (blocked) return blocked
+  const normalized =
+    decision ||
+    (String(status || '').toLowerCase().includes('clear') || String(status || '').toLowerCase() === 'approved'
+      ? 'approve'
+      : 'reject')
   const res = await apiClient.post(
-    '/api/v1/tc-requests',
-    { studentRef, reason, transferTo, lastDateOfAttendance: lastDateOfAttendance || null, requestedBy },
+    `/api/v1/tc-requests/${encodeURIComponent(ref)}/noc`,
+    { decision: normalized === 'approve' || normalized === 'Approved' || normalized === 'Cleared' ? 'approve' : 'reject', remarks },
     { skipMock: true, ...options },
   )
   if (!res.success) return res

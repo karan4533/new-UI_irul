@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react'
+import { NavLink } from 'react-router-dom'
 import {
     Receipt,
     CheckCircle2,
@@ -14,8 +15,8 @@ import {
     X,
     Check
 } from 'lucide-react'
-import { DataTable, StatusBadge } from '../../Common/ui'
-import { proService } from '../../services/modules/proService'
+import { DataTable, FeedbackState, IntegrationNotice, StatusBadge } from '../../Common/ui'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
 
 const INITIAL_CHALLANS = [
     {
@@ -91,7 +92,9 @@ const INITIAL_CHALLANS = [
 ]
 
 const ProChallans = () => {
+    const live = isLiveApiEnabled()
     const [challans, setChallans] = useState(() => {
+        if (isLiveApiEnabled()) return []
         const saved = localStorage.getItem('pro_challans_records')
         return saved ? JSON.parse(saved) : INITIAL_CHALLANS
     })
@@ -102,6 +105,7 @@ const ProChallans = () => {
     const [feedbackMessage, setFeedbackMessage] = useState('')
 
     useEffect(() => {
+        if (isLiveApiEnabled()) return
         localStorage.setItem('pro_challans_records', JSON.stringify(challans))
     }, [challans])
 
@@ -121,6 +125,11 @@ const ProChallans = () => {
     }, [challans, statusFilter, searchQuery])
 
     const handleVerify = (id) => {
+        if (isLiveApiEnabled()) {
+            setFeedbackMessage('Live challan verification has no FastAPI collection yet. Use Permits / Affiliations.')
+            setTimeout(() => setFeedbackMessage(''), 4000)
+            return
+        }
         setChallans((prev) =>
             prev.map((c) => {
                 if (c.id === id) {
@@ -214,6 +223,29 @@ const ProChallans = () => {
             ),
         },
     ]
+
+    if (live) {
+        return (
+            <section className='space-y-4 p-1'>
+                <IntegrationNotice
+                    state='mock'
+                    title='Treasury challans are not a live FastAPI collection'
+                    description='Browser challan ledger is disabled in live mode. Track statutory fees via Permits and Affiliations until a dedicated challans API exists.'
+                />
+                <FeedbackState
+                    kind='empty'
+                    title='No live challan register'
+                    description='Use PRO Permits / Affiliations for government filings that are persisted on the server.'
+                    action={(
+                        <div className='flex flex-wrap justify-center gap-3'>
+                            <NavLink to='/pro/permits' className='rounded-md bg-[#515DEF] px-4 py-2 text-sm font-semibold text-white'>Open permits</NavLink>
+                            <NavLink to='/pro/affiliations' className='rounded-md border border-[#515DEF] px-4 py-2 text-sm font-semibold text-[#515DEF]'>Open affiliations</NavLink>
+                        </div>
+                    )}
+                />
+            </section>
+        )
+    }
 
     return (
         <section className='space-y-6 p-1'>

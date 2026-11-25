@@ -1,5 +1,9 @@
 import { CLASSES, SECTIONS, SUBJECTS } from '../../AssignedClass/assignedClassData'
 import { STUDENTS_LIST } from '../../StudentsList/studentsListData'
+import { isLiveApiEnabled } from '../../../../services/api/tokenStore.js'
+
+/** No live marks-entry endpoint yet: live mode is always an empty list and never invents marks. */
+export const MARKS_ENTRY_LIVE_UNAVAILABLE = 'Marks entry is not connected to a live endpoint yet. No demo marks are shown.'
 
 export const EXAM_NAMES = [
     'Continuous Assessment 1 (CA 1 / RCT 1)',
@@ -71,10 +75,12 @@ const STORAGE_KEY = 'teacher_marks_entries'
 const DEFAULT_MARKS_ENTRIES = []
 
 export const saveMarksEntries = (records) => {
+    if (isLiveApiEnabled()) return
     localStorage.setItem(STORAGE_KEY, JSON.stringify(records))
 }
 
 export const getMarksEntries = () => {
+    if (isLiveApiEnabled()) return []
     try {
         const stored = localStorage.getItem(STORAGE_KEY)
         if (stored) return JSON.parse(stored)
@@ -89,6 +95,7 @@ export const getMarksEntryById = (id) =>
     getMarksEntries().find((item) => item.id === id || item.entryId === id) ?? null
 
 export const addMarksEntry = (payload) => {
+    if (isLiveApiEnabled()) return []
     const list = getMarksEntries()
     const nextId = `ME-${1000 + list.length + 1}`
     const student = STUDENTS_LIST.find((item) => item.rollNumber === payload.rollNumber)

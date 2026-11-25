@@ -102,48 +102,6 @@ const EscalationListPage = ({ roleKey }) => {
         return getReceivedEscalations(effectiveRoleKey || roleKey, currentUser)
     }, [live, liveReceived, effectiveRoleKey, roleKey, currentUser])
 
-    const live = isLiveApiEnabled()
-    const seesAll = ['Super Admin', 'Admin'].includes(roleConfig?.roleLabel)
-    const [liveSent, setLiveSent] = useState([])
-    const [liveReceived, setLiveReceived] = useState([])
-    const [liveLoading, setLiveLoading] = useState(live)
-    const [liveError, setLiveError] = useState('')
-
-    const loadLive = useCallback(async () => {
-        setLiveLoading(true)
-        setLiveError('')
-        const [sent, received] = await Promise.all([
-            canAdd ? listEscalations('mine') : Promise.resolve({ success: true, data: [] }),
-            listEscalations(seesAll ? 'all' : 'received'),
-        ])
-        setLiveLoading(false)
-        const failure = [sent, received].find((res) => !res.success)
-        if (failure) {
-            setLiveSent([])
-            setLiveReceived([])
-            setLiveError(typeof failure.error === 'string' ? failure.error : 'Failed to load escalations.')
-            return
-        }
-        setLiveSent(sent.data)
-        setLiveReceived(received.data)
-    }, [canAdd, seesAll])
-
-    useEffect(() => {
-        if (!live) return undefined
-        const timer = setTimeout(() => { loadLive() }, 0)
-        return () => clearTimeout(timer)
-    }, [live, loadLive])
-
-    const mockSent = useMemo(
-        () => (live ? [] : getSentEscalations(effectiveRoleKey || roleKey, currentUser)),
-        [live, effectiveRoleKey, roleKey, currentUser],
-    )
-    const mockReceived = useMemo(
-        () => (live ? [] : getReceivedEscalations(effectiveRoleKey || roleKey, currentUser)),
-        [live, effectiveRoleKey, roleKey, currentUser],
-    )
-    const sentEscalations = live ? liveSent : mockSent
-    const receivedEscalations = live ? liveReceived : mockReceived
     const activeList = listView === 'received' ? receivedEscalations : sentEscalations
 
     const filtered = useMemo(() => {
@@ -223,18 +181,10 @@ const EscalationListPage = ({ roleKey }) => {
                         {live ? (
                             <button
                                 type='button'
-                                onClick={async () => {
-                                    const res = await runEscalationSlaSweep()
-                                    if (!res.success) {
-                                        toast.error(typeof res.error === 'string' ? res.error : 'SLA sweep failed.')
-                                        return
-                                    }
-                                    toast.success('24h SLA sweep completed.')
-                                    loadLive()
-                                }}
+                                onClick={loadLive}
                                 className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] bg-white px-4 text-sm font-semibold text-[var(--erp-ink)]'
                             >
-                                Run 24h SLA sweep
+                                Refresh
                             </button>
                         ) : null}
                         {canAdd && listView === 'sent' ? (
@@ -251,18 +201,18 @@ const EscalationListPage = ({ roleKey }) => {
                 <button type='button' role='tab' aria-selected={listView === 'received'} onClick={() => switchView('received')} className={`min-h-9 rounded-md px-3 text-sm font-semibold ${listView === 'received' ? 'bg-[var(--erp-ink)] text-white' : 'text-[var(--erp-slate)]'}`}>Received ({receivedEscalations.length})</button>
             </div>
 
-            {live && liveLoading && (
+            {live && listLoading && (
                 <FeedbackState kind='loading' title='Loading escalations' description='Fetching your escalation queue…' />
             )}
-            {live && !liveLoading && liveError && (
+            {live && !listLoading && listError && (
                 <FeedbackState
                     kind='error'
                     title='Escalations API unavailable'
-                    description={liveError}
+                    description={listError}
                     action={<button type='button' onClick={loadLive} className='min-h-10 rounded-lg border border-[var(--erp-line-strong)] px-4 text-sm font-semibold text-[var(--erp-ink)]'>Retry</button>}
                 />
             )}
-            {!(live && (liveLoading || liveError)) && (
+            {!(live && (listLoading || listError)) && (
             <div className='overflow-hidden rounded-[var(--erp-radius-surface)] border border-[var(--erp-line)] bg-white'>
                 <DataToolbar
                     query={search}

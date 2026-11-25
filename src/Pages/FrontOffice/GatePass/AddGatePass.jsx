@@ -29,7 +29,7 @@ const AddGatePass = () => {
         return undefined
     }, [])
 
-    const handleSave = () => {
+    const handleSave = async () => {
         const validationErrors = validateStudentGatePassForm(formData)
         setErrors(validationErrors)
         if (Object.keys(validationErrors).length > 0) {
@@ -38,7 +38,7 @@ const AddGatePass = () => {
         }
 
         setSubmitting(true)
-        const result = addStudentGatePass(formData)
+        const result = await addStudentGatePass(formData)
         setSubmitting(false)
 
         if (!result.success) {
@@ -47,7 +47,11 @@ const AddGatePass = () => {
         }
 
         const approvers = (formData.selectedApprovers || []).join(', ') || 'chosen approvers'
-        toast.success(`Gate pass submitted to ${approvers}. Security will verify at the gate after approval.`)
+        toast.success(
+            isLiveApiEnabled()
+                ? `Gate pass saved on the server and submitted to ${approvers}.`
+                : `Gate pass submitted to ${approvers}. Security will verify at the gate after approval.`,
+        )
         navigate('/front-office/gate-pass-list')
     }
 

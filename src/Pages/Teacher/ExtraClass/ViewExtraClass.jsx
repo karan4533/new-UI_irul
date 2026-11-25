@@ -1,7 +1,9 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { ArrowLeft, CheckCircle2, Clock, Check, Users, UserCheck, UserX } from 'lucide-react'
 import { getExtraClassById, updateExtraClassStatus } from './extraClassData'
+import { useAcademicsLiveCollection } from '../../../services/api/useAcademicsLiveCollection'
+import { canUseAcademicsApi } from '../../../services/api/academicsApiService'
 
 const DEFAULT_COHORT_STUDENTS = [
     { id: 'STU-01', rollNo: '10A-01', name: 'Aarav Patel', status: 'Present' },
@@ -44,7 +46,16 @@ const ViewExtraClass = ({ listPath = null }) => {
     const [record, setRecord] = useState(() => getExtraClassById(id))
     const [isConducting, setIsConducting] = useState(false)
     const [notes, setNotes] = useState(() => record?.sessionNotes || '')
-    const [attendance, setAttendance] = useState(() => record?.attendanceList || DEFAULT_COHORT_STUDENTS)
+    const [attendance, setAttendance] = useState(() => record?.attendanceList || (canUseAcademicsApi() ? [] : DEFAULT_COHORT_STUDENTS))
+    const { version } = useAcademicsLiveCollection('extra-classes')
+
+    useEffect(() => {
+        if (!canUseAcademicsApi()) return
+        const next = getExtraClassById(id)
+        setRecord(next)
+        setNotes(next?.sessionNotes || '')
+        setAttendance(next?.attendanceList || [])
+    }, [id, version])
 
     const toggleStudentAttendance = (stuId) => {
         setAttendance((prev) =>

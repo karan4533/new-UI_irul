@@ -1,4 +1,8 @@
 import { CLASSES, SECTIONS, SUBJECTS } from '../AssignedClass/assignedClassData'
+import { canUseAcademicsApi } from '../../../services/api/academicsApiService.js'
+import { readAcademicsCollection, writeAcademicsCollection } from '../../../services/api/academicsLiveCollection.js'
+
+const LIVE_COLLECTION = 'unit-tests'
 
 const STORAGE_KEY = 'teacher-unit-tests'
 
@@ -141,6 +145,9 @@ export const DEFAULT_UNIT_TESTS = [
 ]
 
 export const getUnitTests = () => {
+    if (canUseAcademicsApi()) {
+        return readAcademicsCollection(LIVE_COLLECTION) // [] until hydrated
+    }
     try {
         const stored = localStorage.getItem(STORAGE_KEY)
         if (stored) {
@@ -154,6 +161,10 @@ export const getUnitTests = () => {
 }
 
 export const saveUnitTests = (records) => {
+    if (canUseAcademicsApi()) {
+        writeAcademicsCollection(LIVE_COLLECTION, records)
+        return
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(records))
 }
 
@@ -184,8 +195,8 @@ export const addUnitTest = (values) => {
         duration: values.duration,
         fileName: values.fileName || '—',
         fileType: values.fileType || 'pdf',
-        teacher: values.teacher || 'Anita Verma',
-        teacherId: values.teacherId || 'TEA-1001',
+        teacher: values.teacher || (canUseAcademicsApi() ? '' : 'Anita Verma'),
+        teacherId: values.teacherId || (canUseAcademicsApi() ? '' : 'TEA-1001'),
         type: values.type || 'CA',
         marksEntered: false,
         averageScore: null

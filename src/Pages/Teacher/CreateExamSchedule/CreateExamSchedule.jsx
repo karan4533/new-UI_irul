@@ -8,8 +8,11 @@ import ExportModal from '../../../Common/CommonComponents/ExportModal'
 import EditRequestModal from '../../../Common/CommonComponents/EditRequestModal'
 import DeleteRequestModal from '../../../Common/CommonComponents/DeleteRequestModal'
 import ExamTimeTableModal from './Components/ExamTimeTableModal'
+import AcademicsLiveNotice from '../Components/AcademicsLiveNotice'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 import {
     getExamSchedules,
+    listLiveExamSchedules,
     APPROVAL_STATUSES,
     approvalBadgeColor,
     CLASSES,
@@ -21,7 +24,10 @@ const CreateExamSchedule = () => {
     const { role } = useAuth()
     const canDelete = canRoleDelete(role)
     const location = useLocation()
+    const live = isLiveApiEnabled()
     const [schedules, setSchedules] = useState(() => getExamSchedules())
+    const [loading, setLoading] = useState(Boolean(live))
+    const [error, setError] = useState('')
     const [fromDate, setFromDate] = useState(new Date())
     const [toDate, setToDate] = useState(new Date())
     const [exportModal, setExportModal] = useState(false)
@@ -30,11 +36,29 @@ const CreateExamSchedule = () => {
     const [timeTableModal, setTimeTableModal] = useState(null)
 
     useEffect(() => {
-        setSchedules(getExamSchedules())
+        let cancelled = false
+        async function load() {
+            if (!isLiveApiEnabled()) {
+                setSchedules(getExamSchedules())
+                setLoading(false)
+                setError('')
+                return
+            }
+            setLoading(true)
+            setError('')
+            const res = await listLiveExamSchedules()
+            if (cancelled) return
+            setLoading(false)
+            setSchedules(res.data)
+            setError(res.success ? '' : res.error)
+        }
+        load()
+        return () => { cancelled = true }
     }, [location.pathname])
 
     return (
         <section>
+            <AcademicsLiveNotice live={live} loading={loading} error={error} label='Exam schedules' endpoint='GET /api/v1/exams' />
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='flex justify-between md:items-center sm:items-stretch md:flex-row sm:flex-col flex-col gap-y-4'>
                     <button type='button' className='bg-[#515DEF] text-white uppercase text-sm px-6 py-1.5 border border-[#515DEF] rounded-lg hover:opacity-90 transition-all duration-200 cursor-pointer'>

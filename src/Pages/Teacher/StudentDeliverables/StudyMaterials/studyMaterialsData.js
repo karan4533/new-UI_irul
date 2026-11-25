@@ -1,4 +1,8 @@
 import { CLASSES, SECTIONS, SUBJECTS } from '../../AssignedClass/assignedClassData'
+import { canUseAcademicsApi } from '../../../../services/api/academicsApiService.js'
+import { readAcademicsCollection, writeAcademicsCollection } from '../../../../services/api/academicsLiveCollection.js'
+
+const LIVE_COLLECTION = 'study-materials'
 
 const STORAGE_KEY = 'teacher-student-deliverables-study-materials'
 
@@ -8,6 +12,9 @@ export const ACADEMICS_ROUTE_BASE = '/teacher/academics/study-materials'
 const DEFAULT_STUDY_MATERIALS = []
 
 export const getStudyMaterials = () => {
+    if (canUseAcademicsApi()) {
+        return readAcademicsCollection(LIVE_COLLECTION) // [] until hydrated
+    }
     try {
         const stored = localStorage.getItem(STORAGE_KEY)
         if (stored) return JSON.parse(stored)
@@ -18,6 +25,10 @@ export const getStudyMaterials = () => {
 }
 
 export const saveStudyMaterials = (records) => {
+    if (canUseAcademicsApi()) {
+        writeAcademicsCollection(LIVE_COLLECTION, records)
+        return
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(records))
 }
 

@@ -5,6 +5,9 @@ import 'react-datepicker/dist/react-datepicker.css'
 import { Calendar, ChevronLeft, ChevronRight, Bus, CreditCard, CheckCircle2, Receipt, X } from 'lucide-react'
 import { feeService } from '../../../services/modules/feeService'
 import { transportService } from '../../../services/modules/transportService'
+import { useAuth } from '../../../context/AuthContext'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { listTransportStudentAssignments } from '../../../services/api/transportApiService'
 
 const DEFAULT_TRANSPORT_RECORDS = [
     {
@@ -50,11 +53,21 @@ const TransportPayment = () => {
     const [searchTerm, setSearchTerm] = useState('')
     const [statusFilter, setStatusFilter] = useState('')
 
-    const [records, setRecords] = useState(DEFAULT_TRANSPORT_RECORDS)
-    const [activeRouteInfo, setActiveRouteInfo] = useState({
-        routeName: 'Route 4: Anna Nagar -> Collectorate -> Campus',
-        vehicleNumber: 'BUS-04 (TN-58-BZ-4190)',
-    })
+    const { user, employeeId } = useAuth()
+    const live = isLiveApiEnabled()
+    const liveStudentId = user?.studentId || user?.id || employeeId || ''
+
+    // Live: start empty — never DEFAULT_TRANSPORT_RECORDS / demo route.
+    const [records, setRecords] = useState(live ? [] : DEFAULT_TRANSPORT_RECORDS)
+    const [activeRouteInfo, setActiveRouteInfo] = useState(
+        live
+            ? { routeName: '—', vehicleNumber: '—' }
+            : {
+                routeName: 'Route 4: Anna Nagar -> Collectorate -> Campus',
+                vehicleNumber: 'BUS-04 (TN-58-BZ-4190)',
+            },
+    )
+    const [liveLoaded, setLiveLoaded] = useState(!live)
 
     // Payment modal state
     const [payModalItem, setPayModalItem] = useState(null)
@@ -65,6 +78,53 @@ const TransportPayment = () => {
     const [viewReceiptItem, setViewReceiptItem] = useState(null)
 
     const loadData = useCallback(async () => {
+        if (live) {
+            try {
+                const [assignRes, invRes] = await Promise.all([
+                    listTransportStudentAssignments(),
+                    feeService.getInvoices(),
+                ])
+                const mine = assignRes.success && liveStudentId
+                    ? (assignRes.data || []).find(
+                        (a) => String(a.studentId) === String(liveStudentId) || String(a.admissionNumber) === String(liveStudentId),
+                    )
+                    : null
+                const routeName = mine?.routeName ? `${mine.routeName}${mine.stopName ? ` (${mine.stopName})` : ''}` : '—'
+                const vehicleNumber = mine?.vehicleNumber || '—'
+                setActiveRouteInfo({ routeName, vehicleNumber })
+                if (invRes.success && Array.isArray(invRes.data) && liveStudentId) {
+                    const mapped = invRes.data
+                        .filter((inv) => String(inv.studentId) === String(liveStudentId))
+                        .filter((inv) =>
+                            inv.items?.some(
+                                (i) => i.feeHeadId === 'FH-TRN' || String(i.name || '').toLowerCase().includes('transport'),
+                            ) || String(inv.invoiceNumber || '').includes('TRP'),
+                        )
+                        .map((inv) => ({
+                            id: inv.id,
+                            invoiceNumber: inv.invoiceNumber,
+                            studentId: inv.studentId,
+                            routeName: inv.routeName || routeName,
+                            vehicleNumber: inv.vehicleNumber || vehicleNumber,
+                            transportFee: inv.totalAmount || 0,
+                            paidAmount: inv.paidAmount || 0,
+                            balanceAmount: inv.balanceAmount ?? ((inv.totalAmount || 0) - (inv.paidAmount || 0)),
+                            dueDate: inv.dueDate || '—',
+                            status: inv.status || (inv.balanceAmount === 0 ? 'Paid' : 'Pending'),
+                            paymentMethod: inv.paymentMethod || '—',
+                            receiptNumber: inv.receipts?.[0] || '',
+                        }))
+                    setRecords(mapped)
+                } else {
+                    setRecords([])
+                }
+            } catch {
+                setRecords([])
+            } finally {
+                setLiveLoaded(true)
+            }
+            return
+        }
         try {
             const [routesRes, manifestRes, invRes] = await Promise.all([
                 transportService.getRoutes(),
@@ -119,7 +179,7 @@ const TransportPayment = () => {
         } catch {
             // Graceful fallback to default mock data
         }
-    }, [])
+    }, [live, liveStudentId])
 
     useEffect(() => {
         loadData()
@@ -144,13 +204,23 @@ const TransportPayment = () => {
 
         const amountToPay = payModalItem.balanceAmount || payModalItem.transportFee || 3000
         try {
-            await feeService.recordPayment({
+            const payRes = await feeService.recordPayment({
                 invoiceId: payModalItem.id,
-                studentId: payModalItem.studentId || 'STU-001',
+                studentId: payModalItem.studentId || (live ? liveStudentId : 'STU-001'),
                 amount: amountToPay,
                 paymentMethod: selectedMethod,
             })
-        } catch {
+            if (live && payRes && payRes.success === false) {
+                setIsProcessing(false)
+                toast.error(payRes.error || payRes.message || 'Payment could not be recorded.')
+                return
+            }
+        } catch (err) {
+            if (live) {
+                setIsProcessing(false)
+                toast.error(err?.message || 'Payment could not be recorded.')
+                return
+            }
             // Handled gracefully in mock
         }
 
@@ -368,6 +438,15 @@ const TransportPayment = () => {
                         </thead>
 
                         <tbody>
+                            {filteredRecords.length === 0 ? (
+                                <tr>
+                                    <td colSpan={8} className='p-8 text-center text-sm text-slate-500'>
+                                        {live && !liveLoaded
+                                            ? 'Loading transport invoices…'
+                                            : 'No transport invoices found for your account.'}
+                                    </td>
+                                </tr>
+                            ) : null}
                             {filteredRecords.map((row) => (
                                 <tr
                                     key={row.id}

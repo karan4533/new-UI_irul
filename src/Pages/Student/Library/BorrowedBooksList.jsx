@@ -1,8 +1,11 @@
-import React, { useState, useMemo } from 'react'
+import React, { useCallback, useEffect, useState, useMemo } from 'react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { Calendar, ChevronLeft, ChevronRight, Plus, BookOpen, X, Check } from 'lucide-react'
 import { toast } from 'react-toastify'
+import { FeedbackState, IntegrationNotice } from '../../../Common/ui'
+import { listLibraryIssues } from '../../../services/api/libraryApiService'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 
 const INITIAL_BOOKS = [
     {
@@ -31,8 +34,27 @@ const INITIAL_BOOKS = [
     },
 ]
 
+const mapIssueRow = (row = {}) => {
+    const statusRaw = String(row.status || 'Issued')
+    let status = statusRaw
+    if (/issued|borrowed/i.test(statusRaw) && !row.returnDate) status = 'Borrowed'
+    if (/overdue/i.test(statusRaw) || Number(row.daysOverdue) > 0) status = 'Overdue'
+    if (/return/i.test(statusRaw) || row.returnDate) status = 'Returned'
+    return {
+        id: row.id || '',
+        bookName: row.bookTitle || row.bookName || '—',
+        authorName: row.author || row.authorName || '—',
+        issuedDate: row.issuedDate || '—',
+        returnDate: row.returnDate || row.dueDate || '—',
+        status,
+    }
+}
+
 const BorrowedBooksList = () => {
-    const [books, setBooks] = useState(INITIAL_BOOKS)
+    const live = isLiveApiEnabled()
+    const [books, setBooks] = useState(() => (live ? [] : INITIAL_BOOKS))
+    const [loading, setLoading] = useState(Boolean(live))
+    const [error, setError] = useState('')
     const [searchQuery, setSearchQuery] = useState('')
     const [statusFilter, setStatusFilter] = useState('')
     const [fromDate, setFromDate] = useState(null)
@@ -44,6 +66,28 @@ const BorrowedBooksList = () => {
         category: 'Mathematics',
         purpose: '',
     })
+
+    const loadLive = useCallback(async () => {
+        if (!isLiveApiEnabled()) {
+            setBooks(INITIAL_BOOKS)
+            setLoading(false)
+            return
+        }
+        setLoading(true)
+        setError('')
+        const res = await listLibraryIssues()
+        setLoading(false)
+        if (!res.success) {
+            setBooks([])
+            setError(typeof res.error === 'string' ? res.error : 'Failed to load library issues.')
+            return
+        }
+        setBooks((Array.isArray(res.data) ? res.data : []).map(mapIssueRow))
+    }, [])
+
+    useEffect(() => {
+        loadLive()
+    }, [loadLive])
 
     const badgeColor = {
         Returned: 'bg-[#4CAF5033] text-[#4CAF50]',
@@ -61,6 +105,11 @@ const BorrowedBooksList = () => {
 
     const handleRequestSubmit = (e) => {
         e.preventDefault()
+        if (isLiveApiEnabled()) {
+            toast.info('Book requests are handled by the Librarian portal. Live student self-request is not enabled yet.')
+            setShowRequestModal(false)
+            return
+        }
         if (!requestForm.bookTitle.trim()) {
             toast.error('Book title is required.')
             return
@@ -96,6 +145,15 @@ const BorrowedBooksList = () => {
 
     return (
         <section className='space-y-6'>
+            {live ? (
+                <IntegrationNotice
+                    state={error ? 'failed' : 'connected'}
+                    title={error ? 'Library issues API failed' : 'Borrowed books are live'}
+                    description={error || 'Loaded from GET /api/v1/ops/library-issues. Requests stay with the Librarian portal.'}
+                />
+            ) : null}
+            {loading ? <FeedbackState kind='loading' title='Loading borrowed books' description='Fetching library issues…' /> : null}
+            {error && !loading ? <FeedbackState kind='error' title='Library issues unavailable' description={error} /> : null}
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='flex justify-between md:items-center sm:items-stretch md:flex-row sm:flex-col flex-col gap-y-4'>
                     <button

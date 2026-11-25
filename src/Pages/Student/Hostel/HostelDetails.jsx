@@ -4,34 +4,121 @@ import hostel_img from "../../../assets/images/hostel-mock-img.png"
 import { Building, CircleCheck, ShieldAlert, Bed, Phone, Calendar, UserCheck, AlertCircle } from 'lucide-react'
 import { hostelService } from '../../../services/modules/hostelService'
 import { useAuth } from '../../../context/AuthContext'
+import { FeedbackState, IntegrationNotice } from '../../../Common/ui'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { listHostelAssignments } from '../../../services/api/hostelApiService'
+
+const norm = (value) => String(value ?? '').trim().toLowerCase()
 
 const HostelDetails = () => {
-    const { auth } = useAuth()
-    const studentId = auth?.user?.id || 'STU-001'
+    const { user, employeeId, email } = useAuth()
+    const live = isLiveApiEnabled()
+    // Live: no demo STU-001 fallback. Mock: keep demo identity.
+    const studentId = user?.studentId || user?.id || employeeId || (live ? '' : 'STU-001')
 
     const [enrolment, setEnrolment] = useState(null)
     const [loading, setLoading] = useState(true)
+    const [liveError, setLiveError] = useState('')
 
     useEffect(() => {
+        let cancelled = false
         const fetchEnrolment = async () => {
             setLoading(true)
+            setLiveError('')
             try {
-                // Try direct student ID, or demo fallback 'STU-001'
+                if (live) {
+                    const res = await listHostelAssignments()
+                    if (cancelled) return
+                    if (!res.success) {
+                        setEnrolment(null)
+                        setLiveError(typeof res.error === 'string' ? res.error : 'Could not load hostel assignments.')
+                        return
+                    }
+                    const keys = [studentId, user?.admissionNumber, user?.id, employeeId, email]
+                        .map(norm)
+                        .filter(Boolean)
+                    const match = (res.data || []).find((row) =>
+                        keys.includes(norm(row.studentId)) || keys.includes(norm(row.admissionNumber)),
+                    )
+                    setEnrolment(
+                        match
+                            ? {
+                                hostelBlockName: match.blockName,
+                                roomNumber: match.roomNumber,
+                                bedNumber: match.bedNumber,
+                                checkInDate: match.checkInDate,
+                                status: match.status,
+                            }
+                            : null,
+                    )
+                    return
+                }
+                // Mock mode: try direct student ID, or demo fallback 'STU-001'
                 let res = await hostelService.getEnrolmentByStudentId(studentId)
                 if (!res?.data) {
                     res = await hostelService.getEnrolmentByStudentId('STU-001')
                 }
-                if (res?.success && res.data) {
+                if (!cancelled && res?.success && res.data) {
                     setEnrolment(res.data)
                 }
             } catch (err) {
                 console.warn('Could not load student hostel enrolment:', err)
+                if (live && !cancelled) setLiveError(err?.message || 'Could not load hostel assignments.')
             } finally {
-                setLoading(false)
+                if (!cancelled) setLoading(false)
             }
         }
         fetchEnrolment()
-    }, [studentId])
+        return () => {
+            cancelled = true
+        }
+    }, [live, studentId, user, employeeId, email])
+
+    if (live) {
+        if (loading) {
+            return <FeedbackState kind='loading' title='Loading hostel allocation' description='Fetching /api/v1/ops/hostel-assignments…' compact />
+        }
+        if (liveError) {
+            return (
+                <section className='space-y-4'>
+                    <IntegrationNotice state='failed' title='Hostel allocation unavailable' description={liveError} />
+                    <FeedbackState kind='error' title='Could not load hostel details' description={liveError} compact />
+                </section>
+            )
+        }
+        if (!enrolment) {
+            return (
+                <FeedbackState
+                    kind='empty'
+                    title='No hostel allocation found'
+                    description='The hostel office has not assigned a room or bed to your account yet. Contact the hostel warden if you expect a placement.'
+                    compact
+                />
+            )
+        }
+        const dash = (v) => v || '—'
+        return (
+            <section className='space-y-6'>
+                <div className='bg-white rounded-2xl shadow-md p-6 space-y-6'>
+                    <h2 className='text-xl font-bold text-slate-900'>Hostel Bed Allocation</h2>
+                    <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6'>
+                        {[
+                            ['Hostel Block', dash(enrolment.hostelBlockName)],
+                            ['Allocated Room', dash(enrolment.roomNumber)],
+                            ['Allocated Bed', dash(enrolment.bedNumber)],
+                            ['Check-in Date', dash(enrolment.checkInDate)],
+                            ['Status', dash(enrolment.status)],
+                        ].map(([label, value]) => (
+                            <div key={label} className='flex flex-col gap-y-1'>
+                                <span className='text-xs font-semibold text-slate-500 uppercase tracking-wider'>{label}</span>
+                                <span className='text-sm text-slate-900 font-medium'>{value}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </section>
+        )
+    }
 
     const blockName = enrolment?.hostelBlockName || 'Block A - Boys Senior Wing'
     const roomNo = enrolment?.roomNumber || 'A-201'

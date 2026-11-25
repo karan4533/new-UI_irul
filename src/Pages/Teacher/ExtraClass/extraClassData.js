@@ -1,4 +1,8 @@
 import { CLASSES, SECTIONS, SUBJECTS } from '../AssignedClass/assignedClassData'
+import { canUseAcademicsApi } from '../../../services/api/academicsApiService.js'
+import { readAcademicsCollection, writeAcademicsCollection } from '../../../services/api/academicsLiveCollection.js'
+
+const LIVE_COLLECTION = 'extra-classes'
 
 export const VENUES = [
     'Room 204 — Science Block',
@@ -8,7 +12,7 @@ export const VENUES = [
     'Library Conference Room',
 ]
 
-export const EXTRA_CLASSES = [
+export const DEFAULT_EXTRA_CLASSES = [
     {
         id: 'EC-1001',
         extraClassId: 'EC-1001',
@@ -84,6 +88,9 @@ export const EXTRA_CLASSES = [
 const STORAGE_KEY = 'school-erp-extra-classes-v1'
 
 export const getExtraClasses = () => {
+    if (canUseAcademicsApi()) {
+        return readAcademicsCollection(LIVE_COLLECTION) // [] until hydrated
+    }
     try {
         const stored = localStorage.getItem(STORAGE_KEY)
         if (stored) {
@@ -93,7 +100,19 @@ export const getExtraClasses = () => {
     } catch {
         /* ignore */
     }
-    return EXTRA_CLASSES
+    return DEFAULT_EXTRA_CLASSES
+}
+
+export const saveExtraClasses = (records) => {
+    if (canUseAcademicsApi()) {
+        writeAcademicsCollection(LIVE_COLLECTION, records)
+        return
+    }
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(records))
+    } catch {
+        /* ignore */
+    }
 }
 
 export const getExtraClassById = (id) =>
@@ -111,6 +130,10 @@ export const updateExtraClassStatus = (id, status, notes = '', attendanceList = 
               }
             : item
     )
+    if (canUseAcademicsApi()) {
+        writeAcademicsCollection(LIVE_COLLECTION, updated)
+        return updated
+    }
     try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
     } catch {

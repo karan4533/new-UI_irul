@@ -1,3 +1,10 @@
+import { isLiveApiEnabled } from '../../services/api/tokenStore.js'
+import {
+    listLibraryRequests,
+    replaceLibraryRequests,
+    upsertLibraryRequest,
+} from '../../services/api/libraryApiService.js'
+
 const STORAGE_ISSUED_KEY = 'schoolerp-library-issued-books'
 const STORAGE_REQUESTS_KEY = 'schoolerp-library-book-requests'
 const STORAGE_CATALOG_KEY = 'schoolerp-library-catalog-books'
@@ -309,7 +316,19 @@ export const saveIssuedBooks = (records) => {
     localStorage.setItem(STORAGE_ISSUED_KEY, JSON.stringify(records))
 }
 
+// Live-mode in-memory cache of library-requests (never seeded from INITIAL_BOOK_REQUESTS).
+let liveBookRequestsCache = []
+
+/** Live: hydrate the in-memory cache from GET /api/v1/ops/library-requests. */
+export const hydrateBookRequests = async () => {
+    if (!isLiveApiEnabled()) return { success: true, data: getBookRequests() }
+    const res = await listLibraryRequests()
+    if (res.success) liveBookRequestsCache = Array.isArray(res.data) ? res.data : []
+    return res
+}
+
 export const getBookRequests = () => {
+    if (isLiveApiEnabled()) return liveBookRequestsCache
     try {
         const stored = localStorage.getItem(STORAGE_REQUESTS_KEY)
         if (stored) return JSON.parse(stored)
@@ -319,8 +338,18 @@ export const getBookRequests = () => {
     return INITIAL_BOOK_REQUESTS
 }
 
+/**
+ * Mock: sync localStorage write, returns void.
+ * Live: updates cache immediately and returns a Promise of the replaceLibraryRequests response.
+ */
 export const saveBookRequests = (records) => {
+    if (isLiveApiEnabled()) {
+        const rows = Array.isArray(records) ? records : []
+        liveBookRequestsCache = rows
+        return replaceLibraryRequests(rows)
+    }
     localStorage.setItem(STORAGE_REQUESTS_KEY, JSON.stringify(records))
+    return undefined
 }
 
 export const issueBookToMember = ({ bookId, memberId, returnDate }) => {
@@ -401,6 +430,37 @@ export const returnBookIssue = ({ issueId, returnComment = 'Returned in good con
 }
 
 export const submitBookRequest = ({ title, author, isbn, category, reason, requestedBy, requestedByRole, memberId }) => {
+    if (isLiveApiEnabled()) {
+        // Live: persisted via upsertLibraryRequest; returns a Promise<{ success, message, request }>.
+        const draft = {
+            title,
+            bookTitle: title,
+            author,
+            isbn: isbn || '',
+            category: category || 'General',
+            requestedBy: requestedBy || '',
+            requestedByRole: requestedByRole || 'Staff',
+            memberId: memberId || '',
+            requestDate: new Date().toLocaleDateString('en-GB'),
+            reason: reason || '',
+            status: 'Pending Review',
+            librarianRemarks: '',
+        }
+        return upsertLibraryRequest(draft).then((res) => {
+            if (!res.success) {
+                return {
+                    success: false,
+                    message: typeof res.error === 'string' ? res.error : 'Server rejected book request.',
+                }
+            }
+            if (Array.isArray(res.rows)) liveBookRequestsCache = res.rows
+            return {
+                success: true,
+                message: `Requisition for "${title}" submitted to Library Desk.`,
+                request: res.data,
+            }
+        })
+    }
     const newReq = {
         id: `REQ-${100 + getBookRequests().length + 1}`,
         title,
@@ -419,4 +479,3 @@ export const submitBookRequest = ({ title, author, isbn, category, reason, reque
     saveBookRequests(updated)
     return { success: true, message: `Requisition for "${title}" submitted to Library Desk.`, request: newReq }
 }
-

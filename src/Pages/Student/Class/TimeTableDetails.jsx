@@ -1,9 +1,12 @@
-import React, { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { format } from 'date-fns';
 import { Calendar, ChevronLeft, ChevronRight } from "lucide-react";
 import WeeklyTimetable from "../Components/WeeklyTimetable";
+import { useAuth } from '../../../context/AuthContext'
+import { useAcademicsLiveCollection } from '../../../services/api/useAcademicsLiveCollection'
+import { STUDENT_TIMETABLE_COLLECTION, dailyRowsFromWeeklyView, getLiveStudentWeeklyView } from '../Components/studentTimetableLive'
 
 const DAILY_TIMETABLE_ROWS = [
     { period: '1', time: '09:00 AM - 09:45 AM', subject: 'Mathematics', teacher: 'Sandy Selva' },
@@ -17,6 +20,15 @@ const TimeTableDetails = ({ weeklyOnly = false }) => {
     const [toDate, setToDate] = useState(new Date());
 
     const [activeTab, setActiveTab] = useState(weeklyOnly ? 2 : 1);
+
+    const { user } = useAuth()
+    const { live, loading, error, version } = useAcademicsLiveCollection(STUDENT_TIMETABLE_COLLECTION)
+    // Live: daily rows come from academics `class-timetables`; DAILY_TIMETABLE_ROWS is mock-only.
+    const dailyRows = useMemo(() => {
+        if (!live) return DAILY_TIMETABLE_ROWS
+        return dailyRowsFromWeeklyView(getLiveStudentWeeklyView(user), format(fromDate || new Date(), 'EEEE'))
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [live, user, version, fromDate])
 
     if (weeklyOnly) {
         return (
@@ -140,12 +152,21 @@ const TimeTableDetails = ({ weeklyOnly = false }) => {
                                 </thead>
 
                                 <tbody>
-                                    {DAILY_TIMETABLE_ROWS.map((row) => (
+                                    {dailyRows.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={5} className="px-2 py-8 text-center text-sm text-slate-500">
+                                                {error
+                                                    ? `Could not load class timetable: ${error}`
+                                                    : loading ? 'Loading class timetable…' : 'No periods scheduled for the selected day.'}
+                                            </td>
+                                        </tr>
+                                    ) : null}
+                                    {dailyRows.map((row) => (
                                         <tr key={row.period} className="border-b text-[#667085] border-[#f2f4f7] hover:bg-[#f2f4f7] rounded-lg">
                                             <td className="px-2 py-4 rounded-s-lg">{row.period}</td>
                                             <td className="px-2 py-4">{row.time}</td>
                                             <td className="px-2 py-4">{row.subject}</td>
-                                            <td className="px-2 py-4">{format(fromDate, 'dd-MM-yyyy')}</td>
+                                            <td className="px-2 py-4">{format(fromDate || new Date(), 'dd-MM-yyyy')}</td>
                                             <td className="px-2 py-4 rounded-e-lg">{row.teacher}</td>
                                         </tr>
                                     ))}

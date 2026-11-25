@@ -1,4 +1,6 @@
 import AttendanceAndLeaveWorkspace from '../Common/AttendanceAndLeave/AttendanceAndLeaveWorkspace'
+import MyLeaveRequestsList from '../Common/LeaveRequest/MyLeaveRequestsList'
+import { isLiveApiEnabled } from '../services/api/tokenStore'
 import { EnterpriseOperationsRoutes } from './EnterpriseOperationsRoutes'
 import React from 'react'
 import CentralActivitiesWorkspace from '../Common/Activities/CentralActivitiesWorkspace'
@@ -66,8 +68,9 @@ const TeacherRoutes = () => {
             <Route path="/teacher/activities" element={<CentralActivitiesWorkspace defaultCategory="all" roleKey="teacher" />} />
             <Route path="/teacher/attendance" element={<Navigate to="/teacher/attendance/my-attendance" replace />} />
             <Route path="/teacher/attendance-history" element={<Navigate to="/teacher/attendance/my-attendance" replace />} />
-            <Route path="/teacher/attendance-and-leave" element={<AttendanceAndLeaveWorkspace defaultTab="overview" />} />
-            <Route path="/teacher/attendance/my-attendance" element={<AttendanceAndLeaveWorkspace defaultTab="records" />} />
+            {/* Live: formal leave module (Common/LeaveRequest via MyLeaveRequests). Mock keeps the demo workspace. */}
+            <Route path="/teacher/attendance-and-leave" element={isLiveApiEnabled() ? <Navigate to="/teacher/leave-request/my-requests" replace /> : <AttendanceAndLeaveWorkspace defaultTab="overview" />} />
+            <Route path="/teacher/attendance/my-attendance" element={isLiveApiEnabled() ? <Navigate to="/teacher/leave-request/my-requests" replace /> : <AttendanceAndLeaveWorkspace defaultTab="records" />} />
             <Route path="/teacher/attendance/class-attendance" element={<ClassAttendance />} />
             <Route path="/teacher/class/class-routine" element={<ClassRoutine />} />
             <Route path="/teacher/class/extra-class" element={<ExtraClass />} />
@@ -77,7 +80,7 @@ const TeacherRoutes = () => {
             <Route path="/teacher/class/online-class/add" element={<AddOnlineClass />} />
             <Route path="/teacher/class/online-class/view/:id" element={<ViewOnlineClass />} />
             <Route path="/teacher/class/leave-request" element={<Navigate to="/teacher/leave-request/received" replace />} />
-            <Route path="/teacher/leave-request/my-requests" element={<MyLeaveRequests />} />
+            <Route path="/teacher/leave-request/my-requests" element={isLiveApiEnabled() ? <MyLeaveRequestsList roleKey="teacher" /> : <MyLeaveRequests />} />
             <Route path="/teacher/leave-request/my-requests/add" element={<AddLeaveRequest />} />
             <Route path="/teacher/leave-request/my-requests/view/:id" element={<ViewMyLeaveRequest />} />
             <Route path="/teacher/leave-request/received" element={<ReceivedLeaveRequests />} />

@@ -76,6 +76,13 @@ export const LEAVE_ROUTE_CONFIG = {
         receivedList: '/transport-manager/leave-request',
         receivedView: '/transport-manager/leave-request/view',
     },
+    pro: {
+        myList: '/pro/leave-request/my-requests',
+        add: '/pro/leave-request/my-requests/add',
+        myView: '/pro/leave-request/my-requests/view',
+        receivedList: '/pro/leave-request/received',
+        receivedView: '/pro/leave-request/received/view',
+    },
     librarian: {
         myList: '/librarian/leave-request/my-requests',
         add: '/librarian/leave-request/my-requests/add',
@@ -169,15 +176,15 @@ export const LEAVE_ROUTE_CONFIG = {
     },
     student: {
         myList: '/student/apply-leave',
-        add: '/student/apply-leave',
-        myView: '/student/apply-leave',
+        add: '/student/apply-leave/add',
+        myView: '/student/apply-leave/view',
         receivedList: '/student/apply-leave',
         receivedView: '/student/apply-leave',
     },
     parent: {
         myList: '/parent/apply-leave',
-        add: '/parent/apply-leave',
-        myView: '/parent/apply-leave',
+        add: '/parent/apply-leave/add',
+        myView: '/parent/apply-leave/view',
         receivedList: '/parent/apply-leave',
         receivedView: '/parent/apply-leave',
     },
@@ -220,6 +227,11 @@ export const LEAVE_APPROVER_CONFIG = {
         submitHint: 'This request will be sent to Admin for approval.',
     },
     [ROLES.PRM]: {
+        approverRole: ROLES.DIRECTOR,
+        requestedToLabel: 'Director',
+        submitHint: 'This request will be sent to Director for approval.',
+    },
+    [ROLES.PRO]: {
         approverRole: ROLES.DIRECTOR,
         requestedToLabel: 'Director',
         submitHint: 'This request will be sent to Director for approval.',

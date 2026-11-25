@@ -5,40 +5,81 @@ import 'react-datepicker/dist/react-datepicker.css'
 import { Calendar, ChevronLeft, ChevronRight } from 'lucide-react'
 import ExamTimeTableModal from '../../Teacher/CreateExamSchedule/Components/ExamTimeTableModal'
 import { getExamSchedules } from '../../Teacher/CreateExamSchedule/createExamScheduleData'
+import { FeedbackState, IntegrationNotice } from '../../../Common/ui'
+import { listExams } from '../../../services/api/examsApiService'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 
 const STUDENT_CLASS = '10'
 const STUDENT_SECTION = 'A'
 
 const ExamSchedule = () => {
     const location = useLocation()
-    const [schedules, setSchedules] = useState(() => getExamSchedules())
+    const live = isLiveApiEnabled()
+    const [schedules, setSchedules] = useState(() => (live ? [] : getExamSchedules()))
+    const [loading, setLoading] = useState(Boolean(live))
+    const [error, setError] = useState('')
     const [fromDate, setFromDate] = useState(null)
     const [toDate, setToDate] = useState(null)
     const [search, setSearch] = useState('')
     const [timeTableModal, setTimeTableModal] = useState(null)
 
     useEffect(() => {
-        setSchedules(getExamSchedules())
+        let cancelled = false
+        async function load() {
+            if (!isLiveApiEnabled()) {
+                setSchedules(getExamSchedules())
+                setLoading(false)
+                setError('')
+                return
+            }
+            setLoading(true)
+            setError('')
+            const res = await listExams()
+            if (cancelled) return
+            setLoading(false)
+            if (!res.success) {
+                setSchedules([])
+                setError(typeof res.error === 'string' ? res.error : 'Failed to load exam schedules.')
+                return
+            }
+            setSchedules(Array.isArray(res.data) ? res.data : [])
+        }
+        load()
+        return () => { cancelled = true }
     }, [location.pathname])
 
     const filteredSchedules = useMemo(() => {
         const query = search.trim().toLowerCase()
 
         return schedules.filter((record) => {
-            if (record.approvalStatus !== 'Approved') return false
-            if (record.className !== STUDENT_CLASS || record.section !== STUDENT_SECTION) return false
+            const status = record.approvalStatus || record.status
+            if (live) {
+                if (status && !['Approved', 'Published', 'Scheduled'].includes(status)) return false
+            } else {
+                if (record.approvalStatus !== 'Approved') return false
+                if (record.className !== STUDENT_CLASS || record.section !== STUDENT_SECTION) return false
+            }
 
             if (query) {
-                const haystack = `${record.examId} ${record.examName} ${record.teacherName}`.toLowerCase()
+                const haystack = `${record.examId || record.id || ''} ${record.examName || ''} ${record.teacherName || ''} ${record.className || ''}`.toLowerCase()
                 if (!haystack.includes(query)) return false
             }
 
             return true
         })
-    }, [schedules, search])
+    }, [schedules, search, live])
 
     return (
-        <section>
+        <section className='space-y-4'>
+            {live ? (
+                <IntegrationNotice
+                    state={error ? 'failed' : 'connected'}
+                    title={error ? 'Exam schedules API failed' : 'Exam schedules are live'}
+                    description={error || 'Loaded from GET /api/v1/exams. No browser mock fallback when live.'}
+                />
+            ) : null}
+            {loading ? <FeedbackState kind='loading' title='Loading exam schedules' description='Fetching campus exams…' /> : null}
+            {error && !loading ? <FeedbackState kind='error' title='Exam schedules unavailable' description={error} /> : null}
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='flex justify-between md:items-center sm:items-stretch md:flex-row sm:flex-col flex-col gap-y-4'>
                     <button
@@ -134,12 +175,12 @@ const ExamSchedule = () => {
                             ) : (
                                 filteredSchedules.map((record) => (
                                     <tr key={record.id} className='border-b text-[#667085] border-[#f2f4f7] hover:bg-[#f2f4f7] rounded-lg'>
-                                        <td className='px-2 py-4 font-medium text-[#1E1E1E] rounded-s-lg'>{record.examId}</td>
-                                        <td className='px-2 py-4 font-medium text-[#1E1E1E]'>{record.examName}</td>
-                                        <td className='px-2 py-4'>{record.classLabel ?? `${record.className} - ${record.section}`}</td>
-                                        <td className='px-2 py-4'>{record.startDate}</td>
-                                        <td className='px-2 py-4'>{record.endDate}</td>
-                                        <td className='px-2 py-4'>{record.teacherName}</td>
+                                        <td className='px-2 py-4 font-medium text-[#1E1E1E] rounded-s-lg'>{record.examId || record.id || '—'}</td>
+                                        <td className='px-2 py-4 font-medium text-[#1E1E1E]'>{record.examName || '—'}</td>
+                                        <td className='px-2 py-4'>{record.classLabel ?? ([record.className, record.section].filter(Boolean).join(' - ') || '—')}</td>
+                                        <td className='px-2 py-4'>{record.startDate || '—'}</td>
+                                        <td className='px-2 py-4'>{record.endDate || '—'}</td>
+                                        <td className='px-2 py-4'>{record.teacherName || '—'}</td>
                                         <td className='px-2 py-4 rounded-e-lg'>
                                             <button
                                                 type='button'

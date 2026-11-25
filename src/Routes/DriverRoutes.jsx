@@ -1,6 +1,10 @@
 import AttendanceAndLeaveWorkspace from '../Common/AttendanceAndLeave/AttendanceAndLeaveWorkspace'
+import MyLeaveRequestsList from '../Common/LeaveRequest/MyLeaveRequestsList'
+import AddLeaveRequestForm from '../Common/LeaveRequest/AddLeaveRequestForm'
+import ViewMyLeaveRequestPage from '../Common/LeaveRequest/ViewMyLeaveRequestPage'
 import React from 'react'
 import { Route, Routes as ReactRoutes, Navigate } from 'react-router-dom'
+import { isLiveApiEnabled } from '../services/api/tokenStore'
 import PagePlaceholder from '../Pages/Driver/Components/PagePlaceholder'
 import Dashboard from '../Pages/Driver/Dashboard/Dashboard'
 import VehicleDetails from '../Pages/Driver/VehicleManagement/VehicleDetails'
@@ -95,11 +99,11 @@ const DriverRoutes = () => {
             <Route path='/driver/maintenance-request/add' element={<AddMaintenanceRequest />} />
             <Route path='/driver/maintenance-request/edit/:id' element={<EditMaintenanceRequest />} />
             <Route path='/driver/maintenance-request/view/:id' element={<ViewMaintenanceRequest />} />
-            <Route path='/driver/leave-request' element={<LeaveRequest />} />
-            <Route path='/driver/leave-request/add' element={<AddLeaveRequest />} />
-            <Route path='/driver/leave-request/edit/:id' element={<EditLeaveRequest />} />
-            <Route path='/driver/leave-request/view/:id' element={<ViewLeaveRequest />} />
-            <Route path="/driver/attendance-and-leave" element={<AttendanceAndLeaveWorkspace defaultTab="overview" />} />
+            <Route path='/driver/leave-request' element={isLiveApiEnabled() ? <MyLeaveRequestsList roleKey='driver' /> : <LeaveRequest />} />
+            <Route path='/driver/leave-request/add' element={isLiveApiEnabled() ? <AddLeaveRequestForm roleKey='driver' /> : <AddLeaveRequest />} />
+            <Route path='/driver/leave-request/edit/:id' element={isLiveApiEnabled() ? <Navigate to='/driver/leave-request' replace /> : <EditLeaveRequest />} />
+            <Route path='/driver/leave-request/view/:id' element={isLiveApiEnabled() ? <ViewMyLeaveRequestPage roleKey='driver' /> : <ViewLeaveRequest />} />
+            <Route path="/driver/attendance-and-leave" element={isLiveApiEnabled() ? <Navigate to='/driver/leave-request' replace /> : <AttendanceAndLeaveWorkspace defaultTab="overview" />} />
 
             {/* Driver Reports & Analytics */}
             <Route path='/driver/reports-analytics' element={<UniversalReportsAnalyticsWorkspace roleOverride="driver" />} />

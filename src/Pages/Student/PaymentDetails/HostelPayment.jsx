@@ -5,10 +5,13 @@ import { Calendar, ChevronLeft, ChevronRight, Search, CreditCard, CheckCircle2, 
 import { toast } from 'react-toastify'
 import { feeService } from '../../../services/modules/feeService'
 import { useAuth } from '../../../context/AuthContext'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 
 const HostelPayment = () => {
-    const { auth } = useAuth()
-    const studentId = auth?.user?.id || 'STU-001'
+    const { user, employeeId } = useAuth()
+    const live = isLiveApiEnabled()
+    // Live: no demo STU-001 identity or seeded invoice rows.
+    const studentId = user?.studentId || user?.id || employeeId || (live ? '' : 'STU-001')
 
     const [invoices, setInvoices] = useState([])
     const [loading, setLoading] = useState(true)
@@ -29,6 +32,10 @@ const HostelPayment = () => {
         try {
             const res = await feeService.getInvoices({ feeHead: 'FH-HSTL' })
             if (res.success && Array.isArray(res.data)) {
+                if (live) {
+                    setInvoices(studentId ? res.data.filter((inv) => inv.studentId === studentId) : [])
+                    return
+                }
                 // Find invoices for this student or related hostel invoices
                 const matched = res.data.filter((inv) => inv.studentId === studentId || inv.feeHeadId === 'FH-HSTL')
                 if (matched.length > 0) {
@@ -63,6 +70,7 @@ const HostelPayment = () => {
             }
         } catch (err) {
             console.warn('Failed to load hostel fee invoices:', err)
+            if (live) setInvoices([])
         } finally {
             setLoading(false)
         }

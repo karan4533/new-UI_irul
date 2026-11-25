@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect, useCallback } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
     BookOpen,
@@ -21,6 +21,11 @@ import ExportModal from '../../../Common/CommonComponents/ExportModal'
 import { IntegrationNotice } from '../../../Common/ui'
 import { useAuth } from '../../../context/AuthContext'
 import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import {
+    listLibraryRequests,
+    replaceLibraryRequests,
+    upsertLibraryRequest,
+} from '../../../services/api/libraryApiService'
 
 const STORAGE_KEY = 'school-erp-library-book-requests-v1'
 
@@ -108,6 +113,8 @@ const INITIAL_REQUESTS = [
 ]
 
 const readRequests = () => {
+    // Live mode: never read INITIAL_REQUESTS or localStorage; hydrate from API instead.
+    if (isLiveApiEnabled()) return []
     try {
         const stored = localStorage.getItem(STORAGE_KEY)
         if (stored) {
@@ -121,6 +128,7 @@ const readRequests = () => {
 }
 
 const saveRequests = (items) => {
+    if (isLiveApiEnabled()) return
     try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(items))
     } catch {
@@ -130,7 +138,11 @@ const saveRequests = (items) => {
 
 export default function BookRequestsList() {
     const { role } = useAuth()
+    const live = isLiveApiEnabled()
     const [requests, setRequests] = useState(readRequests)
+    const [liveSource, setLiveSource] = useState(live ? 'loading' : 'local')
+    const [liveError, setLiveError] = useState('')
+    const [saving, setSaving] = useState(false)
     const [searchTerm, setSearchTerm] = useState('')
     const [statusFilter, setStatusFilter] = useState('ALL')
     const [typeFilter, setTypeFilter] = useState('ALL')
@@ -153,14 +165,33 @@ export default function BookRequestsList() {
         priority: 'Standard',
     })
 
+    const hydrate = useCallback(async () => {
+        if (!isLiveApiEnabled()) return
+        setLiveSource((prev) => (prev === 'backend' ? 'backend' : 'loading'))
+        const res = await listLibraryRequests()
+        if (!res.success) {
+            setRequests([])
+            setLiveSource('error')
+            setLiveError(typeof res.error === 'string' ? res.error : 'Failed to load library requests.')
+            return
+        }
+        setRequests(Array.isArray(res.data) ? res.data : [])
+        setLiveSource('backend')
+        setLiveError('')
+    }, [])
+
+    useEffect(() => {
+        hydrate()
+    }, [hydrate])
+
     const filteredRequests = useMemo(() => {
         return requests.filter((r) => {
             const matchesSearch = !searchTerm ||
-                r.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                r.bookTitle.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                r.author.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                r.requesterName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                r.department.toLowerCase().includes(searchTerm.toLowerCase())
+                String(r.id || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                String(r.bookTitle || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                String(r.author || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                String(r.requesterName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                String(r.department || '').toLowerCase().includes(searchTerm.toLowerCase())
 
             const matchesStatus = statusFilter === 'ALL' || r.status === statusFilter
             const matchesType = typeFilter === 'ALL' || r.requesterType === typeFilter
@@ -179,8 +210,40 @@ export default function BookRequestsList() {
         }
     }, [requests])
 
-    const handleCreateRequest = (e) => {
+    const emptyForm = {
+        bookTitle: '',
+        author: '',
+        isbn: '',
+        requesterName: '',
+        requesterId: '',
+        requesterType: 'Student',
+        classSection: '',
+        department: '',
+        purpose: '',
+        priority: 'Standard',
+    }
+
+    const handleCreateRequest = async (e) => {
         e.preventDefault()
+        if (live) {
+            setSaving(true)
+            const res = await upsertLibraryRequest({
+                ...newForm,
+                requestDate: new Date().toISOString().split('T')[0],
+                status: 'Pending Review',
+                adminRemarks: '',
+            })
+            setSaving(false)
+            if (!res.success) {
+                setLiveError(typeof res.error === 'string' ? res.error : 'Server rejected book request.')
+                setLiveSource('error')
+                return
+            }
+            setIsAddModalOpen(false)
+            setNewForm(emptyForm)
+            await hydrate()
+            return
+        }
         const newRecord = {
             id: `BR-2026-${String(requests.length + 1).padStart(3, '0')}`,
             ...newForm,
@@ -192,24 +255,34 @@ export default function BookRequestsList() {
         setRequests(updated)
         saveRequests(updated)
         setIsAddModalOpen(false)
-        setNewForm({
-            bookTitle: '',
-            author: '',
-            isbn: '',
-            requesterName: '',
-            requesterId: '',
-            requesterType: 'Student',
-            classSection: '',
-            department: '',
-            purpose: '',
-            priority: 'Standard',
-        })
+        setNewForm(emptyForm)
     }
 
-    const handleUpdateStatus = (id, newStatus, remarks = '') => {
+    const handleUpdateStatus = async (id, newStatus, remarks = '') => {
         const updated = requests.map((r) =>
-            r.id === id ? { ...r, status: newStatus, adminRemarks: remarks || r.adminRemarks } : r
+            r.id === id
+                ? {
+                    ...r,
+                    status: newStatus,
+                    adminRemarks: remarks || r.adminRemarks,
+                    librarianRemarks: remarks || r.librarianRemarks,
+                }
+                : r
         )
+        if (live) {
+            setSaving(true)
+            const res = await replaceLibraryRequests(updated)
+            setSaving(false)
+            if (!res.success) {
+                setLiveError(typeof res.error === 'string' ? res.error : 'Server rejected status update.')
+                setLiveSource('error')
+                return
+            }
+            setSelectedRequest(null)
+            setActionNotes('')
+            await hydrate()
+            return
+        }
         setRequests(updated)
         saveRequests(updated)
         setSelectedRequest(null)
@@ -229,15 +302,33 @@ export default function BookRequestsList() {
         }
     }
 
-    const live = isLiveApiEnabled()
-
     return (
         <section className='space-y-4'>
-            <IntegrationNotice
-                state='mock'
-                title={live ? 'Book requests have no FastAPI collection' : 'Browser mock book requests'}
-                description='This screen intentionally uses browser storage. Catalog, issues and members are live elsewhere under /api/v1/ops/library-*.'
-            />
+            {liveSource === 'backend' ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Live book requests'
+                    description='Requisitions hydrate from GET /api/v1/ops/library-requests; submit and status changes persist via full-collection PUT. An empty list means no requests on the server.'
+                />
+            ) : liveSource === 'error' ? (
+                <IntegrationNotice
+                    state='failed'
+                    title='Book requests unavailable'
+                    description={liveError || 'Could not reach /api/v1/ops/library-requests.'}
+                />
+            ) : liveSource === 'loading' ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Loading book requests'
+                    description='Fetching /api/v1/ops/library-requests…'
+                />
+            ) : (
+                <IntegrationNotice
+                    state='mock'
+                    title='Browser mock book requests'
+                    description='Demo requisitions stored in browser storage. Enable live API to use /api/v1/ops/library-requests.'
+                />
+            )}
             {/* Unified Book Management Navigation Tabs */}
             <div className='flex items-center gap-2 border-b border-slate-200 pb-2'>
                 <NavLink
@@ -486,6 +577,7 @@ export default function BookRequestsList() {
                         <div className='flex items-center justify-end gap-2 pt-2 border-t'>
                             <button
                                 type='button'
+                                disabled={saving}
                                 onClick={() => handleUpdateStatus(selectedRequest.id, 'Rejected', actionNotes || 'Declined after library committee review.')}
                                 className='px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-semibold'
                             >
@@ -493,6 +585,7 @@ export default function BookRequestsList() {
                             </button>
                             <button
                                 type='button'
+                                disabled={saving}
                                 onClick={() => handleUpdateStatus(selectedRequest.id, 'Approved & Reserved', actionNotes || 'Approved. Requisition forwarded to acquisition department.')}
                                 className='px-4 py-2 bg-[#515DEF] hover:bg-[#434ec9] text-white rounded-lg text-xs font-semibold shadow-xs'
                             >
@@ -641,7 +734,8 @@ export default function BookRequestsList() {
                                 </button>
                                 <button
                                     type='submit'
-                                    className='px-4 py-2 bg-[#515DEF] hover:bg-[#434ec9] text-white rounded-lg font-semibold shadow-xs'
+                                    disabled={saving}
+                                    className='px-4 py-2 bg-[#515DEF] hover:bg-[#434ec9] text-white rounded-lg font-semibold shadow-xs disabled:opacity-50'
                                 >
                                     Submit Request
                                 </button>

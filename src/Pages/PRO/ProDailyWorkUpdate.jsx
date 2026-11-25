@@ -18,8 +18,9 @@ import {
     Send,
     Edit3
 } from 'lucide-react'
-import { DataTable, StatusBadge } from '../../Common/ui'
+import { DataTable, FeedbackState, IntegrationNotice, StatusBadge } from '../../Common/ui'
 import { proService } from '../../services/modules/proService'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
 
 const AUTHORITIES = [
     'ALL',
@@ -44,7 +45,9 @@ const STATUSES = ['ALL', 'Completed', 'Pending Follow-up', 'In Progress']
 
 const ProDailyWorkUpdate = () => {
     const [updates, setUpdates] = useState([])
+    const live = isLiveApiEnabled()
     const [loading, setLoading] = useState(true)
+    const [error, setError] = useState('')
     const [searchQuery, setSearchQuery] = useState('')
     const [authorityFilter, setAuthorityFilter] = useState('ALL')
     const [officerFilter, setOfficerFilter] = useState('ALL')
@@ -74,6 +77,7 @@ const ProDailyWorkUpdate = () => {
 
     const loadData = async () => {
         setLoading(true)
+        setError('')
         try {
             const res = await proService.getDailyWorkUpdates({
                 authority: authorityFilter,
@@ -85,9 +89,14 @@ const ProDailyWorkUpdate = () => {
             })
             if (res.success && Array.isArray(res.data)) {
                 setUpdates(res.data)
+            } else {
+                setUpdates([])
+                if (live) setError(typeof res.error === 'string' ? res.error : 'Failed to load daily work updates.')
             }
         } catch (err) {
             console.error('Failed to load daily work updates:', err)
+            setUpdates([])
+            if (live) setError(err?.message || 'Failed to load daily work updates.')
         } finally {
             setLoading(false)
         }
@@ -138,7 +147,7 @@ const ProDailyWorkUpdate = () => {
                 })
                 loadData()
             } else {
-                alert(`Error: ${res.error?.message || 'Failed to create work update'}`)
+                alert(`Error: ${(typeof res.error === 'string' ? res.error : res.error?.message) || 'Failed to create work update'}`)
             }
         } catch (err) {
             console.error('Failed to create daily work update:', err)
@@ -164,6 +173,8 @@ const ProDailyWorkUpdate = () => {
                 setEditStatusModal(null)
                 setStatusRemarks('')
                 loadData()
+            } else {
+                alert(`Error: ${(typeof res.error === 'string' ? res.error : res.error?.message) || 'Failed to update status'}`)
             }
         } catch (err) {
             console.error('Failed to update status:', err)
@@ -395,6 +406,27 @@ const ProDailyWorkUpdate = () => {
                 )}
             </div>
 
+            {live && !error && !loading ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Daily work updates are live'
+                    description='GET/PUT /api/v1/ops/pro-daily-updates. No demo rows or localStorage fallback on failure.'
+                />
+            ) : null}
+            {!live ? (
+                <IntegrationNotice
+                    state='mock'
+                    title='Demo mode'
+                    description='Live API is disabled; daily work updates are stored in the local demo adapter only.'
+                />
+            ) : null}
+            {error ? (
+                <>
+                    <IntegrationNotice state='failed' title='Daily updates API failed' description={error} />
+                    <FeedbackState kind='error' title='Daily work updates unavailable' description={error} />
+                </>
+            ) : null}
+
             {/* Metrics */}
             <div className='grid grid-cols-2 sm:grid-cols-4 gap-4'>
                 <div className='bg-white rounded-2xl p-4 border border-slate-200 shadow-xs'>
@@ -520,7 +552,13 @@ const ProDailyWorkUpdate = () => {
                     <DataTable
                         columns={columns}
                         data={updates}
-                        emptyMessage='No daily work update entries found matching the filter criteria.'
+                        emptyMessage={
+                            error
+                                ? 'Could not load daily work updates from the server.'
+                                : live
+                                  ? 'No daily work updates recorded yet. Log a daily work entry to get started.'
+                                  : 'No daily work update entries found matching the filter criteria.'
+                        }
                     />
                 </div>
             </div>

@@ -5,7 +5,9 @@ import Dropdown from '../../../../Common/CommonComponents/Dropdown'
 import ExportModal from '../../../../Common/CommonComponents/ExportModal'
 import EditRequestModal from '../../../../Common/CommonComponents/EditRequestModal'
 import DeleteRequestModal from '../../../../Common/CommonComponents/DeleteRequestModal'
-import { getMarksEntries, CLASSES, SECTIONS, SUBJECTS, EXAM_NAMES } from './enterMarksData'
+import { getMarksEntries, CLASSES, SECTIONS, SUBJECTS, EXAM_NAMES, MARKS_ENTRY_LIVE_UNAVAILABLE } from './enterMarksData'
+import { FeedbackState } from '../../../../Common/ui'
+import { isLiveApiEnabled } from '../../../../services/api/tokenStore'
 import { useAuth } from '../../../../context/AuthContext'
 import { canRoleDelete } from '../../../../Common/RBAC/actionPermissions'
 
@@ -24,6 +26,9 @@ const EnterMarks = () => {
 
     return (
         <section>
+            {isLiveApiEnabled() && records.length === 0 ? (
+                <FeedbackState compact kind='empty' title='No marks entries' description={MARKS_ENTRY_LIVE_UNAVAILABLE} className='mb-4' />
+            ) : null}
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='flex justify-between md:items-center sm:items-stretch md:flex-row sm:flex-col flex-col gap-y-4'>
                     <button type='button' className='bg-[#515DEF] text-white uppercase text-sm px-6 py-1.5 border border-[#515DEF] rounded-lg hover:opacity-90 transition-all duration-200 cursor-pointer'>

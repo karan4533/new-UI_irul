@@ -1,5 +1,7 @@
-import React, { useState } from 'react'
-import { NavLink } from 'react-router-dom'
+import React, { useEffect, useState } from 'react'
+import { NavLink, useLocation } from 'react-router-dom'
+import AcademicsLiveNotice from '../Components/AcademicsLiveNotice'
+import { useAcademicsLiveCollection } from '../../../services/api/useAcademicsLiveCollection'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { Calendar, ChevronLeft, ChevronRight, EllipsisIcon, Plus, Download } from 'lucide-react'
@@ -8,7 +10,7 @@ import ExportModal from '../../../Common/CommonComponents/ExportModal'
 import EditRequestModal from '../../../Common/CommonComponents/EditRequestModal'
 import DeleteRequestModal from '../../../Common/CommonComponents/DeleteRequestModal'
 import {
-    ONLINE_CLASSES,
+    getOnlineClasses,
     SUBJECTS,
     CLASSES,
     SECTIONS,
@@ -21,6 +23,12 @@ import { canRoleDelete } from '../../../Common/RBAC/actionPermissions'
 const OnlineClass = () => {
     const { role } = useAuth()
     const canDelete = canRoleDelete(role)
+    const location = useLocation()
+    const { live, loading, error, version } = useAcademicsLiveCollection('online-classes', location.pathname)
+    const [onlineClasses, setOnlineClasses] = useState(() => getOnlineClasses())
+    useEffect(() => {
+        setOnlineClasses(getOnlineClasses())
+    }, [location.pathname, version])
     const [fromDate, setFromDate] = useState(new Date())
     const [toDate, setToDate] = useState(new Date())
     const [exportModal, setExportModal] = useState(false)
@@ -29,6 +37,7 @@ const OnlineClass = () => {
 
     return (
         <section>
+            <AcademicsLiveNotice live={live} loading={loading} error={error} label='Online classes' endpoint='GET /api/v1/academics/online-classes' />
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='flex justify-between md:items-center sm:items-stretch md:flex-row sm:flex-col flex-col gap-y-4'>
                     <button type='button' className='bg-[#515DEF] text-white uppercase text-sm px-6 py-1.5 border border-[#515DEF] rounded-lg hover:opacity-90 transition-all duration-200 cursor-pointer'>
@@ -160,7 +169,7 @@ const OnlineClass = () => {
                             </tr>
                         </thead>
                         <tbody>
-                            {ONLINE_CLASSES.map((record) => (
+                            {onlineClasses.map((record) => (
                                 <tr key={record.id} className='border-b text-[#667085] border-[#f2f4f7] hover:bg-[#f2f4f7] rounded-lg'>
                                     <td className='px-2 py-4 font-medium text-[#1E1E1E] rounded-s-lg'>{record.onlineClassId}</td>
                                     <td className='px-2 py-4 font-medium text-[#1E1E1E]'>{record.subject}</td>
@@ -204,7 +213,7 @@ const OnlineClass = () => {
 
             <div className='flex justify-between items-center px-4 mt-4'>
                 <p className='text-sm font-medium text-[#515DEF]'>
-                    Showing 1 to {ONLINE_CLASSES.length} of {ONLINE_CLASSES.length} entries
+                    Showing 1 to {onlineClasses.length} of {onlineClasses.length} entries
                 </p>
                 <div className='flex justify-center gap-x-2 flex-wrap'>
                     <button type='button' className='size-8 flex justify-center items-center p-2 bg-white text-[#515DEF] border border-[#E2E8F0] hover:bg-[#515DEF] hover:text-white rounded-full cursor-pointer'>

@@ -67,9 +67,11 @@ const RouteData = () => {
     return (
         <section>
             <IntegrationNotice
-                state='mock'
-                title='GPS / ProTrack tracking is not configured'
-                description='Route cards may list live transport-routes when the API is on, but map telemetry and ProTrack GPS remain demonstration-only (fail closed — no silent live GPS claim).'
+                state={live ? (error ? 'failed' : 'connected') : 'mock'}
+                title={live ? 'ProTrack365 GPS via FastAPI' : 'Live API off'}
+                description={live
+                    ? 'Open a route to poll /api/v1/protrack/track. Vehicles/routes need a mapped gpsImei (or plate matching ProTrack platenumber).'
+                    : 'Enable VITE_USE_MOCK=false to use ProTrack365 live tracking.'}
             />
             {error ? (
                 <>
@@ -77,19 +79,11 @@ const RouteData = () => {
                     <FeedbackState kind='error' title='Could not load routes' description={error} />
                 </>
             ) : null}
-            {live && !error && !loading ? (
-                <IntegrationNotice
-                    state='connected'
-                    className='mt-3'
-                    title='Route list from live ops'
-                    description='GET /api/v1/ops/transport-routes powers the cards below. Track map stays mock.'
-                />
-            ) : null}
 
             <div className='bg-white rounded-2xl shadow-md p-4 mb-6 mt-4'>
                 <h2 className='text-xl font-medium text-black'>Route Data</h2>
                 <p className='text-sm text-[#667085] mt-1'>
-                    Select a route to open the tracking demo map. ProTrack GPS is not wired.
+                    Select a route to open ProTrack365 live tracking.
                 </p>
             </div>
 

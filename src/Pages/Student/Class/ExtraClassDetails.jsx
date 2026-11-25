@@ -1,16 +1,25 @@
-import React, { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { Calendar, ChevronLeft, ChevronRight } from "lucide-react";
+import { IntegrationNotice } from '../../../Common/ui'
+import { useAcademicsLiveCollection } from '../../../services/api/useAcademicsLiveCollection'
+import { getExtraClasses } from '../../Teacher/ExtraClass/extraClassData'
 
 const ExtraClassDetails = () => {
 
     const [fromDate, setFromDate] = useState(new Date());
     const [toDate, setToDate] = useState(new Date());
-
+    const { live, loading, error, version } = useAcademicsLiveCollection('extra-classes')
+    // Live: academics `extra-classes` only (empty until hydrated); static demo rows are mock-only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const liveRows = useMemo(() => (live ? getExtraClasses() : []), [live, version])
 
     return (
         <section>
+            {live && error ? (
+                <IntegrationNotice state='failed' title='Extra classes unavailable' description={error} className='mb-4' />
+            ) : null}
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='flex justify-between md:items-center sm:items-stretch md:flex-row sm:flex-col flex-col gap-y-4'>
                     <button className='bg-[#515DEF] text-white uppercase text-sm px-6 py-2 border border-[#515DEF] rounded-lg hover:opacity-90 transition-all duration-200 cursor-pointer'>Clear Filters</button>
@@ -101,6 +110,29 @@ const ExtraClassDetails = () => {
                             </tr>
                         </thead>
 
+                        {live ? (
+                            <tbody>
+                                {liveRows.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={8} className='px-2 py-8 text-center text-sm text-slate-500'>
+                                            {loading ? 'Loading extra classes…' : 'No extra classes scheduled.'}
+                                        </td>
+                                    </tr>
+                                ) : null}
+                                {liveRows.map((row) => (
+                                    <tr key={row.id || row.extraClassId} className="border-b text-[#667085] border-[#f2f4f7] hover:bg-[#f2f4f7] rounded-lg">
+                                        <td className="px-2 py-4 rounded-s-lg">{row.classSection || [row.className, row.section].filter(Boolean).join('-') || '—'}</td>
+                                        <td className="px-2 py-4">{row.subject || '—'}</td>
+                                        <td className="px-2 py-4">{row.teacherName || row.teacher || '—'}</td>
+                                        <td className="px-2 py-4">{row.date || '—'}</td>
+                                        <td className="px-2 py-4">{row.startTime || '—'}</td>
+                                        <td className="px-2 py-4">{row.endTime || '—'}</td>
+                                        <td className="px-2 py-4">{row.venue || '—'}</td>
+                                        <td className="px-2 py-4">{row.reason || row.topic || '—'}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        ) : (
                         <tbody>
                             <tr className="border-b text-[#667085] border-[#f2f4f7] hover:bg-[#f2f4f7] rounded-lg">
                                 <td className="px-2 py-4 rounded-s-lg">Class 10th</td>
@@ -133,13 +165,16 @@ const ExtraClassDetails = () => {
                                 <td className="px-2 py-4">Exam Preparation</td>
                             </tr>
                         </tbody>
+                        )}
                     </table>
                 </div>
             </div>
 
             {/* Pagination */}
             <div className='flex justify-between items-center px-4 mt-4'>
-                <p className='text-sm font-medium text-[#515DEF]'>Showing 1 to 10 of 20 entries</p>
+                <p className='text-sm font-medium text-[#515DEF]'>
+                    {live ? `Showing ${liveRows.length} of ${liveRows.length} entries` : 'Showing 1 to 10 of 20 entries'}
+                </p>
 
                 <div className="flex justify-center gap-x-2 flex-wrap">
                     <button className="size-8 flex justify-center items-center p-2 bg-white text-[#515DEF] border border-[#E2E8F0] hover:bg-[#515DEF] hover:text-white rounded-full cursor-pointer">

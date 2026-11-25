@@ -5,6 +5,7 @@ import React from 'react'
 import CommunicationInbox from '../Pages/TransportManager/Communication/Inbox'
 import RedirectLegacyDirectMessages from '../Common/Communication/RedirectLegacyDirectMessages'
 import { Route, Routes as ReactRoutes, Navigate } from 'react-router-dom'
+import { isLiveApiEnabled } from '../services/api/tokenStore'
 import Dashboard from '../Pages/TransportManager/Dashboard/Dashboard'
 import DriverManagement from '../Pages/TransportManager/DriverManagement/DriverManagement'
 import AddDriver from '../Pages/TransportManager/DriverManagement/AddDriver'
@@ -45,44 +46,45 @@ import AnnouncementListView from '../Common/Announcement/AnnouncementListView'
 import ViewAnnouncementPage from '../Common/Announcement/ViewAnnouncementPage'
 
 const TransportManagerRoutes = () => {
+    const live = isLiveApiEnabled()
     return (
         <ReactRoutes>
             <Route path="/transport-manager/dashboard" element={<Dashboard />} />
             <Route path="/transport-manager/driver-management" element={<DriverManagement />} />
-            <Route path="/transport-manager/driver-management/add" element={<AddDriver />} />
-            <Route path="/transport-manager/driver-management/edit/:id" element={<EditDriver />} />
-            <Route path="/transport-manager/driver-management/view/:id" element={<ViewDriver />} />
+            <Route path="/transport-manager/driver-management/add" element={live ? <Navigate to="/transport-manager/driver-management" replace /> : <AddDriver />} />
+            <Route path="/transport-manager/driver-management/edit/:id" element={live ? <Navigate to="/transport-manager/driver-management" replace /> : <EditDriver />} />
+            <Route path="/transport-manager/driver-management/view/:id" element={live ? <Navigate to="/transport-manager/driver-management" replace /> : <ViewDriver />} />
             <Route path="/transport-manager/vehicle-management" element={<VehicleManagement />} />
-            <Route path="/transport-manager/vehicle-management/add-vehicle" element={<AddVehicle />} />
-            <Route path="/transport-manager/vehicle-management/view/:id" element={<ViewVehicle />} />
-            <Route path="/transport-manager/vehicle-management/edit/:id" element={<EditVehicle />} />
+            <Route path="/transport-manager/vehicle-management/add-vehicle" element={live ? <Navigate to="/transport-manager/vehicle-management" replace /> : <AddVehicle />} />
+            <Route path="/transport-manager/vehicle-management/view/:id" element={live ? <Navigate to="/transport-manager/vehicle-management" replace /> : <ViewVehicle />} />
+            <Route path="/transport-manager/vehicle-management/edit/:id" element={live ? <Navigate to="/transport-manager/vehicle-management" replace /> : <EditVehicle />} />
             <Route path="/transport-manager/route-management" element={<RouteManagement />} />
-            <Route path="/transport-manager/route-management/add-route" element={<AddRoute />} />
-            <Route path="/transport-manager/route-management/view/:id" element={<ViewRoute />} />
-            <Route path="/transport-manager/route-management/edit/:id" element={<EditRoute />} />
+            <Route path="/transport-manager/route-management/add-route" element={live ? <Navigate to="/transport-manager/route-management" replace /> : <AddRoute />} />
+            <Route path="/transport-manager/route-management/view/:id" element={live ? <Navigate to="/transport-manager/route-management" replace /> : <ViewRoute />} />
+            <Route path="/transport-manager/route-management/edit/:id" element={live ? <Navigate to="/transport-manager/route-management" replace /> : <EditRoute />} />
             <Route path="/transport-manager/route-data" element={<RouteData />} />
             <Route path="/transport-manager/route-data/track/:id" element={<TrackBus />} />
             <Route path="/transport-manager/student-transport" element={<StudentTransport />} />
-            <Route path="/transport-manager/student-transport/add" element={<AddStudentTransport />} />
-            <Route path="/transport-manager/student-transport/view/:id" element={<ViewStudentTransport />} />
+            <Route path="/transport-manager/student-transport/add" element={live ? <Navigate to="/transport-manager/student-transport" replace /> : <AddStudentTransport />} />
+            <Route path="/transport-manager/student-transport/view/:id" element={live ? <Navigate to="/transport-manager/student-transport" replace /> : <ViewStudentTransport />} />
             <Route path="/transport-manager/assign-duty" element={<AssignDuty />} />
-            <Route path="/transport-manager/assign-duty/add" element={<AddAssignDuty />} />
-            <Route path="/transport-manager/assign-duty/view/:id" element={<ViewAssignDuty />} />
+            <Route path="/transport-manager/assign-duty/add" element={live ? <Navigate to="/transport-manager/assign-duty" replace /> : <AddAssignDuty />} />
+            <Route path="/transport-manager/assign-duty/view/:id" element={live ? <Navigate to="/transport-manager/assign-duty" replace /> : <ViewAssignDuty />} />
             <Route path="/transport-manager/vehicle-maintenance" element={<VehicleMaintenance />} />
             <Route path="/transport-manager/vehicle-maintenance/add" element={<AddVehicleMaintenance />} />
-            <Route path="/transport-manager/vehicle-maintenance/view/:id" element={<ViewVehicleMaintenance />} />
+            <Route path="/transport-manager/vehicle-maintenance/view/:id" element={live ? <Navigate to="/transport-manager/vehicle-maintenance" replace /> : <ViewVehicleMaintenance />} />
             <Route path="/transport-manager/request-approvals" element={<RequestApprovals />} />
-            <Route path="/transport-manager/request-approvals/add-request" element={<AddRequest />} />
-            <Route path="/transport-manager/request-approvals/view-request/:id" element={<ViewRequest />} />
+            <Route path="/transport-manager/request-approvals/add-request" element={live ? <Navigate to="/transport-manager/request-approvals" replace /> : <AddRequest />} />
+            <Route path="/transport-manager/request-approvals/view-request/:id" element={live ? <Navigate to="/transport-manager/request-approvals" replace /> : <ViewRequest />} />
             <Route path="/transport-manager/transport-expenses" element={<TransportExpenses />} />
             <Route path="/transport-manager/transport-expenses/add/:type" element={<AddTransportExpense />} />
-            <Route path="/transport-manager/transport-expenses/view/:type/:id" element={<ViewTransportExpense />} />
-            <Route path="/transport-manager/attendance-and-leave" element={<AttendanceAndLeaveWorkspace defaultTab="overview" />} />
+            <Route path="/transport-manager/transport-expenses/view/:type/:id" element={live ? <Navigate to="/transport-manager/transport-expenses" replace /> : <ViewTransportExpense />} />
+            <Route path="/transport-manager/attendance-and-leave" element={live ? <Navigate to="/transport-manager/leave-request/my-requests" replace /> : <AttendanceAndLeaveWorkspace defaultTab="overview" />} />
             <Route path="/transport-manager/leave-request/my-requests" element={<MyLeaveRequestsList roleKey='transportmanager' />} />
             <Route path="/transport-manager/leave-request/my-requests/add" element={<AddLeaveRequestForm roleKey='transportmanager' />} />
             <Route path="/transport-manager/leave-request/my-requests/view/:id" element={<ViewMyLeaveRequestPage roleKey='transportmanager' />} />
-            <Route path="/transport-manager/leave-request" element={<LeaveRequest />} />
-            <Route path="/transport-manager/leave-request/view/:id" element={<ViewLeaveRequest />} />
+            <Route path="/transport-manager/leave-request" element={live ? <Navigate to="/transport-manager/leave-request/my-requests" replace /> : <LeaveRequest />} />
+            <Route path="/transport-manager/leave-request/view/:id" element={live ? <Navigate to="/transport-manager/leave-request/my-requests" replace /> : <ViewLeaveRequest />} />
             <Route path="/transport-manager/announcement" element={<AnnouncementListView roleKey='transportmanager' />} />
             <Route path="/transport-manager/announcement/view/:id" element={<ViewAnnouncementPage roleKey='transportmanager' />} />
             <Route path="/transport-manager/driver-conductor-noc" element={<DriverConductorNoc />} />
