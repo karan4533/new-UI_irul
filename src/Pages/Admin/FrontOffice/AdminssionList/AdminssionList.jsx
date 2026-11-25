@@ -27,7 +27,8 @@ import {
 } from './admissionListData'
 import { getAddAdmissionPath, isAdminFrontOfficePath } from '../AdmissionEnquiry/admissionEnquiryData'
 import { isLiveApiEnabled } from '../../../../services/api/tokenStore'
-import { listAdmissions } from '../../../../services/api/admissionsApiService'
+import { enrollAdmission, listAdmissions } from '../../../../services/api/admissionsApiService'
+import EnrolAdmissionDialog from './EnrolAdmissionDialog'
 
 const AdminssionList = () => {
     const live = isLiveApiEnabled()
@@ -48,6 +49,7 @@ const AdminssionList = () => {
     const [page, setPage] = useState(initialTableState.page)
     const [pageSize, setPageSize] = useState(initialTableState.pageSize)
     const [pendingAction, setPendingAction] = useState(null)
+    const [enrolBusy, setEnrolBusy] = useState(false)
     const [hasDraft] = useState(() => Boolean(loadAdmissionDraft(draftKey)))
     const [refreshNonce, setRefreshNonce] = useState(0)
 
@@ -108,37 +110,64 @@ const AdminssionList = () => {
         setRecords(getAllAdmissions())
     }
 
-    const confirmPendingAction = () => {
-        if (!pendingAction) return
-        const { type, record } = pendingAction
+    const confirmDeleteAction = () => {
+        if (!pendingAction || pendingAction.type !== 'delete') return
+        const { record } = pendingAction
 
-        if (isLiveApiEnabled()) {
-            toast.error(type === 'delete'
-                ? 'Hard delete is not supported on the admissions API from this screen.'
-                : 'Enrol from the admissions API convert/enroll endpoints (not wired as a silent local enrol).')
+        if (record?.status === 'Enrolled' || record?.enrolledStudentId) {
+            toast.error('Enrolled admissions cannot be deleted.')
             setPendingAction(null)
             return
         }
 
-        if (type === 'delete') {
-            deleteAdmission(record.id)
-            refresh()
+        if (isLiveApiEnabled()) {
+            toast.error('Hard delete is not supported on the admissions API from this screen.')
             setPendingAction(null)
-            toast.success('Admission removed from this browser.')
+            return
+        }
+
+        deleteAdmission(record.id)
+        refresh()
+        setPendingAction(null)
+        toast.success('Admission removed from this browser.')
+    }
+
+    const confirmEnrolAction = async (portalPayload = {}) => {
+        if (!pendingAction || pendingAction.type !== 'enrol') return
+        const { record } = pendingAction
+
+        if (isLiveApiEnabled()) {
+            setEnrolBusy(true)
+            const res = await enrollAdmission(record.id, portalPayload)
+            setEnrolBusy(false)
+            if (!res.success) {
+                toast.error(typeof res.error === 'string' ? res.error : 'Enrol failed on the admissions API.')
+                return
+            }
+            setPendingAction(null)
+            const name = getStudentDisplayName(record)
+            const code = res.data?.studentCode || ''
+            toast.success(
+                `${name} enrolled${code ? ` (${code})` : ''}. `
+                + 'UIS/class placed — student portal opens after Finance admission payment. '
+                + 'No separate parent login.',
+            )
+            refresh()
             return
         }
 
         const result = enrollAdmissionAsStudent(record.id)
         if (!result.success) {
             toast.error(result.message)
-            setPendingAction(null)
             return
         }
-        refresh()
         setPendingAction(null)
-        if (result.parentCreated) toast.success(`${getStudentDisplayName(record)} enrolled. Parent account created.`)
-        else if (result.parentMapped) toast.success(`${getStudentDisplayName(record)} enrolled and linked to an existing parent.`)
-        else toast.success(`${getStudentDisplayName(record)} enrolled as a student.`)
+        toast.success(
+            `${getStudentDisplayName(record)} enrolled. `
+            + 'UIS/class placed — student portal opens after Finance admission payment. '
+            + 'No separate parent login.',
+        )
+        refresh()
     }
 
     const columns = [
@@ -182,7 +211,7 @@ const AdminssionList = () => {
                 state={listSource === 'backend' ? 'connected' : listSource === 'error' ? 'failed' : 'demo'}
                 title={listSource === 'backend' ? 'Live admissions directory' : listSource === 'error' ? 'Admissions API unavailable' : 'Browser-stored admission records'}
                 description={listSource === 'backend'
-                    ? 'GET /api/v1/admissions. Admin view is read-focused; hard delete and local enrol are disabled in live mode.'
+                    ? 'GET /api/v1/admissions. Enrol opens a details form for parent login, then POST /api/v1/admissions/{id}/enroll. Hard delete stays disabled in live mode.'
                     : listSource === 'error'
                         ? listError
                         : 'Records, enrolment and parent mapping are local demo workflows. Production submission, document verification, payment and identity checks require backend APIs.'}
@@ -236,34 +265,41 @@ const AdminssionList = () => {
                             </NavLink>
                             {!isAdminView && (
                                 <>
-                                    <NavLink to={getAdmissionEditPath(pathname, record.id)} className='inline-flex min-h-9 items-center gap-1 rounded-lg border border-[var(--erp-line-strong)] px-3 text-xs font-semibold text-[var(--erp-ink)]'>
-                                        <Pencil aria-hidden='true' size={14} /> Edit
-                                    </NavLink>
                                     {record.status === 'Enrolled' ? (
-                                        <span className='inline-flex min-h-9 items-center gap-1 rounded-lg bg-emerald-50 border border-emerald-200 px-2.5 text-xs font-semibold text-emerald-700'>
+                                        <span
+                                            className='inline-flex min-h-9 items-center gap-1 rounded-lg bg-emerald-50 border border-emerald-200 px-2.5 text-xs font-semibold text-emerald-700'
+                                            title='Enrolled admissions cannot be edited or deleted.'
+                                        >
                                             <GraduationCap aria-hidden='true' size={14} /> Enrolled
                                         </span>
-                                    ) : record.status === 'Pending Finance Approval' ? (
-                                        <button
-                                            type='button'
-                                            onClick={() => toast.info('Awaiting fee payment and clearance from Finance before final enrollment.')}
-                                            className='inline-flex min-h-9 items-center gap-1 rounded-lg border border-amber-300 bg-amber-50/80 px-2.5 text-xs font-semibold text-amber-800'
-                                            title='Student details submitted. Awaiting Finance approval and admission bill payment.'
-                                        >
-                                            <GraduationCap aria-hidden='true' size={14} /> Awaiting Finance
-                                        </button>
                                     ) : (
-                                        <button
-                                            type='button'
-                                            onClick={() => setPendingAction({ type: 'enrol', record })}
-                                            className='inline-flex min-h-9 items-center gap-1 rounded-lg border border-[var(--erp-line-strong)] px-3 text-xs font-semibold text-[var(--erp-indigo)]'
-                                        >
-                                            <GraduationCap aria-hidden='true' size={14} /> Enrol
-                                        </button>
+                                        <>
+                                            <NavLink to={getAdmissionEditPath(pathname, record.id)} className='inline-flex min-h-9 items-center gap-1 rounded-lg border border-[var(--erp-line-strong)] px-3 text-xs font-semibold text-[var(--erp-ink)]'>
+                                                <Pencil aria-hidden='true' size={14} /> Edit
+                                            </NavLink>
+                                            {record.status === 'Pending Finance Approval' ? (
+                                                <button
+                                                    type='button'
+                                                    onClick={() => toast.info('Awaiting fee payment and clearance from Finance before final enrollment.')}
+                                                    className='inline-flex min-h-9 items-center gap-1 rounded-lg border border-amber-300 bg-amber-50/80 px-2.5 text-xs font-semibold text-amber-800'
+                                                    title='Student details submitted. Awaiting Finance approval and admission bill payment.'
+                                                >
+                                                    <GraduationCap aria-hidden='true' size={14} /> Awaiting Finance
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    type='button'
+                                                    onClick={() => setPendingAction({ type: 'enrol', record })}
+                                                    className='inline-flex min-h-9 items-center gap-1 rounded-lg border border-[var(--erp-line-strong)] px-3 text-xs font-semibold text-[var(--erp-indigo)]'
+                                                >
+                                                    <GraduationCap aria-hidden='true' size={14} /> Enrol
+                                                </button>
+                                            )}
+                                            <button type='button' onClick={() => setPendingAction({ type: 'delete', record })} className='inline-flex min-h-9 items-center gap-1 rounded-lg border border-[#F4433655] px-3 text-xs font-semibold text-[#B42318]'>
+                                                <Trash2 aria-hidden='true' size={14} /> Delete
+                                            </button>
+                                        </>
                                     )}
-                                    <button type='button' onClick={() => setPendingAction({ type: 'delete', record })} className='inline-flex min-h-9 items-center gap-1 rounded-lg border border-[#F4433655] px-3 text-xs font-semibold text-[#B42318]'>
-                                        <Trash2 aria-hidden='true' size={14} /> Delete
-                                    </button>
                                 </>
                             )}
                         </>
@@ -274,20 +310,26 @@ const AdminssionList = () => {
             ) : null}
 
             <ConfirmAction
-                open={Boolean(pendingAction)}
+                open={pendingAction?.type === 'delete'}
                 onClose={() => setPendingAction(null)}
-                onConfirm={confirmPendingAction}
-                title={pendingAction?.type === 'delete' ? 'Delete this admission?' : 'Enrol this student?'}
-                description={pendingAction?.type === 'delete' ? 'The local admission record will be removed.' : 'A student record and guardian mapping will be created from this admission.'}
-                confirmLabel={pendingAction?.type === 'delete' ? 'Delete admission' : 'Enrol student'}
-                tone={pendingAction?.type === 'delete' ? 'danger' : 'primary'}
+                onConfirm={confirmDeleteAction}
+                title='Delete this admission?'
+                description='The local admission record will be removed.'
+                confirmLabel='Delete admission'
+                tone='danger'
             >
-                <p>
-                    {pendingAction?.type === 'delete'
-                        ? 'This cannot be undone in the current browser dataset.'
-                        : 'Confirm that identity, guardian, fee and document checks are complete before enrolment.'}
-                </p>
+                <p>This cannot be undone in the current browser dataset.</p>
             </ConfirmAction>
+
+            <EnrolAdmissionDialog
+                open={pendingAction?.type === 'enrol'}
+                record={pendingAction?.type === 'enrol' ? pendingAction.record : null}
+                busy={enrolBusy}
+                onClose={() => {
+                    if (!enrolBusy) setPendingAction(null)
+                }}
+                onConfirm={confirmEnrolAction}
+            />
         </section>
     )
 }

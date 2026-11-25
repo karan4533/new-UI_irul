@@ -3,6 +3,7 @@ import {
     formatGatePassDate,
     formatOutTimeForDisplay,
     getEnrolledStudentSelectOptions,
+    loadEnrolledStudentsForGatePass,
     mapStudentForGatePass,
     parseGatePassDate,
 } from '../GatePass/gatePassData'
@@ -11,6 +12,7 @@ export {
     formatGatePassDate,
     formatOutTimeForDisplay,
     getEnrolledStudentSelectOptions,
+    loadEnrolledStudentsForGatePass,
     mapStudentForGatePass,
     parseGatePassDate,
 }

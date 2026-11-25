@@ -26,7 +26,7 @@ export const ADMISSION_STAGES = [
     {
         key: 'account',
         label: 'Account',
-        description: 'Guardian portal access',
+        description: 'Contact emails (no parent login)',
         requiredFields: ['parentAccountEmail'],
     },
     {

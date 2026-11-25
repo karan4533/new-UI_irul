@@ -1,8 +1,6 @@
 import React from 'react'
 import {
     MODE_OF_TRANSPORT_OPTIONS,
-    ROUTE_OPTIONS,
-    getBusStopsByRoute,
     isSchoolBusMode,
 } from '../../../../../Common/transportData'
 
@@ -12,21 +10,12 @@ const disabledClass = 'text-sm font-normal text-[#808080] border border-[#D9D9D9
 const TransportInfo = ({ form, onChange }) => {
     const update = (key, value) => onChange?.(key, value)
     const schoolBusSelected = isSchoolBusMode(form.modeOfTransport)
-    const busStops = getBusStopsByRoute(form.route)
 
     const handleModeChange = (event) => {
         const nextMode = event.target.value
         update('modeOfTransport', nextMode)
         if (!isSchoolBusMode(nextMode)) {
             update('route', '')
-            update('busStop', '')
-        }
-    }
-
-    const handleRouteChange = (event) => {
-        const nextRoute = event.target.value
-        update('route', nextRoute)
-        if (form.busStop && !getBusStopsByRoute(nextRoute).includes(form.busStop)) {
             update('busStop', '')
         }
     }
@@ -44,29 +33,27 @@ const TransportInfo = ({ form, onChange }) => {
             </div>
             <div className='flex flex-col gap-y-2'>
                 <label htmlFor='routeList' className='text-base font-medium text-[#1E1E1E]'>Route List:</label>
-                <select id='routeList' value={form.route} onChange={handleRouteChange} disabled={!schoolBusSelected} className={schoolBusSelected ? inputClass : disabledClass}>
-                    <option value=''>{schoolBusSelected ? 'Select Route List' : 'Select School Bus first'}</option>
-                    {ROUTE_OPTIONS.map((item) => (
-                        <option key={item} value={item}>{item}</option>
-                    ))}
-                </select>
+                <input
+                    id='routeList'
+                    type='text'
+                    value={form.route || ''}
+                    onChange={(event) => update('route', event.target.value)}
+                    disabled={!schoolBusSelected}
+                    className={schoolBusSelected ? inputClass : disabledClass}
+                    placeholder={schoolBusSelected ? 'Enter route name / number' : 'Select School Bus first'}
+                />
             </div>
             <div className='flex flex-col gap-y-2'>
                 <label htmlFor='busStop' className='text-base font-medium text-[#1E1E1E]'>Bus Stop:</label>
-                <select
+                <input
                     id='busStop'
-                    value={form.busStop}
+                    type='text'
+                    value={form.busStop || ''}
                     onChange={(event) => update('busStop', event.target.value)}
-                    disabled={!schoolBusSelected || !form.route}
-                    className={schoolBusSelected && form.route ? inputClass : disabledClass}
-                >
-                    <option value=''>
-                        {!schoolBusSelected ? 'Select School Bus first' : form.route ? 'Select Bus Stop' : 'Select route first'}
-                    </option>
-                    {busStops.map((item) => (
-                        <option key={item} value={item}>{item}</option>
-                    ))}
-                </select>
+                    disabled={!schoolBusSelected}
+                    className={schoolBusSelected ? inputClass : disabledClass}
+                    placeholder={schoolBusSelected ? 'Enter bus stop' : 'Select School Bus first'}
+                />
             </div>
         </div>
     )

@@ -13,6 +13,8 @@ import {
     getAvailableStudents,
     STUDENT_GATE_PASS_STATUSES
 } from '../../../Common/GatePassSecurity/gatePassSecurityData'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { listStudents } from '../../../services/api/studentApiService'
 
 export const STATUS_OPTIONS = [
     'Pending Approval',
@@ -37,6 +39,16 @@ export const statusBadgeColor = {
     'Overdue Return': 'bg-red-50 text-red-700 border-red-300'
 }
 
+/** Client rule: requester chooses approvers (Class Teacher is always included). */
+export const GATE_PASS_APPROVER_OPTIONS = [
+    { value: 'class_teacher', label: 'Class Teacher (required)', fixed: true },
+    { value: 'coordinator', label: 'Coordinator' },
+    { value: 'principal', label: 'Principal' },
+    { value: 'director', label: 'Director of Academics' },
+    { value: 'prm', label: 'PRM / Front Office' },
+    { value: 'hostel_warden', label: 'Hostel Warden' },
+]
+
 export const DEFAULT_GATE_PASS_FORM = {
     studentId: '',
     studentName: '',
@@ -53,6 +65,8 @@ export const DEFAULT_GATE_PASS_FORM = {
     accompanyingPerson: '',
     parentGuardianInfo: '',
     remarks: '',
+    selectedApprovers: ['class_teacher', 'principal'],
+    securityVerifyRequired: true,
     status: 'Pending Approval',
     profileImage: '',
 }
@@ -104,17 +118,68 @@ export const parseOutTimeForInput = (value) => {
     return `${String(hours).padStart(2, '0')}:${minutes}`
 }
 
-export const getEnrolledStudentSelectOptions = () => {
-    const list = getAvailableStudents()
-    return list.map((s) => ({
-        value: s.studentId,
-        label: `${s.studentId} — ${s.studentName} (${s.classSection})`
-    }))
+/** Normalize a live /students row or local directory row into gate-pass picker shape. */
+export const toGatePassStudent = (row = {}) => {
+    const studentId = row.studentId || row.id || row.admissionNumber || ''
+    const studentName = row.studentName || row.name
+        || [row.firstName, row.lastName].filter(Boolean).join(' ').trim()
+        || 'Student'
+    const classSection = row.classSection
+        || [row.className, row.section].filter(Boolean).join('-')
+        || row.className
+        || ''
+    return {
+        studentId: String(studentId),
+        studentName,
+        classSection,
+        admissionNumber: row.admissionNumber || '',
+        department: row.department || 'Academics - Secondary',
+        gender: row.gender || '',
+        mobileNumber: row.mobileNumber || '',
+        city: row.city || '',
+        parentName: row.parentName || 'Parent',
+        parentPhone: row.parentPhone || row.mobileNumber || '',
+    }
 }
 
-export const mapStudentForGatePass = (studentId) => {
-    const list = getAvailableStudents()
-    const student = list.find((s) => s.studentId === studentId)
+export const getEnrolledStudentSelectOptions = (students = null) => {
+    const list = Array.isArray(students) ? students : getAvailableStudents()
+    return list.map((s) => {
+        const student = toGatePassStudent(s)
+        const idLabel = student.admissionNumber || student.studentId
+        return {
+            value: student.studentId,
+            label: `${idLabel} — ${student.studentName} (${student.classSection || 'Class TBA'})`,
+            student,
+        }
+    })
+}
+
+/**
+ * Live SoT: enrolled admissions appear here via GET /api/v1/students.
+ * Demo mode keeps the local/default directory.
+ */
+export const loadEnrolledStudentsForGatePass = async () => {
+    if (!isLiveApiEnabled()) {
+        const students = getAvailableStudents().map(toGatePassStudent)
+        return { success: true, source: 'local', students, error: '' }
+    }
+    const res = await listStudents()
+    if (!res.success) {
+        return {
+            success: false,
+            source: 'error',
+            students: [],
+            error: typeof res.error === 'string' ? res.error : 'Failed to load enrolled students.',
+        }
+    }
+    const students = (Array.isArray(res.data) ? res.data : []).map(toGatePassStudent)
+    return { success: true, source: 'backend', students, error: '' }
+}
+
+export const mapStudentForGatePass = (studentId, students = null) => {
+    const list = Array.isArray(students) ? students.map(toGatePassStudent) : getAvailableStudents().map(toGatePassStudent)
+    const student = list.find((s) => s.studentId === studentId || s.admissionNumber === studentId)
     if (!student) return null
 
     return {
@@ -125,9 +190,9 @@ export const mapStudentForGatePass = (studentId) => {
         gender: student.gender,
         mobileNumber: student.mobileNumber,
         city: student.city,
-        parentGuardianInfo: `${student.parentName || 'Parent'} (${student.parentPhone || student.mobileNumber})`,
-        accompanyingPerson: student.parentName || 'Parent / Guardian',
-        profileImage: ''
+        parentGuardianInfo: `${student.parentName || 'Parent'} (${student.parentPhone || student.mobileNumber || '—'})`,
+        accompanyingPerson: student.parentName || 'Parent',
+        profileImage: '',
     }
 }
 
@@ -137,6 +202,12 @@ export const getStudentGatePassById = (id) => getUnifiedStudentGatePassById(id)
 
 export const addStudentGatePass = (payload) => {
     try {
+        const selectedApprovers = Array.isArray(payload.selectedApprovers) && payload.selectedApprovers.length
+            ? payload.selectedApprovers
+            : ['class_teacher', 'principal']
+        if (!selectedApprovers.includes('class_teacher')) {
+            selectedApprovers.unshift('class_teacher')
+        }
         const result = createStudentGatePassRequest({
             studentId: payload.studentId,
             studentName: payload.studentName,
@@ -149,6 +220,8 @@ export const addStudentGatePass = (payload) => {
             accompanyingPerson: payload.accompanyingPerson,
             parentGuardianInfo: payload.parentGuardianInfo,
             remarks: payload.remarks,
+            selectedApprovers,
+            securityVerifyRequired: payload.securityVerifyRequired !== false,
             requesterName: 'Kavita Reddy (PRM / Front Office)',
             requesterRole: 'prm'
         })
@@ -201,6 +274,10 @@ export const toGatePassFormState = (record) => ({
     accompanyingPerson: record?.accompanyingPerson || '',
     parentGuardianInfo: record?.parentGuardianInfo || '',
     remarks: record?.remarks || '',
+    selectedApprovers: Array.isArray(record?.selectedApprovers) && record.selectedApprovers.length
+        ? record.selectedApprovers
+        : ['class_teacher', 'principal'],
+    securityVerifyRequired: record?.securityVerifyRequired !== false,
     status: record?.status || 'Pending Approval',
     profileImage: record?.profileImage || '',
 })
@@ -215,6 +292,12 @@ export const validateStudentGatePassForm = (formData) => {
     }
     if (!String(formData.expectedReturnTime || '').trim()) {
         errors.expectedReturnTime = 'Expected return time is required.'
+    }
+    const approvers = Array.isArray(formData.selectedApprovers) ? formData.selectedApprovers : []
+    if (!approvers.length) {
+        errors.selectedApprovers = 'Select at least one approver (Class Teacher is required).'
+    } else if (!approvers.includes('class_teacher')) {
+        errors.selectedApprovers = 'Class Teacher must be included as an approver.'
     }
     return errors
 }

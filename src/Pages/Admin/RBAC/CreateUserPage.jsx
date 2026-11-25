@@ -14,13 +14,20 @@ const AdminCreateUserPage = () => (
     <CreateUserPage
         routeBase={ROUTE_BASE}
         defaultForm={DEFAULT_USER_FORM}
-        pageTitle='Create staff user'
-        pageDescription='Provision a campus staff login. Role must be one the Administrator is allowed to create.'
+        pageTitle='Create user (Admin)'
+        pageDescription={
+            'Client rule: school staff logins are created by HR only. '
+            + 'Campus Admin cannot provision teachers/PRM/etc. from this screen. '
+            + 'Use HR → Employees for staff. Super Admin may create Assistant Admin accounts.'
+        }
         submitLabel='Create user'
-        successMessage='Staff user created successfully.'
+        successMessage='User created successfully.'
         onSubmit={async (form) => {
             if (!isLiveApiEnabled()) {
-                return createUser(form)
+                return {
+                    success: false,
+                    message: 'Live API required. School staff must be created from HR → Employees.',
+                }
             }
             const validation = validateUserCreationForm(form)
             if (!validation.success) return validation
@@ -35,7 +42,12 @@ const AdminCreateUserPage = () => (
             }
             const res = await createAdminUserApi(form, { role: form.role })
             if (!res.success) {
-                return { success: false, message: typeof res.error === 'string' ? res.error : 'Server rejected the user create.' }
+                return {
+                    success: false,
+                    message: typeof res.error === 'string'
+                        ? res.error
+                        : 'Server rejected the user create. School staff → HR Employees.',
+                }
             }
             return {
                 success: true,

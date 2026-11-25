@@ -973,6 +973,8 @@ export const createStudentGatePassRequest = ({
     accompanyingPerson = '',
     parentGuardianInfo = '',
     remarks = '',
+    selectedApprovers = ['class_teacher', 'principal'],
+    securityVerifyRequired = true,
     requesterName = 'Kavita Reddy (PRM / Front Office)',
     requesterRole = 'prm'
 }) => {
@@ -980,11 +982,14 @@ export const createStudentGatePassRequest = ({
     const trimmedReason = String(reason || '').trim()
     const trimmedDepTime = String(expectedDepartureTime || '').trim()
     const trimmedRetTime = String(expectedReturnTime || '').trim()
+    const approvers = Array.isArray(selectedApprovers) ? [...selectedApprovers] : []
+    if (!approvers.includes('class_teacher')) approvers.unshift('class_teacher')
 
     if (!trimmedStudentId) throw new Error('Student Selection is required.')
     if (!trimmedReason) throw new Error('Reason for Leaving is required.')
     if (!trimmedDepTime) throw new Error('Expected Departure Time is required.')
     if (!trimmedRetTime) throw new Error('Expected Return Time is required.')
+    if (!approvers.length) throw new Error('Select at least one approver.')
 
     // Auto-populate from SIS if fields are blank
     let resolvedName = studentName
@@ -1007,6 +1012,13 @@ export const createStudentGatePassRequest = ({
     const now = new Date()
     const requestDate = date || now.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-')
 
+    const approverChain = approvers.map((role) => ({
+        role,
+        status: 'Pending',
+        decidedAt: null,
+        decidedBy: null,
+    }))
+
     const newRequest = {
         id: provisionalId,
         gatePassId: provisionalId,
@@ -1022,6 +1034,11 @@ export const createStudentGatePassRequest = ({
         accompanyingPerson: String(accompanyingPerson || '').trim() || 'Parent / Guardian',
         parentGuardianInfo: resolvedParent,
         remarks: String(remarks || '').trim(),
+        selectedApprovers: approvers,
+        approverChain,
+        securityVerifyRequired: securityVerifyRequired !== false,
+        securityVerifiedAt: null,
+        securityVerifiedBy: null,
         status: 'Pending Approval',
         displayStatus: 'Pending Approval',
         requesterName,
@@ -1047,26 +1064,39 @@ export const createStudentGatePassRequest = ({
         entityId: provisionalId,
         previousState: 'None',
         newState: 'Pending Approval',
-        remarks: `PRM submitted gate pass request for ${resolvedName} (${resolvedClass}). Reason: ${trimmedReason}`
+        remarks: `Requester chose approvers [${approvers.join(', ')}] for ${resolvedName} (${resolvedClass}). Reason: ${trimmedReason}`
     })
 
-    // Dispatched to both Principal and Director of Academics
-    dispatchNotification({
-        recipientRole: 'principal',
-        title: 'New Student Gate Pass Awaiting Approval',
-        message: `${provisionalId}: ${resolvedName} (${resolvedClass}) requested exit for ${trimmedReason}.`,
-        link: '/principal/gate-pass',
-        priority: 'High',
-        type: 'GATE_PASS'
-    })
-    dispatchNotification({
-        recipientRole: 'director',
-        title: 'New Student Gate Pass Awaiting Approval',
-        message: `${provisionalId}: ${resolvedName} (${resolvedClass}) requested exit for ${trimmedReason}.`,
-        link: '/director/gate-pass',
-        priority: 'High',
-        type: 'GATE_PASS'
-    })
+    // Notify each chosen approver (client: requester picks approvers).
+    const roleNotifyMap = {
+        class_teacher: { role: 'teacher', link: '/teacher/gate-pass' },
+        coordinator: { role: 'coordinator', link: '/coordinator/gate-pass' },
+        principal: { role: 'principal', link: '/principal/gate-pass' },
+        director: { role: 'director', link: '/director/gate-pass' },
+        prm: { role: 'prm', link: '/front-office/gate-pass-list' },
+        hostel_warden: { role: 'hostelwarden', link: '/hostel-warden/gate-pass' },
+    }
+    for (const key of approvers) {
+        const target = roleNotifyMap[key] || { role: key, link: '/gate-pass' }
+        dispatchNotification({
+            recipientRole: target.role,
+            title: 'New Student Gate Pass Awaiting Approval',
+            message: `${provisionalId}: ${resolvedName} (${resolvedClass}) — chosen for your approval. Reason: ${trimmedReason}.`,
+            link: target.link,
+            priority: 'High',
+            type: 'GATE_PASS'
+        })
+    }
+    if (securityVerifyRequired !== false) {
+        dispatchNotification({
+            recipientRole: 'gatekeeper',
+            title: 'Gate pass pending — Security verify after approval',
+            message: `${provisionalId}: ${resolvedName} will need Security verification at the gate after approval.`,
+            link: '/gate-keeper/gate-pass-list',
+            priority: 'Normal',
+            type: 'GATE_PASS'
+        })
+    }
 
     return newRequest
 }

@@ -1,6 +1,9 @@
-import React, { useMemo } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
+import { FeedbackState, IntegrationNotice } from '../../../../Common/ui'
+import { isLiveApiEnabled } from '../../../../services/api/tokenStore'
+import { getAdmission } from '../../../../services/api/admissionsApiService'
 import {
     getAdmissionById,
     getAdmissionListBase,
@@ -15,18 +18,77 @@ const Field = ({ label, value }) => (
     </div>
 )
 
+const formatDate = (value) => {
+    if (!value) return ''
+    if (typeof value === 'string') return value.slice(0, 10)
+    try {
+        return new Date(value).toLocaleDateString('en-GB')
+    } catch {
+        return String(value)
+    }
+}
+
 const ViewAdmission = () => {
     const { id } = useParams()
     const navigate = useNavigate()
     const { pathname } = useLocation()
     const listPath = getAdmissionListBase(pathname)
-    const record = useMemo(() => getAdmissionById(id), [id])
+    const live = isLiveApiEnabled()
+
+    const [record, setRecord] = useState(() => (live ? null : getAdmissionById(id)))
+    const [loading, setLoading] = useState(Boolean(live))
+    const [error, setError] = useState('')
+    const [source, setSource] = useState(live ? 'backend' : 'local')
+
+    useEffect(() => {
+        let cancelled = false
+
+        async function load() {
+            if (!isLiveApiEnabled()) {
+                setRecord(getAdmissionById(id))
+                setSource('local')
+                setLoading(false)
+                setError('')
+                return
+            }
+
+            setLoading(true)
+            setError('')
+            const res = await getAdmission(id)
+            if (cancelled) return
+            setLoading(false)
+
+            if (!res.success) {
+                setRecord(null)
+                setSource('error')
+                setError(typeof res.error === 'string' ? res.error : 'Failed to load admission.')
+                return
+            }
+
+            setRecord(res.data || null)
+            setSource('backend')
+        }
+
+        load()
+        return () => {
+            cancelled = true
+        }
+    }, [id])
+
+    if (loading) {
+        return (
+            <section className='space-y-4'>
+                <FeedbackState kind='loading' title='Loading admission' description='Fetching admission details from the API…' />
+            </section>
+        )
+    }
 
     if (!record) {
         return (
-            <section className='bg-white rounded-2xl shadow-md p-8 text-center'>
+            <section className='bg-white rounded-2xl shadow-md p-8 text-center space-y-3'>
                 <h2 className='text-xl font-semibold text-[#0C1E5B]'>Admission not found</h2>
-                <NavLink to={listPath} className='inline-block mt-4 text-[#515DEF] hover:underline'>
+                {error ? <p className='text-sm text-[#B42318]'>{error}</p> : null}
+                <NavLink to={listPath} className='inline-block mt-2 text-[#515DEF] hover:underline'>
                     Back to Admission List
                 </NavLink>
             </section>
@@ -44,6 +106,14 @@ const ViewAdmission = () => {
                 Back to list
             </button>
 
+            <IntegrationNotice
+                state={source === 'backend' ? 'connected' : source === 'error' ? 'failed' : 'demo'}
+                title={source === 'backend' ? 'Live admission record' : 'Browser-stored admission record'}
+                description={source === 'backend'
+                    ? 'Loaded from GET /api/v1/admissions/{id}. Passwords are never returned by the API.'
+                    : 'Showing a local demo admission from this browser.'}
+            />
+
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='flex flex-wrap items-start gap-4 mb-6'>
                     <img
@@ -54,7 +124,8 @@ const ViewAdmission = () => {
                     <div>
                         <h2 className='text-xl font-semibold text-black'>{getStudentDisplayName(record)}</h2>
                         <p className='text-sm text-[#667085] mt-1'>
-                            {record.admissionNumber} · Class {record.className || '—'} · Roll {record.rollNumber || '—'}
+                            {record.admissionNumber || record.admissionCode || '—'} · Class {record.className || '—'}
+                            {record.rollNumber ? ` · Roll ${record.rollNumber}` : ''}
                         </p>
                         <p className='text-sm text-[#667085] mt-1'>Status: {record.status || 'Active'}</p>
                     </div>
@@ -62,13 +133,15 @@ const ViewAdmission = () => {
 
                 <h3 className='text-lg font-semibold text-black mb-4'>Admission Information</h3>
                 <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8'>
-                    <Field label='Admission Date' value={record.admissionDate} />
+                    <Field label='Admission Date' value={formatDate(record.admissionDate)} />
                     <Field label='Class' value={record.className} />
                     <Field label='Registration Fees' value={record.registrationFees} />
                     <Field label='Batch Start Year' value={record.batchStartYear} />
                     <Field label='Batch End Year' value={record.batchEndYear} />
-                    <Field label='Created Date' value={record.createdDate} />
-                    {record.fromEnquiryId && <Field label='From Enquiry ID' value={record.fromEnquiryId} />}
+                    <Field label='Created Date' value={formatDate(record.createdDate || record.createdAt)} />
+                    {(record.fromEnquiryId || record.enquiryId) && (
+                        <Field label='From Enquiry ID' value={record.fromEnquiryId || record.enquiryId} />
+                    )}
                     {record.enrolledStudentId && <Field label='Enrolled Student ID' value={record.enrolledStudentId} />}
                 </div>
 
@@ -80,7 +153,7 @@ const ViewAdmission = () => {
                     <Field label='Gender' value={record.gender} />
                     <Field label='Religion' value={record.religion} />
                     <Field label='Caste' value={record.caste} />
-                    <Field label='Date of Birth' value={record.dateOfBirth} />
+                    <Field label='Date of Birth' value={formatDate(record.dateOfBirth)} />
                     <Field label='Blood Group' value={record.bloodGroup} />
                     <Field label='Height' value={record.height} />
                     <Field label='Weight' value={record.weight} />
@@ -126,25 +199,35 @@ const ViewAdmission = () => {
                 <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8'>
                     <Field label='Parent Username / Email ID' value={record.parentAccountEmail} />
                     <Field
-                        label='Password'
-                        value={record.parentAccountPassword ? '••••••••' : '—'}
+                        label='Parent Password'
+                        value={(record.parentAccountPassword || record.hasParentAccountPassword) ? '••••••••' : '—'}
                     />
+                    <Field label='Student Username / Email ID' value={record.studentAccountEmail} />
                 </div>
 
                 <h3 className='text-lg font-semibold text-black mb-4'>Fees</h3>
                 <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8'>
                     <Field label='Fees Group' value={record.feesGroup} />
-                    <Field label='Registration Fees' value={record.registrationFees ? `₹${record.registrationFees}` : '₹5,000'} />
+                    <Field
+                        label='Registration Fees'
+                        value={record.registrationFees ? `₹${record.registrationFees}` : '—'}
+                    />
                 </div>
 
                 <h3 className='text-lg font-semibold text-black mb-4'>Finance Clearance &amp; Enrollment Status</h3>
                 <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 p-4 rounded-xl border border-slate-200 bg-slate-50'>
-                    <Field label='Finance Status' value={record.status === 'Enrolled' ? 'Fee Paid & Approved by Finance' : 'Pending Finance Clearance & Payment'} />
+                    <Field
+                        label='Finance Status'
+                        value={record.status === 'Enrolled' ? 'Fee Paid & Approved by Finance' : 'Pending Finance Clearance & Payment'}
+                    />
                     {record.financeReceiptNumber && <Field label='Receipt Number' value={record.financeReceiptNumber} />}
                     {record.financePaymentMode && <Field label='Payment Mode' value={record.financePaymentMode} />}
                     {record.financeApprovedBy && <Field label='Approved By' value={record.financeApprovedBy} />}
-                    {record.financeApprovedAt && <Field label='Approval Date' value={new Date(record.financeApprovedAt).toLocaleDateString('en-GB')} />}
+                    {record.financeApprovedAt && (
+                        <Field label='Approval Date' value={formatDate(record.financeApprovedAt)} />
+                    )}
                     {record.enrolledStudentId && <Field label='Enrolled Student ID' value={record.enrolledStudentId} />}
+                    {record.enrolledAt && <Field label='Enrolled At' value={formatDate(record.enrolledAt)} />}
                 </div>
             </div>
         </section>

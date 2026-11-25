@@ -36,7 +36,8 @@ const AddGatePass = () => {
             return
         }
 
-        toast.success(`Gate pass request submitted successfully! Routed to Principal and Director of Academics.`)
+        const approvers = (formData.selectedApprovers || []).join(', ') || 'chosen approvers'
+        toast.success(`Gate pass submitted to ${approvers}. Security will verify at the gate after approval.`)
         navigate('/front-office/gate-pass-list')
     }
 

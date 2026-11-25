@@ -243,23 +243,15 @@ export const ensureParentForEnrolledStudent = (admission, studentId) => {
 }
 
 export const validateAdmissionAccountFields = (payload, existing = null) => {
-    const email = normalizeEmail(payload.parentAccountEmail)
-    if (!email) {
-        return { success: false, message: 'Parent username/email is required in Account Information.' }
+    // Client rule: contact emails only — no separate parent login / password at admission.
+    void existing
+    const parentEmail = normalizeEmail(payload.parentAccountEmail)
+    if (parentEmail && !isValidEmail(parentEmail)) {
+        return { success: false, message: 'Enter a valid parent contact email.' }
     }
-    if (!isValidEmail(email)) {
-        return { success: false, message: 'Enter a valid parent username/email in Account Information.' }
+    const studentEmail = normalizeEmail(payload.studentAccountEmail)
+    if (studentEmail && !isValidEmail(studentEmail)) {
+        return { success: false, message: 'Enter a valid student contact email.' }
     }
-
-    const existingParent = getParentByEmail(email)
-    const password = String(payload.parentAccountPassword || '').trim()
-
-    if (!existingParent && !password) {
-        return {
-            success: false,
-            message: 'Parent password is required when creating a new parent account.',
-        }
-    }
-
     return { success: true }
 }

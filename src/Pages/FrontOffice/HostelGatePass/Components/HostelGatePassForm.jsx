@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import Select from 'react-select'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
@@ -13,6 +13,7 @@ import {
     HOSTEL_OPTIONS,
     LEAVE_TYPES,
     getEnrolledStudentSelectOptions,
+    loadEnrolledStudentsForGatePass,
     mapStudentForGatePass,
 } from '../hostelGatePassData'
 
@@ -51,7 +52,27 @@ const selectStyles = {
 }
 
 const HostelGatePassForm = ({ formData, onChange, errors = {} }) => {
-    const studentOptions = useMemo(() => getEnrolledStudentSelectOptions(), [])
+    const [students, setStudents] = useState([])
+    const [directoryLoading, setDirectoryLoading] = useState(true)
+
+    useEffect(() => {
+        let cancelled = false
+        async function loadDirectory() {
+            const res = await loadEnrolledStudentsForGatePass()
+            if (cancelled) return
+            setDirectoryLoading(false)
+            setStudents(Array.isArray(res.students) ? res.students : [])
+        }
+        loadDirectory()
+        return () => {
+            cancelled = true
+        }
+    }, [])
+
+    const studentOptions = useMemo(
+        () => getEnrolledStudentSelectOptions(students),
+        [students],
+    )
 
     const selectedStudent = useMemo(
         () => studentOptions.find((option) => option.value === formData.studentId) ?? null,
@@ -87,7 +108,9 @@ const HostelGatePassForm = ({ formData, onChange, errors = {} }) => {
             return
         }
 
-        const mapped = mapStudentForGatePass(option.value)
+        const mapped = option.student
+            ? mapStudentForGatePass(option.student.studentId, [option.student])
+            : mapStudentForGatePass(option.value, students)
         if (!mapped) {
             onChange({ ...formData, studentId: option.value })
             return
@@ -112,8 +135,9 @@ const HostelGatePassForm = ({ formData, onChange, errors = {} }) => {
                     onChange={handleStudentChange}
                     isClearable
                     isSearchable
-                    placeholder={studentOptions.length ? 'Search student ID or name...' : 'No enrolled students found'}
-                    noOptionsMessage={() => 'No matching students'}
+                    isLoading={directoryLoading}
+                    placeholder={directoryLoading ? 'Loading enrolled students…' : (studentOptions.length ? 'Search student ID or name...' : 'No enrolled students found')}
+                    noOptionsMessage={() => (directoryLoading ? 'Loading…' : 'No enrolled students — enrol from Admissions first')}
                     styles={selectStyles}
                     classNamePrefix='hostel-gate-pass-select'
                 />
