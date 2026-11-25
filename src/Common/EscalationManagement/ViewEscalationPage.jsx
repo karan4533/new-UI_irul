@@ -28,6 +28,7 @@ import { useEscalationContext } from './useEscalationContext'
 import { isLiveApiEnabled } from '../../services/api/tokenStore'
 import {
     getEscalation,
+    markEscalationNotSatisfied,
     setEscalationStatus,
 } from '../../services/api/escalationApiService'
 
@@ -271,11 +272,44 @@ const ViewEscalationPage = ({ roleKey }) => {
                 <WorkflowTimeline events={timelineEvents} description='Only timestamps stored with this escalation are shown.' />
             </div>
 
+            {!isReceived && !workflowState.terminal && (
+                <Surface title='Not Satisfied (client rule)' description='Escalate manually to the next authority if the response is unsatisfactory. Auto-escalation also runs after 24 hours.' contentClassName='p-4 sm:p-5'>
+                    <button
+                        type='button'
+                        disabled={saving}
+                        onClick={async () => {
+                            setSaving(true)
+                            try {
+                                if (live) {
+                                    const res = await markEscalationNotSatisfied(id, {
+                                        note: 'Not Satisfied — escalated to next level.',
+                                    })
+                                    if (!res.success) {
+                                        toast.error(typeof res.error === 'string' ? res.error : 'Could not escalate.')
+                                        return
+                                    }
+                                    setEscalation(res.data)
+                                    toast.success('Marked Not Satisfied — moved to next level.')
+                                    setRevision((n) => n + 1)
+                                } else {
+                                    toast.info('Not Satisfied requires live API. Local mock: use Add Escalation to raise higher.')
+                                }
+                            } finally {
+                                setSaving(false)
+                            }
+                        }}
+                        className='min-h-10 rounded-lg border border-amber-500 bg-amber-50 px-4 text-sm font-semibold text-amber-900 disabled:opacity-50'
+                    >
+                        Mark Not Satisfied &amp; escalate
+                    </button>
+                </Surface>
+            )}
+
             {workflowState.terminal && (
                 <IntegrationNotice
-                    state='disconnected'
-                    title='Reopen and complaint routing not connected'
-                    description='The production API must validate reopen permissions, preserve the prior decision and create the next SLA-bound owner step.'
+                    state='failed'
+                    title='Closed / settled'
+                    description='Use Not Satisfied before close if unsatisfied. Closed escalations stay immutable.'
                 />
             )}
 

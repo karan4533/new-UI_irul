@@ -28,3 +28,10 @@ export { default as EnterpriseDonutChart } from './EnterpriseDonutChart'
 export { default as HierarchyFilterBar } from './HierarchyFilterBar'
 export { default as RejectRequestModal } from '../CommonComponents/RejectRequestModal'
 export { default as RejectionAlertBanner } from '../CommonComponents/RejectionAlertBanner'
+export {
+  IMMUTABLE_STATUSES,
+  IMMUTABLE_NOTICE,
+  isRecordImmutable,
+  assertCanEdit,
+  assertCanDelete,
+} from './immutableRecords'

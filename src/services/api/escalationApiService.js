@@ -120,3 +120,23 @@ export async function setEscalationStatus(escalationId, { status, note = null } 
   if (!res.success) return res
   return { ...res, data: mapEscalationToUi(res.data || {}) }
 }
+
+/** POST /api/v1/escalations/{id}/not-satisfied — raiser manual escalate (client rule). */
+export async function markEscalationNotSatisfied(escalationId, { note = null } = {}, options = {}) {
+  const blocked = requireLive()
+  if (blocked) return blocked
+  const res = await apiClient.post(
+    `/api/v1/escalations/${encodeURIComponent(escalationId)}/not-satisfied`,
+    { note },
+    { skipMock: true, ...options },
+  )
+  if (!res.success) return res
+  return { ...res, data: mapEscalationToUi(res.data || {}) }
+}
+
+/** POST /api/v1/escalations/sla-sweep — run 24h clock now. */
+export async function runEscalationSlaSweep(options = {}) {
+  const blocked = requireLive()
+  if (blocked) return blocked
+  return apiClient.post('/api/v1/escalations/sla-sweep', {}, { skipMock: true, ...options })
+}

@@ -40,6 +40,7 @@ import AdminUsersList from '../Pages/SuperAdmin/UserCreation/AdminUsersList'
 import CreateAdminUser from '../Pages/SuperAdmin/UserCreation/CreateAdminUser'
 import ViewAdminUser from '../Pages/SuperAdmin/UserCreation/ViewAdminUser'
 import { TaskManagementRoutes } from '../Common/TaskManagement/TaskManagementRoutes'
+import IntegrationsConsole from '../Pages/SuperAdmin/Integrations/IntegrationsConsole'
 
 const SuperAdminRoutes = () => {
     return (
@@ -127,6 +128,8 @@ const SuperAdminRoutes = () => {
 
             {/* Enterprise Functional Operations (Stores, Gate Pass, File Room, Ticketing, Monitoring, Lost & Found) */}
             {EnterpriseOperationsRoutes({ basePath: '/super-admin', role: 'superadmin' })}
+
+            <Route path="/super-admin/integrations" element={<IntegrationsConsole />} />
 
             <Route path="*" element={<Navigate to="/super-admin/dashboard" replace />} />
         </ReactRoutes>

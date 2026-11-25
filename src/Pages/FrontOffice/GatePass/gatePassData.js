@@ -15,6 +15,7 @@ import {
 } from '../../../Common/GatePassSecurity/gatePassSecurityData'
 import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 import { listStudents } from '../../../services/api/studentApiService'
+import { isRecordImmutable } from '../../../Common/ui/immutableRecords'
 
 export const STATUS_OPTIONS = [
     'Pending Approval',
@@ -237,8 +238,7 @@ export const updateStudentGatePass = (id, payload) => {
     if (idx < 0) return { success: false, message: 'Gate pass not found.' }
 
     const current = passes[idx]
-    const lockedStatuses = ['Approved', 'Ready for Exit', 'Exit Recorded', 'Returned', 'Rejected', 'Cancelled']
-    if (lockedStatuses.includes(String(current.status || ''))) {
+    if (isRecordImmutable(current, { statusKeys: ['status', 'finalStatus', 'principalApproval'] })) {
         return {
             success: false,
             message: 'Client rule: gate passes cannot be edited after approval / Security verify. Create a new dated pass if needed.',

@@ -21,7 +21,8 @@ import {
 import { formatEscalatedToDisplay } from './escalationUsersData'
 import { useEscalationContext } from './useEscalationContext'
 import { isLiveApiEnabled } from '../../services/api/tokenStore'
-import { listEscalations } from '../../services/api/escalationApiService'
+import { listEscalations, runEscalationSlaSweep } from '../../services/api/escalationApiService'
+import { toast } from 'react-toastify'
 
 const EscalationListPage = ({ roleKey }) => {
     const live = isLiveApiEnabled()
@@ -182,11 +183,32 @@ const EscalationListPage = ({ roleKey }) => {
                 title={listView === 'received' ? 'Received Issues & Escalations' : 'Report Issue / Escalation'}
                 description={`Routing: ${roleConfig.hierarchyLabel || 'Not configured'}`}
                 context={`${activeList.length} total · ${filtered.length} matching`}
-                actions={canAdd && listView === 'sent' ? (
-                    <NavLink to={`${roleConfig.routeBase}/add-escalation`} className='inline-flex min-h-10 items-center gap-2 rounded-lg bg-[var(--erp-indigo)] px-4 text-sm font-semibold text-white'>
-                        <Plus aria-hidden='true' size={16} /> Report Issue / Escalate
-                    </NavLink>
-                ) : null}
+                actions={(
+                    <div className='flex flex-wrap items-center gap-2'>
+                        {live ? (
+                            <button
+                                type='button'
+                                onClick={async () => {
+                                    const res = await runEscalationSlaSweep()
+                                    if (!res.success) {
+                                        toast.error(typeof res.error === 'string' ? res.error : 'SLA sweep failed.')
+                                        return
+                                    }
+                                    toast.success('24h SLA sweep completed.')
+                                    loadLive()
+                                }}
+                                className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] bg-white px-4 text-sm font-semibold text-[var(--erp-ink)]'
+                            >
+                                Run 24h SLA sweep
+                            </button>
+                        ) : null}
+                        {canAdd && listView === 'sent' ? (
+                            <NavLink to={`${roleConfig.routeBase}/add-escalation`} className='inline-flex min-h-10 items-center gap-2 rounded-lg bg-[var(--erp-indigo)] px-4 text-sm font-semibold text-white'>
+                                <Plus aria-hidden='true' size={16} /> Report Issue / Escalate
+                            </NavLink>
+                        ) : null}
+                    </div>
+                )}
             />
 
             <IntegrationNotice

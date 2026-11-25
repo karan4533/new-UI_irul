@@ -6,6 +6,7 @@
 import { ROLES } from '../../constants/roles.js'
 import { appendApprovalDecision } from './approvalHistory.js'
 import { recordAuditLog } from '../AuditAndNotifications/centralAuditEngine.js'
+import { evaluateSpendAgainstLimit } from '../Finance/approvalLimits.js'
 
 export const normalizeRoleKey = (role) => String(role || '').toLowerCase().replace(/[-_\s]/g, '')
 
@@ -231,7 +232,18 @@ export const applyWorkflowDecision = ({
     }
 
     const isApproval = decision === 'Approved' || decision === 'Accepted'
-    const newStatus = isApproval ? activeTier.approvedStatus : activeTier.rejectedStatus
+    const spendTypes = new Set([WORKFLOW_TYPES.PURCHASE_ORDER, WORKFLOW_TYPES.MATERIAL_REQUISITION])
+    let financeEscalation = null
+    if (isApproval && spendTypes.has(workflowType)) {
+        const amount = entity.amountInr ?? entity.amount ?? entity.estimatedCost ?? 0
+        const check = evaluateSpendAgainstLimit({ amountInr: amount, actorRole })
+        if (check.requiresFinance) {
+            financeEscalation = check
+        }
+    }
+    const newStatus = financeEscalation
+        ? 'Pending Finance Approval'
+        : (isApproval ? activeTier.approvedStatus : activeTier.rejectedStatus)
 
     const decisionRecord = {
         id: `DEC-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -264,8 +276,11 @@ export const applyWorkflowDecision = ({
         ...entity,
         status: newStatus,
         approvalStatus: newStatus,
-        currentTier: isApproval && activeTier.approvedStatus !== 'Approved' ? activeTier.tierNumber + 1 : activeTier.tierNumber,
+        currentTier: financeEscalation
+            ? activeTier.tierNumber
+            : (isApproval && activeTier.approvedStatus !== 'Approved' ? activeTier.tierNumber + 1 : activeTier.tierNumber),
         approvalHistory: updatedHistory,
+        financeEscalation: financeEscalation || entity.financeEscalation || null,
         lastUpdated: new Date().toISOString()
     }
 }

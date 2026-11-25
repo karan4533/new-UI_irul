@@ -11,6 +11,7 @@ import AuditMonitoringList from '../Pages/JointDirectorAudit/AuditMonitoring/Aud
 import ViewAuditMonitoring from '../Pages/JointDirectorAudit/AuditMonitoring/ViewAuditMonitoring'
 import FindingsComplianceList from '../Pages/JointDirectorAudit/FindingsCompliance/FindingsComplianceList'
 import ViewFinding from '../Pages/JointDirectorAudit/FindingsCompliance/ViewFinding'
+import CapaSpine from '../Pages/JointDirectorAudit/FindingsCompliance/CapaSpine'
 import ReportsAnalytics from '../Pages/JointDirectorAudit/ReportsAnalytics/ReportsAnalytics'
 import { TaskManagementRoutes } from '../Common/TaskManagement/TaskManagementRoutes'
 import ViewEmployeeProfile from '../Pages/JointDirectorAudit/EmployeeManagement/ViewEmployeeProfile'
@@ -65,6 +66,7 @@ const JointDirectorAuditRoutes = () => {
             <Route path="/joint-director-audit/audit-monitoring" element={<AuditMonitoringList />} />
             <Route path="/joint-director-audit/audit-monitoring/view/:id" element={<ViewAuditMonitoring />} />
             <Route path="/joint-director-audit/findings-compliance" element={<FindingsComplianceList />} />
+            <Route path="/joint-director-audit/findings-compliance/capa" element={<CapaSpine />} />
             <Route path="/joint-director-audit/findings-compliance/view/:id" element={<ViewFinding />} />
             <Route path="/joint-director-audit/reports-analytics" element={<ReportsAnalytics />} />
             {TaskManagementRoutes({ basePath: '/joint-director-audit' })}

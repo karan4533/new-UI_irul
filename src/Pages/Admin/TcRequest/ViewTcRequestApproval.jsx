@@ -14,7 +14,12 @@ import {
     TC_STATUS_LABELS,
 } from '../../../Common/TcRequest/tcRequestData'
 import { isLiveApiEnabled } from '../../../services/api/tokenStore'
-import { decideTcRequest, getTcRequest } from '../../../services/api/tcApiService'
+import {
+    advanceTcRequest,
+    decideTcRequest,
+    getTcRequest,
+    updateTcNoc,
+} from '../../../services/api/tcApiService'
 
 const Section = ({ title, children }) => (
     <div className='bg-white rounded-2xl shadow-md p-4'>
@@ -150,17 +155,42 @@ const ViewTcRequestApproval = () => {
 
                     <Section title='Client TC workflow'>
                         <ol className='grid gap-2 text-sm text-slate-700'>
-                            {CLIENT_TC_WORKFLOW_STEPS.map((step, index) => (
-                                <li key={step.key} className='flex gap-2'>
+                            {CLIENT_TC_WORKFLOW_STEPS.map((step, index) => {
+                                const stage = String(request.workflowStage || '').toLowerCase()
+                                const active = stage === step.key
+                                  || (step.key === 'class_teacher' && stage === 'prm')
+                                  || (step.key === 'md' && request.status === 'Pending Super Admin Approval')
+                                return (
+                                <li key={step.key} className={`flex gap-2 rounded-lg px-2 py-1 ${active ? 'bg-indigo-50 font-semibold text-indigo-900' : ''}`}>
                                     <span className='font-semibold text-slate-500'>{index + 1}.</span>
-                                    <span>{step.label}</span>
+                                    <span>{step.label}{active ? ' · current' : ''}</span>
                                 </li>
-                            ))}
+                                )
+                            })}
                         </ol>
                         <p className='mt-3 text-xs text-slate-500'>
-                            Live API currently compresses CT→DA into PRM intake, then this MD/Admin decide step after NOCs.
-                            Status shown: {TC_STATUS_LABELS[request.status] || request.status}.
+                            Live stages via workflowStage ({request.workflowStage || '—'}). Status: {TC_STATUS_LABELS[request.status] || request.status}.
                         </p>
+                        {live && request.status !== 'Approved' && request.status !== 'Rejected' && request.workflowStage !== 'md' ? (
+                            <button
+                                type='button'
+                                disabled={saving}
+                                onClick={async () => {
+                                    setSaving(true)
+                                    const res = await advanceTcRequest(request.requestId || id, superAdminRemarks || 'Stage advanced')
+                                    setSaving(false)
+                                    if (!res.success) {
+                                        toast.error(typeof res.error === 'string' ? res.error : 'Could not advance TC stage.')
+                                        return
+                                    }
+                                    setRequest(res.data)
+                                    toast.success(`Advanced to ${res.data.workflowStage || 'next stage'}.`)
+                                }}
+                                className='mt-3 min-h-10 rounded-md border border-[#515DEF] px-4 text-sm font-semibold text-[#515DEF] disabled:opacity-50'
+                            >
+                                Advance next stage (CT→…→NOC→MD)
+                            </button>
+                        ) : null}
                     </Section>
 
                     <Section title='Request Summary'>
@@ -193,7 +223,7 @@ const ViewTcRequestApproval = () => {
                                     {(request.nocClearances || []).map((noc) => (
                                         <tr key={noc.departmentKey} className='hover:bg-slate-50/70 transition-colors'>
                                             <td className='py-3 px-4 font-bold text-slate-900'>{noc.department}</td>
-                                            <td className='py-3 px-4 font-medium text-slate-700'>{noc.manager}</td>
+                                            <td className='py-3 px-4 font-medium text-slate-700'>{noc.manager || '—'}</td>
                                             <td className='py-3 px-4'>
                                                 <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
                                                     noc.status === 'Cleared'
@@ -205,7 +235,33 @@ const ViewTcRequestApproval = () => {
                                                 </span>
                                             </td>
                                             <td className='py-3 px-4 text-slate-600'>{noc.remarks || '—'}</td>
-                                            <td className='py-3 px-4 text-slate-600'>{noc.clearedOn || '—'}</td>
+                                            <td className='py-3 px-4 text-slate-600'>
+                                                {noc.clearedOn || noc.date || '—'}
+                                                {live && noc.status !== 'Cleared' ? (
+                                                    <button
+                                                        type='button'
+                                                        disabled={saving}
+                                                        className='ml-2 text-[11px] font-semibold text-[#515DEF] hover:underline disabled:opacity-50'
+                                                        onClick={async () => {
+                                                            setSaving(true)
+                                                            const res = await updateTcNoc(request.requestId || id, {
+                                                                departmentKey: noc.departmentKey,
+                                                                status: 'Cleared',
+                                                                remarks: 'Cleared from MD/Admin console',
+                                                            })
+                                                            setSaving(false)
+                                                            if (!res.success) {
+                                                                toast.error(typeof res.error === 'string' ? res.error : 'NOC update failed.')
+                                                                return
+                                                            }
+                                                            setRequest(res.data)
+                                                            toast.success(`${noc.department} NOC cleared.`)
+                                                        }}
+                                                    >
+                                                        Clear
+                                                    </button>
+                                                ) : null}
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>

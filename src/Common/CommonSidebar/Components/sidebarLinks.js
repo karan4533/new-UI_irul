@@ -259,6 +259,12 @@ export const superAdminSidebarLinks = [
         to: "/super-admin/relieving-request",
         icon: FileText,
     },
+    {
+        id: 28,
+        title: "Integrations Console",
+        to: "/super-admin/integrations",
+        icon: Settings,
+    },
 ];
 
 export const adminSidebarLinks = [
@@ -2400,6 +2406,12 @@ export const jointDirectorAuditSidebarLinks = [
         icon: ShieldCheck,
     },
     {
+        id: 61,
+        title: "CAPA Spine",
+        to: "/joint-director-audit/findings-compliance/capa",
+        icon: Wrench,
+    },
+    {
         id: 7,
         title: "Reports & Analytics",
         to: "/joint-director-audit/reports-analytics",
@@ -3018,11 +3030,16 @@ export const directorSidebarLinks = [
     },
     {
         id: 10,
+        title: "Final Approvals Centre",
+        to: "/director/final-approvals",
+        icon: ClipboardCheck,
+    },
+    {
+        id: 11,
         title: "Request Approvals",
         to: "/director/request-approvals",
         icon: ClipboardList,
     },
-    
     {
         id: 12,
         title: "Attendance & Leave Management",

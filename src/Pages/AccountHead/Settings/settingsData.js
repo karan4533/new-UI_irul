@@ -2,6 +2,7 @@ export const SETTINGS_TABS = [
     { id: 'general', label: 'General' },
     { id: 'payment-configuration', label: 'Payment Configuration' },
     { id: 'fine-rules', label: 'Fine Rules' },
+    { id: 'approval-limits', label: 'Approval Limits' },
     { id: 'bank-accounts', label: 'Bank Accounts' },
     { id: 'pos-terminals', label: 'POS Terminals' },
     { id: 'roles-permissions', label: 'Roles & Permissions' },

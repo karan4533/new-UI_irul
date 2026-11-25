@@ -32,6 +32,10 @@ export function mapTcRequestToUi(row = {}) {
     requestedBy: row.requestedBy || '',
     requestedOn: row.requestedOn || '',
     status: row.status || '',
+    statusLabel: row.statusLabel || row.status || '',
+    workflowStage: row.workflowStage || '',
+    workflowStages: row.workflowStages || [],
+    allNocsCleared: Boolean(row.allNocsCleared),
     prmRemarks: row.prmRemarks || '',
     superAdminRemarks: row.superAdminRemarks || '',
     forwardedOn: row.forwardedOn || '',
@@ -112,6 +116,32 @@ export async function rejectTcRequestAtPrm(ref, remarks = '', options = {}) {
   const res = await apiClient.post(
     `/api/v1/tc-requests/${encodeURIComponent(ref)}/reject-prm`,
     { remarks },
+    { skipMock: true, ...options },
+  )
+  if (!res.success) return res
+  return { ...res, data: mapTcRequestToUi(res.data || {}) }
+}
+
+/** POST /api/v1/tc-requests/{ref}/advance — CT→Coord→Principal→DA→NOC→MD */
+export async function advanceTcRequest(ref, remarks = '', options = {}) {
+  const blocked = requireLive()
+  if (blocked) return blocked
+  const res = await apiClient.post(
+    `/api/v1/tc-requests/${encodeURIComponent(ref)}/advance`,
+    { remarks },
+    { skipMock: true, ...options },
+  )
+  if (!res.success) return res
+  return { ...res, data: mapTcRequestToUi(res.data || {}) }
+}
+
+/** POST /api/v1/tc-requests/{ref}/noc — department NOC clear */
+export async function updateTcNoc(ref, { departmentKey, status = 'Cleared', remarks = '' } = {}, options = {}) {
+  const blocked = requireLive()
+  if (blocked) return blocked
+  const res = await apiClient.post(
+    `/api/v1/tc-requests/${encodeURIComponent(ref)}/noc`,
+    { departmentKey, status, remarks },
     { skipMock: true, ...options },
   )
   if (!res.success) return res
