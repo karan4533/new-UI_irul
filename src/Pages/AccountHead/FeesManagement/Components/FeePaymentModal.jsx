@@ -63,6 +63,19 @@ const FeePaymentModal = ({
                         ? `Server confirmed ${payableLabel}. Receipt ${result.receipt?.receiptNo || ''}`
                         : `Recorded ${payableLabel}. Receipt ${result.receipt?.receiptNo}`,
                 )
+                const portal = result.studentPortal
+                if (portal?.temporary_password || portal?.temporaryPassword) {
+                    const email = portal.email || 'student mailbox'
+                    const pwd = portal.temporary_password || portal.temporaryPassword
+                    toast.success(
+                        `Student portal created after admission payment: ${email} / temp password ${pwd}. Parent access is via the student profile only.`,
+                        { autoClose: 12000 },
+                    )
+                } else if (portal?.message) {
+                    toast.info(portal.message, { autoClose: 8000 })
+                } else if (portal?.error) {
+                    toast.warning('Fee posted, but student portal was not provisioned. Use Finance → provision admission portal.', { autoClose: 8000 })
+                }
                 if (details.sendWhatsAppReceipt) {
                     toast.info(
                         result.dataSource === 'backend'

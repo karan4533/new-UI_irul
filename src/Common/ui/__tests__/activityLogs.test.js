@@ -3,7 +3,13 @@ import assert from 'node:assert/strict'
 
 import {
     filterActivityLogs,
+    formatLogValue,
+    getCellValue,
+    getActivityLogById,
     parseActivityTimestamp,
+    resolveActivityBackRoute,
+    resolvePreviousValue,
+    resolveUpdatedValue,
 } from '../../../Pages/SuperAdmin/ActivityLogs/activityLogsData.js'
 
 const records = [
@@ -32,4 +38,33 @@ test('activity filtering does not mutate source records', () => {
     const copy = structuredClone(records)
     filterActivityLogs(records, { fromDate: '2026-08-08' })
     assert.deepEqual(records, copy)
+})
+
+test('change summary never renders undefined for missing previous/updated values', () => {
+    assert.equal(formatLogValue(undefined), '—')
+    assert.equal(formatLogValue(null), '—')
+    assert.equal(resolvePreviousValue({ previousValue: 'A' }), 'A')
+    assert.equal(resolveUpdatedValue({ updatedValue: 'B' }), 'B')
+    assert.equal(
+        getCellValue(
+            { oldValue: undefined, newValue: undefined },
+            { key: 'changeSummary', computed: true },
+        ),
+        '— → —',
+    )
+    assert.equal(
+        getCellValue(
+            { oldValue: 'Pending', newValue: 'Confirmed' },
+            { key: 'changeSummary', computed: true },
+        ),
+        'Pending → Confirmed',
+    )
+})
+
+test('inspect back route preserves originating activity category', () => {
+    assert.equal(resolveActivityBackRoute('data-changes'), '/super-admin/activity-logs/data-changes')
+    assert.equal(resolveActivityBackRoute('deleted-records'), '/super-admin/activity-logs/deleted-records')
+    assert.equal(resolveActivityBackRoute('demo-activity'), '/super-admin/activity-logs/demo-activity')
+    assert.ok(getActivityLogById('log-dc-001')?.logType === 'data-changes')
+    assert.ok(getActivityLogById('log-dr-001')?.logType === 'deleted-records')
 })

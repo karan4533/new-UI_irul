@@ -1,10 +1,12 @@
-import React, { useMemo } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import Select from 'react-select'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { Calendar, User, Clock, ShieldCheck, Info } from 'lucide-react'
 import {
+    GATE_PASS_APPROVER_OPTIONS,
     getEnrolledStudentSelectOptions,
+    loadEnrolledStudentsForGatePass,
     mapStudentForGatePass,
     parseGatePassDate,
     formatGatePassDate,
@@ -50,7 +52,33 @@ const selectStyles = {
 }
 
 const StudentGatePassForm = ({ formData, onChange, errors = {} }) => {
-    const studentOptions = useMemo(() => getEnrolledStudentSelectOptions(), [])
+    const [students, setStudents] = useState([])
+    const [directoryLoading, setDirectoryLoading] = useState(true)
+    const [directoryError, setDirectoryError] = useState('')
+    const [directorySource, setDirectorySource] = useState('local')
+
+    useEffect(() => {
+        let cancelled = false
+        async function loadDirectory() {
+            setDirectoryLoading(true)
+            setDirectoryError('')
+            const res = await loadEnrolledStudentsForGatePass()
+            if (cancelled) return
+            setDirectoryLoading(false)
+            setDirectorySource(res.source || 'local')
+            setDirectoryError(res.error || '')
+            setStudents(Array.isArray(res.students) ? res.students : [])
+        }
+        loadDirectory()
+        return () => {
+            cancelled = true
+        }
+    }, [])
+
+    const studentOptions = useMemo(
+        () => getEnrolledStudentSelectOptions(students),
+        [students],
+    )
 
     const selectedStudent = useMemo(
         () => studentOptions.find((option) => option.value === formData.studentId) ?? null,
@@ -83,7 +111,9 @@ const StudentGatePassForm = ({ formData, onChange, errors = {} }) => {
             return
         }
 
-        const mapped = mapStudentForGatePass(option.value)
+        const mapped = option.student
+            ? mapStudentForGatePass(option.student.studentId, [option.student])
+            : mapStudentForGatePass(option.value, students)
         if (!mapped) {
             onChange({ ...formData, studentId: option.value })
             return
@@ -101,9 +131,16 @@ const StudentGatePassForm = ({ formData, onChange, errors = {} }) => {
             <div className='rounded-xl border border-blue-100 bg-blue-50/60 p-3.5 flex items-start gap-3 text-xs text-blue-900'>
                 <Info size={18} className='text-blue-600 shrink-0 mt-0.5' />
                 <div>
-                    <span className='font-semibold'>Simplified OR-Based Workflow:</span> Requests submitted by PRM / Front Office are automatically routed to both the <strong>Principal</strong> and <strong>Director of Academics</strong>. Either executive can sanction the pass, instantly generating the official security Gate Pass ID &amp; QR Code for Gatekeeper verification.
+                    <span className='font-semibold'>Client gate-pass workflow:</span>{' '}
+                    {directorySource === 'backend'
+                        ? 'Student search uses live enrolled students from /api/v1/students (Admissions enrol → Students → Gate Pass).'
+                        : 'Student search uses the local demo directory.'}
+                    {' '}Requester chooses approvers (Class Teacher always included). After approval, Security verifies at the gate.
                 </div>
             </div>
+            {directoryError ? (
+                <p className='rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700'>{directoryError}</p>
+            ) : null}
 
             {/* Section 1: Student Information (Auto-populated) */}
             <div>
@@ -122,8 +159,9 @@ const StudentGatePassForm = ({ formData, onChange, errors = {} }) => {
                             onChange={handleStudentChange}
                             isClearable
                             isSearchable
-                            placeholder='Search student ID, name or class...'
-                            noOptionsMessage={() => 'No students found'}
+                            isLoading={directoryLoading}
+                            placeholder={directoryLoading ? 'Loading enrolled students…' : 'Search student ID, name or class...'}
+                            noOptionsMessage={() => (directoryLoading ? 'Loading…' : 'No enrolled students found — enrol from Admissions first')}
                             styles={selectStyles}
                             classNamePrefix='student-gate-pass-select'
                         />
@@ -263,11 +301,44 @@ const StudentGatePassForm = ({ formData, onChange, errors = {} }) => {
                         />
                     </div>
 
+                    <div className='flex flex-col gap-1.5 md:col-span-3'>
+                        <label htmlFor='selectedApprovers' className='text-xs font-semibold text-slate-700'>
+                            Choose approvers <span className='text-rose-500'>*</span>
+                        </label>
+                        <Select
+                            inputId='selectedApprovers'
+                            isMulti
+                            options={GATE_PASS_APPROVER_OPTIONS.map((opt) => ({
+                                value: opt.value,
+                                label: opt.label,
+                                isFixed: Boolean(opt.fixed),
+                            }))}
+                            value={GATE_PASS_APPROVER_OPTIONS
+                                .filter((opt) => (formData.selectedApprovers || []).includes(opt.value))
+                                .map((opt) => ({ value: opt.value, label: opt.label, isFixed: Boolean(opt.fixed) }))}
+                            onChange={(selected) => {
+                                const values = (selected || []).map((row) => row.value)
+                                if (!values.includes('class_teacher')) values.unshift('class_teacher')
+                                updateField('selectedApprovers', [...new Set(values)])
+                            }}
+                            isClearable={false}
+                            styles={selectStyles}
+                            classNamePrefix='gate-pass-approver-select'
+                            placeholder='Select who must approve this pass…'
+                        />
+                        {errors.selectedApprovers && (
+                            <p className='text-xs text-rose-500'>{errors.selectedApprovers}</p>
+                        )}
+                        <p className='text-[11px] text-slate-500'>
+                            Class Teacher is always included. After approvals, Security verifies exit at the gate.
+                        </p>
+                    </div>
+
                     <div className='flex flex-col gap-1.5'>
-                        <label className='text-xs font-semibold text-slate-700'>Approval Workflow Status</label>
+                        <label className='text-xs font-semibold text-slate-700'>Approval / Security status</label>
                         <div className='flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2.5 text-xs font-semibold text-amber-800'>
                             <ShieldCheck size={16} className='text-amber-600' />
-                            <span>Pending Approval (Principal / Director)</span>
+                            <span>Pending chosen approvers → then Security verify</span>
                         </div>
                     </div>
                 </div>

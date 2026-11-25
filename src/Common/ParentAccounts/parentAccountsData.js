@@ -5,6 +5,14 @@ const DEFAULT_SEED_PASSWORD = 'Parent@123'
 
 const SEED_PARENT_ACCOUNTS = [
     {
+        // Aligns with FastAPI seed parent@qmis.edu ↔ ADM-DEMO-001 child.
+        id: 'PAR-QMIS-001',
+        email: 'parent@qmis.edu',
+        name: 'Demo Parent',
+        phone: '+91 90000 00001',
+        studentIds: ['ADM-DEMO-001'],
+    },
+    {
         id: 'PAR-001',
         email: 'parent@school.com',
         name: 'Raj Kumar',
@@ -62,8 +70,33 @@ const seedParentAccounts = () => {
 
 const ensureParentStoreInitialized = () => {
     const records = loadParents()
-    if (records.length > 0) return records
-    return seedParentAccounts()
+    if (records.length === 0) return seedParentAccounts()
+    // Merge any missing FastAPI-aligned seed parents (e.g. parent@qmis.edu) into existing browser store.
+    const byEmail = new Map(records.map((row) => [normalizeEmail(row.email), row]))
+    let changed = false
+    const now = new Date().toISOString()
+    for (const seed of SEED_PARENT_ACCOUNTS) {
+        const email = normalizeEmail(seed.email)
+        if (byEmail.has(email)) continue
+        const row = {
+            id: seed.id,
+            email,
+            password: DEFAULT_SEED_PASSWORD,
+            name: seed.name,
+            phone: seed.phone,
+            studentIds: [...seed.studentIds],
+            status: 'Active',
+            role: ROLES.PARENT,
+            source: 'seed',
+            createdAt: now,
+            updatedAt: now,
+        }
+        records.push(row)
+        byEmail.set(email, row)
+        changed = true
+    }
+    if (changed) saveParents(records)
+    return records
 }
 
 export const resolveParentAccountEmail = (admission) =>
@@ -210,23 +243,15 @@ export const ensureParentForEnrolledStudent = (admission, studentId) => {
 }
 
 export const validateAdmissionAccountFields = (payload, existing = null) => {
-    const email = normalizeEmail(payload.parentAccountEmail)
-    if (!email) {
-        return { success: false, message: 'Parent username/email is required in Account Information.' }
+    // Client rule: contact emails only — no separate parent login / password at admission.
+    void existing
+    const parentEmail = normalizeEmail(payload.parentAccountEmail)
+    if (parentEmail && !isValidEmail(parentEmail)) {
+        return { success: false, message: 'Enter a valid parent contact email.' }
     }
-    if (!isValidEmail(email)) {
-        return { success: false, message: 'Enter a valid parent username/email in Account Information.' }
+    const studentEmail = normalizeEmail(payload.studentAccountEmail)
+    if (studentEmail && !isValidEmail(studentEmail)) {
+        return { success: false, message: 'Enter a valid student contact email.' }
     }
-
-    const existingParent = getParentByEmail(email)
-    const password = String(payload.parentAccountPassword || '').trim()
-
-    if (!existingParent && !password) {
-        return {
-            success: false,
-            message: 'Parent password is required when creating a new parent account.',
-        }
-    }
-
     return { success: true }
 }

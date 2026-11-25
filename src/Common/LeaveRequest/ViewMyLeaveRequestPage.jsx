@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
@@ -11,6 +12,8 @@ import WorkflowTimeline from '../ui/WorkflowTimeline'
 import { buildWorkflowEvents, getWorkflowState } from '../ui/workflow'
 import { canSubmitterAccessRequest, getLeaveRequestById } from './leaveRequestData'
 import { getLeaveRoutes, resolveRoleKey } from './leaveRequestConfigs'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
+import { getLeaveRequest } from '../../services/api/leaveApiService'
 
 const Field = ({ label, value }) => (
     <div>
@@ -26,21 +29,60 @@ const getSubmitterNextAction = (request) => {
 }
 
 export default function ViewMyLeaveRequestPage({ roleKey: roleKeyProp }) {
+    const live = isLiveApiEnabled()
     const { id } = useParams()
     const navigate = useNavigate()
     const { role: authRole } = useAuth()
     const roleKey = resolveRoleKey(authRole || roleKeyProp)
     const routes = getLeaveRoutes(roleKey)
-    const request = getLeaveRequestById(id)
-    const isOwnRequest = canSubmitterAccessRequest(request, roleKey)
+    const [request, setRequest] = useState(() => {
+        if (live) return null
+        const item = getLeaveRequestById(id)
+        return canSubmitterAccessRequest(item, roleKey) ? item : null
+    })
+    const [loading, setLoading] = useState(Boolean(live))
+    const [loadError, setLoadError] = useState('')
 
-    if (!request || !isOwnRequest) {
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            const item = getLeaveRequestById(id)
+            setRequest(canSubmitterAccessRequest(item, roleKey) ? item : null)
+            setLoading(false)
+            setLoadError('')
+            return
+        }
+        let cancelled = false
+        ;(async () => {
+            setLoading(true)
+            setLoadError('')
+            const res = await getLeaveRequest(id)
+            if (cancelled) return
+            setLoading(false)
+            if (!res.success) {
+                setRequest(null)
+                setLoadError(typeof res.error === 'string' ? res.error : 'Leave request was not found on the server.')
+                return
+            }
+            setRequest(res.data)
+        })()
+        return () => { cancelled = true }
+    }, [id, roleKey])
+
+    if (loading) {
+        return (
+            <section className='space-y-5'>
+                <FeedbackState kind='loading' title='Loading leave request' description='Fetching your request from the server.' />
+            </section>
+        )
+    }
+
+    if (!request) {
         return (
             <section className='space-y-5'>
                 <button type='button' onClick={() => navigate(routes.myList)} className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] bg-white px-3 text-sm font-semibold text-[var(--erp-ink)]'>
                     <ArrowLeft aria-hidden='true' size={17} /> Back to requests
                 </button>
-                <FeedbackState kind='permission' title='Leave request unavailable' description='This request does not exist or is outside your role scope.' />
+                <FeedbackState kind='permission' title='Leave request unavailable' description={loadError || 'This request does not exist or is outside your role scope.'} />
             </section>
         )
     }
@@ -59,8 +101,8 @@ export default function ViewMyLeaveRequestPage({ roleKey: roleKeyProp }) {
     return (
         <section className='space-y-5'>
             <PageHeader
-                title={request.leaveRequestId}
-                description={`${request.leaveType} request sent to ${request.requestedTo}.`}
+                title={request.leaveRequestId || request.id}
+                description={`${request.leaveType} request sent to ${request.requestedTo || 'approver'}.`}
                 status={workflowState.key}
                 actions={(
                     <button type='button' onClick={() => navigate(routes.myList)} className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] bg-white px-3 text-sm font-semibold text-[var(--erp-ink)]'>
@@ -71,9 +113,11 @@ export default function ViewMyLeaveRequestPage({ roleKey: roleKeyProp }) {
             />
 
             <IntegrationNotice
-                state='demo'
-                title='Browser-stored leave workflow'
-                description='This decision trail is saved only in this browser. Notification delivery and the production leave API are not connected.'
+                state={live ? 'connected' : 'mock'}
+                title={live ? 'Live leave request' : 'Browser-stored leave workflow'}
+                description={live
+                    ? 'Loaded from /api/v1/leave-requests. Decisions persist in the database.'
+                    : 'This decision trail is saved only in this browser.'}
             />
 
             <WorkflowContextBar
@@ -97,15 +141,6 @@ export default function ViewMyLeaveRequestPage({ roleKey: roleKeyProp }) {
                 </Surface>
                 <WorkflowTimeline events={timelineEvents} description='Only timestamps present in the stored request are shown.' />
             </div>
-
-            {workflowState.terminal && (
-                <IntegrationNotice
-                    state='disconnected'
-                    title='Complaint and reopen service not connected'
-                    description='The documented complaint or reopen path requires backend case routing and permission checks. This screen does not simulate that action.'
-                />
-            )}
         </section>
     )
 }
-

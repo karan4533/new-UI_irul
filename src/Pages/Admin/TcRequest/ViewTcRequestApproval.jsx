@@ -4,13 +4,22 @@ import { ArrowLeft, CheckCircle2 } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { FeedbackState } from '../../../Common/ui'
 import {
+    allNocsCleared,
     approveTcRequest,
+    CLIENT_TC_WORKFLOW_STEPS,
+    displayTcStatus,
     getTcRequestById,
     rejectTcRequest,
     statusBadgeColor,
+    TC_STATUS_LABELS,
 } from '../../../Common/TcRequest/tcRequestData'
 import { isLiveApiEnabled } from '../../../services/api/tokenStore'
-import { decideTcRequest, getTcRequest } from '../../../services/api/tcApiService'
+import {
+    advanceTcRequest,
+    decideTcRequest,
+    getTcRequest,
+    updateTcNoc,
+} from '../../../services/api/tcApiService'
 
 const Section = ({ title, children }) => (
     <div className='bg-white rounded-2xl shadow-md p-4'>
@@ -64,20 +73,34 @@ const ViewTcRequestApproval = () => {
     }, [id])
 
     const handleApprove = async () => {
+        if (!live && request && !allNocsCleared(request)) {
+            toast.error('Clear all department NOCs before MD final approval (client TC workflow).')
+            return
+        }
         if (isLiveApiEnabled()) {
             setSaving(true)
-            const res = await decideTcRequest(id, { decision: 'approve', remarks: superAdminRemarks })
+            const res = await decideTcRequest(id, {
+                decision: 'approve',
+                remarks: superAdminRemarks || 'MD final approval after departmental NOCs.',
+            })
             setSaving(false)
             if (!res.success) {
                 toast.error(typeof res.error === 'string' ? res.error : 'Could not approve TC on the server.')
                 return
             }
             setRequest(res.data)
-            toast.success('TC request approved on the server.')
+            toast.success('TC approved (MD final step on live API).')
             return
         }
-        const updated = approveTcRequest(id, superAdminRemarks)
-        if (updated) setRequest(updated)
+        try {
+            const updated = approveTcRequest(id, superAdminRemarks)
+            if (updated) {
+                setRequest(updated)
+                toast.success('TC issued after MD final approval.')
+            }
+        } catch (err) {
+            toast.error(err?.message || 'Could not approve TC.')
+        }
     }
 
     const handleReject = async () => {
@@ -114,13 +137,53 @@ const ViewTcRequestApproval = () => {
                         <div className='flex flex-wrap items-center gap-3'>
                             <h1 className='text-2xl font-semibold text-black'>{request.requestId}</h1>
                             <span className={`px-3 py-1.5 rounded-lg text-sm font-semibold whitespace-nowrap ${statusBadgeColor[request.status] || 'bg-slate-100 text-slate-700'}`}>
-                                {request.status}
+                                {displayTcStatus(request.status)}
                             </span>
                         </div>
                         <p className='text-sm text-[#667085] mt-2'>
-                            Administrator review · {request.studentName} · {request.classSection}
+                            MD final approval (client TC overflow) · {request.studentName} · {request.classSection}
                         </p>
                     </div>
+
+                    <Section title='Client TC workflow'>
+                        <ol className='grid gap-2 text-sm text-slate-700'>
+                            {CLIENT_TC_WORKFLOW_STEPS.map((step, index) => {
+                                const stage = String(request.workflowStage || '').toLowerCase()
+                                const active = stage === step.key
+                                  || (step.key === 'class_teacher' && stage === 'prm')
+                                  || (step.key === 'md' && request.status === 'Pending Super Admin Approval')
+                                return (
+                                <li key={step.key} className={`flex gap-2 rounded-lg px-2 py-1 ${active ? 'bg-indigo-50 font-semibold text-indigo-900' : ''}`}>
+                                    <span className='font-semibold text-slate-500'>{index + 1}.</span>
+                                    <span>{step.label}{active ? ' · current' : ''}</span>
+                                </li>
+                                )
+                            })}
+                        </ol>
+                        <p className='mt-3 text-xs text-slate-500'>
+                            Live stages via workflowStage ({request.workflowStage || '—'}). Status: {TC_STATUS_LABELS[request.status] || request.status}.
+                        </p>
+                        {live && request.status !== 'Approved' && request.status !== 'Rejected' && request.workflowStage !== 'md' ? (
+                            <button
+                                type='button'
+                                disabled={saving}
+                                onClick={async () => {
+                                    setSaving(true)
+                                    const res = await advanceTcRequest(request.requestId || id, superAdminRemarks || 'Stage advanced')
+                                    setSaving(false)
+                                    if (!res.success) {
+                                        toast.error(typeof res.error === 'string' ? res.error : 'Could not advance TC stage.')
+                                        return
+                                    }
+                                    setRequest(res.data)
+                                    toast.success(`Advanced to ${res.data.workflowStage || 'next stage'}.`)
+                                }}
+                                className='mt-3 min-h-10 rounded-md border border-[#515DEF] px-4 text-sm font-semibold text-[#515DEF] disabled:opacity-50'
+                            >
+                                Advance next stage (CT→…→NOC→MD)
+                            </button>
+                        ) : null}
+                    </Section>
 
                     <Section title='Request Summary'>
                         <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6'>
@@ -152,7 +215,7 @@ const ViewTcRequestApproval = () => {
                                     {(request.nocClearances || []).map((noc) => (
                                         <tr key={noc.departmentKey} className='hover:bg-slate-50/70 transition-colors'>
                                             <td className='py-3 px-4 font-bold text-slate-900'>{noc.department}</td>
-                                            <td className='py-3 px-4 font-medium text-slate-700'>{noc.manager}</td>
+                                            <td className='py-3 px-4 font-medium text-slate-700'>{noc.manager || '—'}</td>
                                             <td className='py-3 px-4'>
                                                 <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
                                                     noc.status === 'Cleared'
@@ -164,7 +227,33 @@ const ViewTcRequestApproval = () => {
                                                 </span>
                                             </td>
                                             <td className='py-3 px-4 text-slate-600'>{noc.remarks || '—'}</td>
-                                            <td className='py-3 px-4 text-slate-600'>{noc.clearedOn || '—'}</td>
+                                            <td className='py-3 px-4 text-slate-600'>
+                                                {noc.clearedOn || noc.date || '—'}
+                                                {live && noc.status !== 'Cleared' ? (
+                                                    <button
+                                                        type='button'
+                                                        disabled={saving}
+                                                        className='ml-2 text-[11px] font-semibold text-[#515DEF] hover:underline disabled:opacity-50'
+                                                        onClick={async () => {
+                                                            setSaving(true)
+                                                            const res = await updateTcNoc(request.requestId || id, {
+                                                                departmentKey: noc.departmentKey,
+                                                                status: 'Cleared',
+                                                                remarks: 'Cleared from MD/Admin console',
+                                                            })
+                                                            setSaving(false)
+                                                            if (!res.success) {
+                                                                toast.error(typeof res.error === 'string' ? res.error : 'NOC update failed.')
+                                                                return
+                                                            }
+                                                            setRequest(res.data)
+                                                            toast.success(`${noc.department} NOC cleared.`)
+                                                        }}
+                                                    >
+                                                        Clear
+                                                    </button>
+                                                ) : null}
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -174,7 +263,12 @@ const ViewTcRequestApproval = () => {
                     ) : null}
 
                     {request.status === 'Pending Super Admin Approval' ? (
-                        <Section title='Administrator decision'>
+                        <Section title='MD final decision (after dept NOCs)'>
+                            {!live && !allNocsCleared(request) ? (
+                                <p className='mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900'>
+                                    All department NOCs must be Cleared before MD final approval.
+                                </p>
+                            ) : null}
                             <label className='grid gap-2 text-sm font-medium text-[#808080]'>
                                 Remarks
                                 <textarea
@@ -182,7 +276,7 @@ const ViewTcRequestApproval = () => {
                                     value={superAdminRemarks}
                                     onChange={(event) => setSuperAdminRemarks(event.target.value)}
                                     className='w-full border border-[#D9D9D9] rounded-md px-3 py-2 text-sm text-[#1E1E1E]'
-                                    placeholder='Add approval or rejection remarks…'
+                                    placeholder='MD approval or rejection remarks…'
                                 />
                             </label>
                             <div className='mt-4 flex flex-wrap gap-2'>
@@ -196,11 +290,11 @@ const ViewTcRequestApproval = () => {
                                 </button>
                                 <button
                                     type='button'
-                                    disabled={saving}
+                                    disabled={saving || (!live && !allNocsCleared(request))}
                                     onClick={handleApprove}
                                     className='min-h-10 rounded-md bg-[#515DEF] px-4 text-sm font-semibold text-white disabled:opacity-50'
                                 >
-                                    Approve
+                                    MD approve &amp; issue TC
                                 </button>
                             </div>
                         </Section>

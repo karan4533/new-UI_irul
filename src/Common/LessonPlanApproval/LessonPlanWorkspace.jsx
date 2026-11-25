@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowUpRight, Download, Plus, RefreshCw } from 'lucide-react'
 import { NavLink, useSearchParams } from 'react-router-dom'
 import {
@@ -24,15 +24,21 @@ import {
     SUBJECT_OPTIONS,
 } from './lessonPlanApprovalData'
 import { getLessonPlanWorkspaceConfig } from './lessonPlanWorkspaceConfig'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
+import { listLessonPlans, mapLessonPlanToUi } from '../../services/api/lessonPlanApiService'
 
 const LessonPlanWorkspace = ({ role, mode = 'submitted' }) => {
+    const live = isLiveApiEnabled()
     const config = getLessonPlanWorkspaceConfig(role)
     const [urlParams, setUrlParams] = useSearchParams()
     const initialTableState = parseTableState(urlParams)
-    const loadPlans = () => mode === 'approved'
+    const loadLocalPlans = () => (mode === 'approved'
         ? getApprovedLessonPlansBySubmitter(config?.submitterName)
-        : getLessonPlansBySubmitter(config?.submitterName)
-    const [plans, setPlans] = useState(loadPlans)
+        : getLessonPlansBySubmitter(config?.submitterName))
+    const [plans, setPlans] = useState(() => (live ? [] : loadLocalPlans()))
+    const [listLoading, setListLoading] = useState(Boolean(live))
+    const [listError, setListError] = useState('')
+    const [listSource, setListSource] = useState(live ? 'backend' : 'local')
     const [search, setSearch] = useState(initialTableState.query)
     const [subject, setSubject] = useState(initialTableState.filters.subject || '')
     const [className, setClassName] = useState(initialTableState.filters.className || '')
@@ -42,6 +48,38 @@ const LessonPlanWorkspace = ({ role, mode = 'submitted' }) => {
     const [toDate, setToDate] = useState(initialTableState.filters.toDate || '')
     const [page, setPage] = useState(initialTableState.page)
     const [pageSize, setPageSize] = useState(urlParams.has('pageSize') ? initialTableState.pageSize : 5)
+
+    const loadLivePlans = useCallback(async () => {
+        setListLoading(true)
+        setListError('')
+        const res = await listLessonPlans({ mine: true })
+        setListLoading(false)
+        if (!res.success) {
+            setListSource('error')
+            setListError(typeof res.error === 'string' ? res.error : 'Failed to load lesson plans.')
+            setPlans([])
+            return
+        }
+        const mapped = (Array.isArray(res.data) ? res.data : []).map(mapLessonPlanToUi)
+        const scoped = mode === 'approved'
+            ? mapped.filter((plan) => plan.approvalStatus === 'Approved' || plan.markAsDone)
+            : mapped
+        setPlans(scoped)
+        setListSource('backend')
+    }, [mode])
+
+    useEffect(() => {
+        if (!config) return
+        if (!isLiveApiEnabled()) {
+            setPlans(loadLocalPlans())
+            setListSource('local')
+            setListLoading(false)
+            setListError('')
+            return
+        }
+        loadLivePlans()
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- localStorage only when not live
+    }, [config, loadLivePlans, mode])
 
     const filteredPlans = useMemo(() => filterLessonPlans(plans, {
         search,
@@ -96,6 +134,14 @@ const LessonPlanWorkspace = ({ role, mode = 'submitted' }) => {
         setPage(1)
     }
 
+    const handleRefresh = () => {
+        if (isLiveApiEnabled()) {
+            loadLivePlans()
+            return
+        }
+        setPlans(loadLocalPlans())
+    }
+
     const columns = [
         {
             key: 'subject',
@@ -127,7 +173,9 @@ const LessonPlanWorkspace = ({ role, mode = 'submitted' }) => {
             <PageHeader
                 title={title}
                 description={description}
-                context={`${config.submitterName} · ${counts.total} browser-stored plans`}
+                context={listSource === 'backend'
+                    ? `${config.submitterName} · ${counts.total} live plans`
+                    : `${config.submitterName} · ${counts.total} browser-stored plans`}
                 actions={mode === 'submitted' ? (
                     <NavLink to={config.createRoute} className='inline-flex min-h-10 items-center gap-2 rounded-lg bg-[var(--erp-indigo)] px-4 text-sm font-semibold text-white'>
                         <Plus aria-hidden='true' size={16} /> Add lesson plan
@@ -135,11 +183,25 @@ const LessonPlanWorkspace = ({ role, mode = 'submitted' }) => {
                 ) : null}
             />
 
-            <IntegrationNotice
-                state='demo'
-                title='Local lesson-plan workflow'
-                description='Drafts and decisions are browser-stored demonstration records. Production review must be persisted by the academic API with version history, reviewer identity, notifications and published visibility rules.'
-            />
+            {listSource === 'backend' ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Live lesson plans'
+                    description='Loaded from GET /api/v1/lesson-plans?mine=true. Refresh reloads the API; browser localStorage is not used on this screen.'
+                />
+            ) : listSource === 'error' ? (
+                <IntegrationNotice
+                    state='failed'
+                    title='Lesson-plan API unavailable'
+                    description={listError || 'Could not load lesson plans from the server.'}
+                />
+            ) : (
+                <IntegrationNotice
+                    state='mock'
+                    title='Browser lesson-plan workflow'
+                    description='Drafts and decisions are browser-stored demonstration records. Production review must be persisted by the academic API.'
+                />
+            )}
 
             <div className='grid grid-cols-2 gap-3 lg:grid-cols-5'>
                 {[
@@ -156,6 +218,11 @@ const LessonPlanWorkspace = ({ role, mode = 'submitted' }) => {
                 ))}
             </div>
 
+            {listLoading ? (
+                <FeedbackState kind='loading' title='Loading lesson plans' description='Fetching your lesson-plan queue…' />
+            ) : null}
+
+            {!listLoading && listSource !== 'error' ? (
             <div className='overflow-hidden rounded-[var(--erp-radius-surface)] border border-[var(--erp-line)] bg-white'>
                 <DataToolbar
                     query={search}
@@ -201,7 +268,7 @@ const LessonPlanWorkspace = ({ role, mode = 'submitted' }) => {
                     )}
                     actions={(
                         <>
-                            <button type='button' onClick={() => setPlans(loadPlans())} className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] px-4 text-sm font-semibold text-[var(--erp-ink)]'>
+                            <button type='button' onClick={handleRefresh} className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] px-4 text-sm font-semibold text-[var(--erp-ink)]'>
                                 <RefreshCw aria-hidden='true' size={16} /> Refresh
                             </button>
                             <button type='button' disabled title='Lesson-plan export API is not connected' className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] px-4 text-sm font-semibold text-[var(--erp-muted)] opacity-65'>
@@ -228,6 +295,7 @@ const LessonPlanWorkspace = ({ role, mode = 'submitted' }) => {
                 />
                 <Pagination {...pagination} pageSizeOptions={[5, 10, 25]} onPageChange={setPage} onPageSizeChange={(value) => { setPageSize(value); setPage(1) }} />
             </div>
+            ) : null}
         </section>
     )
 }

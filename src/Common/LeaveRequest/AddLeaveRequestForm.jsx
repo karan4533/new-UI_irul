@@ -7,6 +7,8 @@ import { toast } from 'react-toastify'
 import { useAuth } from '../../context/AuthContext'
 import { calculateTotalDays, createLeaveRequest, LEAVE_REQUESTS_UPDATED_EVENT, LEAVE_TYPES } from './leaveRequestData'
 import { getLeaveApproverConfig, getLeaveRoutes, getSubmitterProfile, resolveRoleKey } from './leaveRequestConfigs'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
+import { createLeaveRequest as createLeaveRequestApi } from '../../services/api/leaveApiService'
 import IntegrationNotice from '../ui/IntegrationNotice'
 import PageHeader from '../ui/PageHeader'
 import Surface from '../ui/Surface'
@@ -17,7 +19,23 @@ import { isLiveApiEnabled } from '../../services/api/tokenStore'
 const inputClass = 'text-sm font-normal text-[#1E1E1E] border border-[#D9D9D9] rounded-md px-2 py-3 w-full'
 const readOnlyInputClass = `${inputClass} bg-[#F9FAFB] cursor-not-allowed`
 
+function toIsoDate(value) {
+    if (!(value instanceof Date) || Number.isNaN(value.getTime())) return ''
+    const y = value.getFullYear()
+    const m = String(value.getMonth() + 1).padStart(2, '0')
+    const d = String(value.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+}
+
+function permissionHours(fromTime, toTime) {
+    const [fromHour, fromMinute] = fromTime.split(':').map(Number)
+    const [toHour, toMinute] = toTime.split(':').map(Number)
+    const minutes = (toHour * 60 + toMinute) - (fromHour * 60 + fromMinute)
+    return minutes / 60
+}
+
 export default function AddLeaveRequestForm({ roleKey: roleKeyProp }) {
+    const live = isLiveApiEnabled()
     const navigate = useNavigate()
     const { role: authRole, name } = useAuth()
     const roleKey = resolveRoleKey(authRole || roleKeyProp)
@@ -30,6 +48,7 @@ export default function AddLeaveRequestForm({ roleKey: roleKeyProp }) {
     const [reason, setReason] = useState('')
     const [fromTime, setFromTime] = useState('09:00')
     const [toTime, setToTime] = useState('10:00')
+    const [saving, setSaving] = useState(false)
 
     const totalDays = useMemo(() => calculateTotalDays(fromDate, toDate), [fromDate, toDate])
 
@@ -49,11 +68,11 @@ export default function AddLeaveRequestForm({ roleKey: roleKeyProp }) {
             toast.error('Please select valid from and to dates.')
             return
         }
+
+        let hours = null
         if (leaveType === 'Permission') {
-            const [fromHour, fromMinute] = fromTime.split(':').map(Number)
-            const [toHour, toMinute] = toTime.split(':').map(Number)
-            const minutes = (toHour * 60 + toMinute) - (fromHour * 60 + fromMinute)
-            if (minutes <= 0 || minutes > 120) {
+            hours = permissionHours(fromTime, toTime)
+            if (hours <= 0 || hours > 2) {
                 toast.error('Permission cannot exceed 2 hours.')
                 return
             }

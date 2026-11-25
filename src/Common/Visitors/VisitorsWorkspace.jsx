@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react'
+import React, { useState, useMemo, useEffect, useCallback } from 'react'
 import {
     Search,
     Plus,
@@ -11,6 +11,9 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { getProfileLabel } from '../../Pages/Authentication/profileOptions'
+import { DataSourceIndicator, IntegrationNotice } from '../ui'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
+import { listGateVisitors, upsertGateVisitor } from '../../services/api/gateApiService'
 import {
     getVisitorLogs,
     hydrateVisitorLogsFromApi,
@@ -31,6 +34,9 @@ export default function VisitorsWorkspace({ roleOverride = null }) {
 
     // Data States
     const [refreshKey, setRefreshKey] = useState(0)
+    const [liveRows, setLiveRows] = useState([])
+    const [liveLoading, setLiveLoading] = useState(Boolean(live))
+    const [liveError, setLiveError] = useState('')
     const [search, setSearch] = useState('')
     const [statusFilter, setStatusFilter] = useState('All') // 'All', 'Checked In', 'Checked Out'
     const [dateFilter, setDateFilter] = useState('Today') // 'Today', 'All Dates'
@@ -74,6 +80,7 @@ export default function VisitorsWorkspace({ roleOverride = null }) {
 
     // Live sync event listener
     useEffect(() => {
+        if (live) return undefined
         const handleSync = () => setRefreshKey((k) => k + 1)
         if (typeof window !== 'undefined') {
             window.addEventListener('schoolerp-gatepass-security-sync', handleSync)
@@ -85,7 +92,13 @@ export default function VisitorsWorkspace({ roleOverride = null }) {
                 window.removeEventListener('schoolerp-visitor-updated', handleSync)
             }
         }
-    }, [])
+    }, [live])
+
+    useEffect(() => {
+        if (!live) return undefined
+        loadLive()
+        return undefined
+    }, [live, loadLive])
 
     // Live timer update for in-progress visit durations
     useEffect(() => {
@@ -125,9 +138,18 @@ export default function VisitorsWorkspace({ roleOverride = null }) {
 
     // Queries: Visitor Records
     const allVisitors = useMemo(() => {
+        if (live) {
+            return (liveRows || []).map((v) => ({
+                ...v,
+                entryDate: v.checkInAt
+                    ? new Date(v.checkInAt).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-')
+                    : '',
+                badgeNumber: v.id,
+            }))
+        }
         void refreshKey
         return getVisitorLogs()
-    }, [refreshKey])
+    }, [live, liveRows, refreshKey])
 
     // Filtered Visitors List
     const filteredVisitors = useMemo(() => {
@@ -155,7 +177,7 @@ export default function VisitorsWorkspace({ roleOverride = null }) {
     }, [allVisitors, statusFilter, dateFilter, search])
 
     // Handle Form Submit (+ New Check-in Visitor)
-    const handleCheckInSubmit = (e) => {
+    const handleCheckInSubmit = async (e) => {
         e.preventDefault()
         const errors = {}
         if (!formData.visitorName.trim()) errors.visitorName = 'Visitor Full Name is required.'
@@ -166,6 +188,24 @@ export default function VisitorsWorkspace({ roleOverride = null }) {
 
         if (Object.keys(errors).length > 0) {
             setFormErrors(errors)
+            return
+        }
+
+        if (live) {
+            const saved = await upsertGateVisitor({
+                ...formData,
+                status: 'Checked In',
+                checkInAt: new Date().toISOString(),
+            })
+            if (!saved.success) {
+                notify(`Check-in Error: ${saved.error || 'Server rejected visitor check-in.'}`)
+                return
+            }
+            setLiveRows(saved.rows || [])
+            notify(`Visitor ${saved.data?.visitorName || formData.visitorName} checked in on the server.`)
+            setIsModalOpen(false)
+            setFormData(initialFormState)
+            setFormErrors({})
             return
         }
 
@@ -187,7 +227,27 @@ export default function VisitorsWorkspace({ roleOverride = null }) {
     }
 
     // Handle Check Out
-    const handleCheckOut = (visitorId, visitorName) => {
+    const handleCheckOut = async (visitorId, visitorName) => {
+        if (live) {
+            const current = liveRows.find((row) => String(row.id) === String(visitorId))
+            if (!current) {
+                notify('Check-out Error: Visitor not found on the server.')
+                return
+            }
+            const saved = await upsertGateVisitor({
+                ...current,
+                status: 'Checked Out',
+                checkOutAt: new Date().toISOString(),
+            })
+            if (!saved.success) {
+                notify(`Check-out Error: ${saved.error || 'Server rejected visitor check-out.'}`)
+                return
+            }
+            setLiveRows(saved.rows || [])
+            notify(`Visitor ${visitorName} checked out on the server.`)
+            return
+        }
+
         try {
             const officerName = `${authName || 'Kavita Reddy'} (${roleLabel || 'Front Office'})`
             const updated = recordVisitorCheckOut(visitorId, officerName)
@@ -200,6 +260,23 @@ export default function VisitorsWorkspace({ roleOverride = null }) {
 
     return (
         <section className='space-y-6'>
+            {live && !liveError && !liveLoading ? (
+                <DataSourceIndicator
+                    status='LIVE'
+                    detail='GET/PUT /api/v1/ops/gate-visitors (also aliased as GET /api/v1/front-office/visitors). Failures never fall back to localStorage.'
+                />
+            ) : null}
+            {!live ? (
+                <DataSourceIndicator
+                    status='LOCAL ONLY'
+                    detail='Live API is off. Visitor check-in/out stays in this browser until VITE_USE_MOCK=false.'
+                />
+            ) : null}
+            {liveError ? (
+                <IntegrationNotice state='failed' title='Visitors API failed' description={liveError} />
+            ) : null}
+            {liveLoading ? <p className='text-sm text-slate-500'>Loading visitors from server…</p> : null}
+
             {/* Success / Status Notification */}
             {notification && (
                 <div className='p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-sm font-medium flex items-center justify-between shadow-xs transition-all animate-fadeIn'>

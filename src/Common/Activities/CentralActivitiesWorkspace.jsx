@@ -40,8 +40,10 @@ import {
     saveActivities,
     MD_APPROVAL_STATUS,
     mdApprovalBadgeColor,
-    getPersonInCharge
+    getPersonInCharge,
+    ACTIVITIES_UPDATED_EVENT,
 } from './activitiesData'
+import { useLocation } from 'react-router-dom'
 
 const CATEGORY_TABS = [
     { key: 'all', label: 'All Activities', icon: Trophy, color: 'text-blue-600' },
@@ -96,6 +98,21 @@ export default function CentralActivitiesWorkspace({ defaultCategory = 'all', ro
         void version
         return getActivities()
     }, [refreshTrigger, version])
+
+    // Refresh when returning from Add Activity or when shared SoT notifies.
+    useEffect(() => {
+        setRefreshTrigger((k) => k + 1)
+    }, [location.key, defaultCategory])
+
+    useEffect(() => {
+        const bump = () => setRefreshTrigger((k) => k + 1)
+        window.addEventListener(ACTIVITIES_UPDATED_EVENT, bump)
+        window.addEventListener('focus', bump)
+        return () => {
+            window.removeEventListener(ACTIVITIES_UPDATED_EVENT, bump)
+            window.removeEventListener('focus', bump)
+        }
+    }, [])
 
     // Filter by category, status, and search
     const filteredActivities = useMemo(() => {

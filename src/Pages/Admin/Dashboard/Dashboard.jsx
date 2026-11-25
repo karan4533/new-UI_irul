@@ -114,8 +114,9 @@ const Dashboard = () => {
                 description='A focused view of admissions, records, approvals and access-control work that needs attention.'
                 roleContext='Administrator workspace'
                 metrics={metrics}
-                queues={queues}
+                queues={visibleQueues}
                 quickActions={quickActions}
+                lastUpdated={lastUpdated}
             />
         </section>
     )

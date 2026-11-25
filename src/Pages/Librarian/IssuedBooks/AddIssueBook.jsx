@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, NavLink } from 'react-router-dom'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
@@ -15,20 +15,36 @@ import {
     Info
 } from 'lucide-react'
 import QRScanner from './Components/QRScanner'
+import { FeedbackState, IntegrationNotice } from '../../../Common/ui'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import {
+    loadLibraryWorkspace,
+    replaceLibraryBooks,
+    replaceLibraryIssues,
+    replaceLibraryMembers,
+} from '../../../services/api/libraryApiService'
 import {
     CATALOG_BOOKS,
     REGISTERED_MEMBERS,
     BORROWING_RULES,
     getIssuedBooks,
     issueBookToMember,
-    submitBookRequest
+    submitBookRequest,
 } from '../libraryData'
 
 const AddIssueBook = () => {
     const navigate = useNavigate()
+    const live = isLiveApiEnabled()
 
-    const [selectedBookId, setSelectedBookId] = useState(CATALOG_BOOKS[0]?.id || '')
-    const [selectedMemberId, setSelectedMemberId] = useState(REGISTERED_MEMBERS[0]?.id || '')
+    const [catalogBooks, setCatalogBooks] = useState(() => (live ? [] : CATALOG_BOOKS))
+    const [members, setMembers] = useState(() => (live ? [] : REGISTERED_MEMBERS))
+    const [issuedBooks, setIssuedBooks] = useState(() => (live ? [] : getIssuedBooks()))
+    const [loading, setLoading] = useState(Boolean(live))
+    const [loadError, setLoadError] = useState('')
+    const [saving, setSaving] = useState(false)
+
+    const [selectedBookId, setSelectedBookId] = useState('')
+    const [selectedMemberId, setSelectedMemberId] = useState('')
     const [issuedDate, setIssuedDate] = useState(() => new Date())
     const [returnedDate, setReturnedDate] = useState(() => new Date(Date.now() + 14 * 86400000))
     const [returnComment, setReturnComment] = useState('Standard loan')
@@ -44,40 +60,73 @@ const AddIssueBook = () => {
         reason: ''
     })
 
+    const refreshLive = useCallback(async () => {
+        if (!isLiveApiEnabled()) return
+        setLoading(true)
+        setLoadError('')
+        const res = await loadLibraryWorkspace()
+        setLoading(false)
+        if (!res.success) {
+            setLoadError(typeof res.error === 'string' ? res.error : 'Library API unavailable.')
+            setCatalogBooks([])
+            setMembers([])
+            setIssuedBooks([])
+            return
+        }
+        setCatalogBooks(res.data.books || [])
+        setMembers(res.data.members || [])
+        setIssuedBooks(res.data.issues || [])
+        if (!selectedBookId && res.data.books?.[0]?.id) setSelectedBookId(res.data.books[0].id)
+        if (!selectedMemberId && res.data.members?.[0]?.id) setSelectedMemberId(res.data.members[0].id)
+    }, [selectedBookId, selectedMemberId])
+
+    useEffect(() => {
+        if (!live) {
+            setSelectedBookId(CATALOG_BOOKS[0]?.id || '')
+            setSelectedMemberId(REGISTERED_MEMBERS[0]?.id || '')
+            return undefined
+        }
+        refreshLive()
+        return undefined
+    }, [live]) // eslint-disable-line react-hooks/exhaustive-deps -- hydrate once when live
+
     const selectedBook = useMemo(
-        () => CATALOG_BOOKS.find((b) => b.id === selectedBookId) || CATALOG_BOOKS[0],
-        [selectedBookId]
+        () => catalogBooks.find((b) => b.id === selectedBookId) || catalogBooks[0],
+        [catalogBooks, selectedBookId]
     )
 
     const selectedMember = useMemo(
-        () => REGISTERED_MEMBERS.find((m) => m.id === selectedMemberId) || REGISTERED_MEMBERS[0],
-        [selectedMemberId]
+        () => members.find((m) => m.id === selectedMemberId) || members[0],
+        [members, selectedMemberId]
     )
 
-    const isStudent = selectedMember.memberType === 'Student' || selectedMember.role === 'Student'
+    const isStudent = selectedMember?.memberType === 'Student' || selectedMember?.role === 'Student'
     const maxLimit = isStudent ? BORROWING_RULES.Student.maxBooks : BORROWING_RULES.Staff.maxBooks
 
-    // Real-time active borrowed count from state
     const currentActiveBorrows = useMemo(() => {
-        return getIssuedBooks().filter(
+        if (!selectedMember) return 0
+        return issuedBooks.filter(
             (item) => item.memberId === selectedMember.id && item.status !== 'Returned'
         ).length
-    }, [selectedMember.id])
+    }, [issuedBooks, selectedMember])
 
     const isLimitExceeded = currentActiveBorrows >= maxLimit
-    const isBookOutOfStock = selectedBook.availableCopies <= 0
+    const isBookOutOfStock = (selectedBook?.availableCopies || 0) <= 0
 
     const handleMemberChange = (memberId) => {
         setSelectedMemberId(memberId)
-        const member = REGISTERED_MEMBERS.find((m) => m.id === memberId)
+        const member = members.find((m) => m.id === memberId)
         const isStud = member?.memberType === 'Student' || member?.role === 'Student'
-        // adjust default return date: 14 days for students, 30 days for staff
         const days = isStud ? BORROWING_RULES.Student.loanPeriodDays : BORROWING_RULES.Staff.loanPeriodDays
         setReturnedDate(new Date(Date.now() + days * 86400000))
     }
 
-    const handleIssueSubmit = (e) => {
+    const handleIssueSubmit = async (e) => {
         e.preventDefault()
+        if (!selectedBook || !selectedMember) {
+            setNotification({ type: 'error', message: 'Select a valid member and book before issuing.' })
+            return
+        }
         if (isLimitExceeded) {
             setNotification({
                 type: 'error',
@@ -94,6 +143,59 @@ const AddIssueBook = () => {
             return
         }
 
+        if (live) {
+            const due = returnedDate.toLocaleDateString('en-GB')
+            const newIssue = {
+                id: `LIS-${Date.now()}`,
+                bookId: selectedBook.id,
+                bookTitle: selectedBook.title,
+                author: selectedBook.author,
+                memberId: selectedMember.id,
+                memberName: selectedMember.name,
+                memberType: selectedMember.memberType || selectedMember.role,
+                admissionNumber: selectedMember.admissionNumber,
+                issuedDate: issuedDate.toLocaleDateString('en-GB'),
+                dueDate: due,
+                returnDate: null,
+                status: 'Issued',
+                daysOverdue: 0,
+                lateFee: 0,
+                returnComment: returnComment || 'Standard circulation loan',
+            }
+            const nextBooks = catalogBooks.map((b) => (
+                b.id === selectedBook.id
+                    ? {
+                        ...b,
+                        availableCopies: Math.max(0, (b.availableCopies || 0) - 1),
+                        status: (b.availableCopies || 0) - 1 > 0 ? 'Available' : 'Issued',
+                    }
+                    : b
+            ))
+            const nextIssues = [newIssue, ...issuedBooks]
+            const nextMembers = members.map((m) => (
+                m.id === selectedMember.id
+                    ? { ...m, currentlyBorrowedCount: (m.currentlyBorrowedCount || 0) + 1 }
+                    : m
+            ))
+            setSaving(true)
+            const [booksRes, issuesRes, membersRes] = await Promise.all([
+                replaceLibraryBooks(nextBooks),
+                replaceLibraryIssues(nextIssues),
+                replaceLibraryMembers(nextMembers),
+            ])
+            setSaving(false)
+            if (!booksRes.success || !issuesRes.success || !membersRes.success) {
+                setNotification({
+                    type: 'error',
+                    message: booksRes.error || issuesRes.error || membersRes.error || 'Server rejected issue.',
+                })
+                return
+            }
+            setNotification({ type: 'success', message: `Book "${selectedBook.title}" issued (server confirmed).` })
+            setTimeout(() => navigate('/librarian/issued-books/issued-book-list'), 1200)
+            return
+        }
+
         const res = issueBookToMember({
             bookId: selectedBook.id,
             memberId: selectedMember.id,
@@ -103,7 +205,7 @@ const AddIssueBook = () => {
         if (res.success) {
             setNotification({ type: 'success', message: res.message })
             setTimeout(() => {
-                navigate('/librarian/issued-books/issued-books-list')
+                navigate('/librarian/issued-books/issued-book-list')
             }, 1800)
         } else {
             setNotification({ type: 'error', message: res.message })
@@ -112,20 +214,21 @@ const AddIssueBook = () => {
 
     const handleRequisitionSubmit = (e) => {
         e.preventDefault()
+        // Book requests have no FastAPI collection — intentional browser mock (honest).
         submitBookRequest({
             title: reqForm.title,
             author: reqForm.author,
             isbn: reqForm.isbn,
             category: reqForm.category,
             reason: reqForm.reason,
-            requestedBy: selectedMember.name,
-            requestedByRole: selectedMember.role,
-            memberId: selectedMember.id
+            requestedBy: selectedMember?.name,
+            requestedByRole: selectedMember?.role || selectedMember?.memberType,
+            memberId: selectedMember?.id
         })
         setRequestModalOpen(false)
         setNotification({
             type: 'success',
-            message: `Book request for "${reqForm.title}" submitted to Chief Librarian review queue.`
+            message: `Book request for "${reqForm.title}" saved in browser mock queue (no library-requests API).`
         })
         setReqForm({ title: '', author: '', isbn: '', category: 'Science', reason: '' })
     }
@@ -136,7 +239,7 @@ const AddIssueBook = () => {
             <div className='flex items-center justify-between'>
                 <button
                     type='button'
-                    onClick={() => navigate('/librarian/issued-books/issued-books-list')}
+                    onClick={() => navigate('/librarian/issued-books/issued-book-list')}
                     className='inline-flex items-center gap-2 text-sm text-[#515DEF] border border-[#515DEF] rounded-lg px-4 py-2 hover:bg-[#515DEF] hover:text-white transition-colors cursor-pointer font-medium'
                 >
                     <ArrowLeft size={16} />
@@ -152,6 +255,28 @@ const AddIssueBook = () => {
                 </button>
             </div>
 
+            {live && !loadError && !loading ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Issue form uses live library collections'
+                    description='Catalog, members and issues load from /api/v1/ops/library-*. Requisitions stay browser mock.'
+                />
+            ) : null}
+            {!live ? (
+                <IntegrationNotice
+                    state='mock'
+                    title='Browser mock issue form'
+                    description='Enable live API to persist issues on FastAPI ops library collections.'
+                />
+            ) : null}
+            {loadError ? (
+                <>
+                    <IntegrationNotice state='failed' title='Library API failed' description={loadError} />
+                    <FeedbackState kind='error' title='Library API unavailable' description={loadError} />
+                </>
+            ) : null}
+            {loading ? <FeedbackState kind='loading' title='Loading library' description='Fetching catalog and members…' /> : null}
+
             {/* Notification Alert */}
             {notification && (
                 <div className={`p-4 rounded-xl text-xs font-semibold flex items-center gap-2.5 ${
@@ -165,11 +290,13 @@ const AddIssueBook = () => {
             )}
 
             {/* Main Form Container */}
+            {!loading && !loadError && selectedMember && selectedBook ? (
             <div className='bg-white rounded-2xl shadow-md p-6 space-y-6'>
                 <div>
                     <h2 className='text-xl font-bold text-slate-900'>Issue Book from Central Catalog</h2>
                     <p className='text-xs text-slate-500 mt-1'>
                         Select registered member, select book title, and verify institutional borrowing rules before dispatching loan.
+                        {saving ? ' Saving to server…' : ''}
                     </p>
                 </div>
 
@@ -191,7 +318,7 @@ const AddIssueBook = () => {
                                     onChange={(e) => handleMemberChange(e.target.value)}
                                     className='w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-[#515DEF] bg-white font-medium text-slate-800'
                                 >
-                                    {REGISTERED_MEMBERS.map((m) => (
+                                    {members.map((m) => (
                                         <option key={m.id} value={m.id}>
                                             {m.name} ({m.memberType || m.role} • {m.classSection})
                                         </option>
@@ -255,7 +382,7 @@ const AddIssueBook = () => {
                                     onChange={(e) => setSelectedBookId(e.target.value)}
                                     className='w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-[#515DEF] bg-white font-medium text-slate-800'
                                 >
-                                    {CATALOG_BOOKS.map((b) => (
+                                    {catalogBooks.map((b) => (
                                         <option key={b.id} value={b.id}>
                                             {b.title} — By: {b.author} ({b.availableCopies} available)
                                         </option>
@@ -381,12 +508,12 @@ const AddIssueBook = () => {
                         <QRScanner
                             onScan={(val) => {
                                 if (!val) return
-                                const matchedBook = CATALOG_BOOKS.find((b) => b.id === val || b.isbn === val)
+                                const matchedBook = catalogBooks.find((b) => b.id === val || b.isbn === val)
                                 if (matchedBook) {
                                     setSelectedBookId(matchedBook.id)
                                     return
                                 }
-                                const matchedMember = REGISTERED_MEMBERS.find((m) => m.id === val)
+                                const matchedMember = members.find((m) => m.id === val)
                                 if (matchedMember) {
                                     handleMemberChange(matchedMember.id)
                                 }
@@ -405,18 +532,19 @@ const AddIssueBook = () => {
                         </button>
                         <button
                             type='submit'
-                            disabled={isLimitExceeded || isBookOutOfStock}
+                            disabled={saving || isLimitExceeded || isBookOutOfStock}
                             className={`px-6 py-2.5 rounded-xl text-sm font-bold text-white shadow-sm transition-all ${
-                                isLimitExceeded || isBookOutOfStock
+                                saving || isLimitExceeded || isBookOutOfStock
                                     ? 'bg-slate-300 cursor-not-allowed'
                                     : 'bg-[#515DEF] hover:bg-[#434ecb] cursor-pointer'
                             }`}
                         >
-                            Confirm & Issue Book
+                            {saving ? 'Saving…' : 'Confirm & Issue Book'}
                         </button>
                     </div>
                 </form>
             </div>
+            ) : null}
 
             {/* REQUEST BOOK MODAL */}
             {requestModalOpen && (

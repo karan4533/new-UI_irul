@@ -129,10 +129,15 @@ export const EnterpriseOperationsRoutes = ({ basePath, role = null }) => (
         <Route path={`${basePath}/reports`} element={<UniversalReportsAnalyticsWorkspace roleOverride={role} />} />
         <Route path={`${basePath}/analytics`} element={<UniversalReportsAnalyticsWorkspace roleOverride={role} />} />
 
-        {/* 13. Institutional Hostel Accommodation & Bed Management */}
-        <Route path={`${basePath}/hostel`} element={<HostelManagementWorkspace roleOverride={role} />} />
-        <Route path={`${basePath}/hostel-management`} element={<HostelManagementWorkspace roleOverride={role} />} />
-        <Route path={`${basePath}/hostel-management/:tab`} element={<HostelManagementWorkspace roleOverride={role} />} />
+        {/* 13. Institutional Hostel Accommodation & Bed Management
+            Hostel Warden uses dedicated MOCK/BLOCKED page in HostelWardenRoutes (no invented room/mess APIs). */}
+        {role !== 'hostelwarden' && role !== 'gatekeeper' && role !== 'gatekeeper-manager' && role !== 'gatekeepermanager' ? (
+            <>
+                <Route path={`${basePath}/hostel`} element={<HostelManagementWorkspace roleOverride={role} />} />
+                <Route path={`${basePath}/hostel-management`} element={<HostelManagementWorkspace roleOverride={role} />} />
+                <Route path={`${basePath}/hostel-management/:tab`} element={<HostelManagementWorkspace roleOverride={role} />} />
+            </>
+        ) : null}
 
         {/* Catchall Fallback */}
         <Route path="*" element={<Navigate to={`${basePath}/dashboard`} replace />} />

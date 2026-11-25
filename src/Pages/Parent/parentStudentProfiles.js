@@ -1,5 +1,14 @@
 /** Parent-portal child profiles (separate from teacher student list where needed). */
 export const PARENT_CHILD_PROFILES = {
+    'ADM-DEMO-001': {
+        id: 'ADM-DEMO-001',
+        name: 'Demo Child Sharma',
+        className: 'Class 10',
+        section: 'A',
+        classSection: 'Class 10-A',
+        rollNumber: '10-A-01',
+        admissionNumber: 'ADM-DEMO-001',
+    },
     'STU-PAR-001': {
         id: 'STU-PAR-001',
         name: 'Abhinav Raj',

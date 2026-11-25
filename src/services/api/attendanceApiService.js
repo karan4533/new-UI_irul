@@ -57,3 +57,21 @@ export async function upsertAttendance(body, options = {}) {
     data: Array.isArray(res.data) ? res.data.map(mapAttendanceRowToUi) : [],
   }
 }
+
+/**
+ * GET /api/v1/attendance/students/{studentId}/calendar
+ * Returns a month map of P/A/H codes for AttendanceCalendar.
+ */
+export async function getStudentAttendanceCalendar(studentId, { year, month } = {}, options = {}) {
+  const blocked = requireLive()
+  if (blocked) return { ...blocked, data: {} }
+  if (!studentId) return { success: false, error: 'Student id is required.', data: {} }
+  if (!year || !month) return { success: false, error: 'year and month (1-12) are required.', data: {} }
+  const res = await apiClient.get(
+    `/api/v1/attendance/students/${encodeURIComponent(studentId)}/calendar`,
+    { skipMock: true, params: { year, month }, ...options },
+  )
+  if (!res.success) return { ...res, data: {} }
+  const payload = res.data && typeof res.data === 'object' ? res.data : {}
+  return { ...res, data: payload }
+}

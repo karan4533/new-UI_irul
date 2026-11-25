@@ -36,6 +36,8 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import VisitorsWorkspace from '../Visitors/VisitorsWorkspace'
+import { IntegrationNotice } from '../ui'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
 import { getProfileLabel } from '../../Pages/Authentication/profileOptions'
 import {
     getGatePasses,
@@ -220,6 +222,10 @@ export default function GatePassSecurityWorkspace({ defaultTab = 'overview', rol
 
     const handleVisitorCheckinSubmit = (e) => {
         e.preventDefault()
+        if (isLiveApiEnabled()) {
+            notify('Live mode: use the Visitors tab (ops/gate-visitors). Overview check-in does not write localStorage when live.')
+            return
+        }
         try {
             const newRecord = registerVisitorCheckIn({
                 ...visitorFormData,
@@ -235,6 +241,10 @@ export default function GatePassSecurityWorkspace({ defaultTab = 'overview', rol
     }
 
     const handleVisitorCheckout = (visitorId) => {
+        if (isLiveApiEnabled()) {
+            notify('Live mode: use the Visitors tab (ops/gate-visitors). Overview check-out does not write localStorage when live.')
+            return
+        }
         try {
             const updated = recordVisitorCheckOut(visitorId, `${authName || 'Security Officer'} (${roleLabel})`)
             notify(`Visitor ${updated.visitorName} checked out! Exit recorded.`)
@@ -246,6 +256,10 @@ export default function GatePassSecurityWorkspace({ defaultTab = 'overview', rol
 
     // OR-Based Student Gate Pass Approval Handlers
     const handleApproveStudentPass = (passId) => {
+        if (isLiveApiEnabled()) {
+            notify('Live mode: student gate-pass approve/write is not available from this workspace (FO write is PRM/admin). No localStorage fallback.')
+            return
+        }
         try {
             const result = approveStudentGatePass(
                 passId,
@@ -265,6 +279,10 @@ export default function GatePassSecurityWorkspace({ defaultTab = 'overview', rol
     }
 
     const handleRejectStudentPass = (passId) => {
+        if (isLiveApiEnabled()) {
+            notify('Live mode: student gate-pass reject is not available from this workspace. No localStorage fallback.')
+            return
+        }
         const reason = prompt('Please specify the reason for declining this gate pass:')
         if (reason === null) return
         try {
@@ -282,6 +300,10 @@ export default function GatePassSecurityWorkspace({ defaultTab = 'overview', rol
     }
 
     const handleGatekeeperExit = (passId) => {
+        if (isLiveApiEnabled()) {
+            notify('Live mode: student exit logging has no Gate Keeper write API here. No localStorage fallback.')
+            return
+        }
         try {
             const pass = recordStudentExit(passId, `${authName || 'Ram Singh'} (Gatekeeper)`)
             notify(`Student ${pass.studentName} departure logged at gate. Status: Exit Recorded.`)
@@ -292,6 +314,10 @@ export default function GatePassSecurityWorkspace({ defaultTab = 'overview', rol
     }
 
     const handleGatekeeperReturn = (passId) => {
+        if (isLiveApiEnabled()) {
+            notify('Live mode: student return logging has no Gate Keeper write API here. No localStorage fallback.')
+            return
+        }
         try {
             const pass = recordStudentReturn(passId, `${authName || 'Ram Singh'} (Gatekeeper)`)
             notify(`Student ${pass.studentName} return verified. Pass closed.`)
@@ -301,6 +327,8 @@ export default function GatePassSecurityWorkspace({ defaultTab = 'overview', rol
         }
     }
 
+    const live = isLiveApiEnabled()
+
     return (
         <div className='space-y-6 p-4 md:p-6 bg-slate-50/50 min-h-screen'>
             {/* Feedback Alert Toast */}
@@ -309,6 +337,20 @@ export default function GatePassSecurityWorkspace({ defaultTab = 'overview', rol
                     <CheckCircle2 size={16} className='text-emerald-600 shrink-0' />
                     <span>{actionMessage}</span>
                 </div>
+            )}
+
+            {live ? (
+                <IntegrationNotice
+                    state='mock'
+                    title='Security overview / student & material passes stay browser mock in this workspace'
+                    description='Visitors tab uses live /api/v1/ops/gate-visitors. Dedicated Gate Keeper Visitors, Incidents, My Duty and Hostel Gate Pass pages are live. Live mode refuses silent localStorage writes for overview check-in/out and student exit/return.'
+                />
+            ) : (
+                <IntegrationNotice
+                    state='mock'
+                    title='Browser mock gate-pass security workspace'
+                    description='Enable live API for visitors via ops/gate-visitors. Student/material FO collections remain partial.'
+                />
             )}
 
             {/* Header: Title, Role Badge, Primary Actions */}

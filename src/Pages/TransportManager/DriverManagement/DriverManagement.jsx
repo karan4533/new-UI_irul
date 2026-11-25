@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'react-toastify'
-import { FeedbackState } from '../../../Common/ui'
+import { FeedbackState, IntegrationNotice } from '../../../Common/ui'
 import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 import { listTransportDrivers, upsertTransportDriver } from '../../../services/api/transportApiService'
 
@@ -80,8 +80,26 @@ const DriverManagement = () => {
                 <h1 className='text-2xl font-semibold text-black'>Driver Management</h1>
                 <p className='text-sm text-[#667085] mt-1'>Persisted on /api/v1/ops/transport-drivers.</p>
             </div>
-            {live ? <p className='text-xs font-medium text-[#027A48]'>Live · GET/PUT /api/v1/ops/transport-drivers</p> : null}
-            {error ? <FeedbackState kind='error' title='Drivers API unavailable' description={error} /> : null}
+            {live && !error && !loading ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Drivers are live'
+                    description='GET/PUT /api/v1/ops/transport-drivers. Failures never fall back to localStorage.'
+                />
+            ) : null}
+            {!live ? (
+                <IntegrationNotice
+                    state='mock'
+                    title='Live API disabled'
+                    description='Enable VITE_USE_MOCK=false to manage drivers on FastAPI ops.'
+                />
+            ) : null}
+            {error ? (
+                <>
+                    <IntegrationNotice state='failed' title='Drivers API failed' description={error} />
+                    <FeedbackState kind='error' title='Drivers API unavailable' description={error} />
+                </>
+            ) : null}
             {loading ? <FeedbackState kind='loading' title='Loading drivers' description='Fetching transport drivers…' /> : null}
 
             {!loading && !error ? (

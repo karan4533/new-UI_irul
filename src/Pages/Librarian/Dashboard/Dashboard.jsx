@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { NavLink } from 'react-router-dom'
+import { toast } from 'react-toastify'
 import {
     BookOpen,
     BookMarked,
@@ -8,34 +9,93 @@ import {
     Plus,
     CheckCircle2,
     AlertCircle,
-    Download,
-    ArrowUpRight,
-    Search,
     BookmarkCheck,
     Send,
-    Eye,
-    TrendingUp,
-    ShieldAlert
+    ShieldAlert,
 } from 'lucide-react'
+import { IntegrationNotice } from '../../../Common/ui'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 import {
-    CATALOG_BOOKS,
-    REGISTERED_MEMBERS,
     getIssuedBooks,
     getBookRequests,
     saveBookRequests,
-    BORROWING_RULES
+    getCatalogBooks,
+    REGISTERED_MEMBERS,
 } from '../libraryData'
+import {
+    loadLibraryWorkspace,
+    replaceLibraryBooks,
+    replaceLibraryIssues,
+    replaceLibraryMembers,
+} from '../../../services/api/libraryApiService'
+
+const isActiveLoan = (row) => {
+    const status = String(row?.status || '').toLowerCase()
+    return status === 'issued' || status === 'overdue'
+}
+
+const isOverdueLoan = (row) => String(row?.status || '').toLowerCase() === 'overdue'
 
 const Dashboard = () => {
-    const [issuedList, setIssuedList] = useState(getIssuedBooks())
+    const live = isLiveApiEnabled()
+    const [catalogBooks, setCatalogBooks] = useState(() => (live ? [] : getCatalogBooks()))
+    const [issuedList, setIssuedList] = useState(() => (live ? [] : getIssuedBooks()))
+    const [members, setMembers] = useState(() => (live ? [] : REGISTERED_MEMBERS))
     const [bookRequests, setBookRequests] = useState(getBookRequests())
-    const [activeTab, setActiveTab] = useState('overview') // 'overview' | 'overdue' | 'requests'
+    const [activeTab, setActiveTab] = useState('overview')
     const [actionNotice, setActionNotice] = useState('')
+    const [liveSource, setLiveSource] = useState(live ? 'loading' : 'local')
+    const [liveError, setLiveError] = useState('')
+    const [saving, setSaving] = useState(false)
 
-    const totalTitles = 1480
-    const totalCopies = 6240
-    const activeCirculation = issuedList.filter((b) => b.status === 'Issued' || b.status === 'Overdue').length
-    const overdueBooks = issuedList.filter((b) => b.status === 'Overdue')
+    const refreshLive = useCallback(async () => {
+        if (!isLiveApiEnabled()) {
+            setCatalogBooks(getCatalogBooks())
+            setIssuedList(getIssuedBooks())
+            setMembers(REGISTERED_MEMBERS)
+            setLiveSource('local')
+            setLiveError('')
+            return
+        }
+        setLiveSource((prev) => (prev === 'backend' ? 'backend' : 'loading'))
+        const res = await loadLibraryWorkspace()
+        if (!res.success) {
+            setLiveSource('error')
+            setLiveError(typeof res.error === 'string' ? res.error : 'Failed to load library collections.')
+            setCatalogBooks([])
+            setIssuedList([])
+            setMembers([])
+            return
+        }
+        setCatalogBooks(res.data.books || [])
+        setIssuedList(res.data.issues || [])
+        setMembers(res.data.members || [])
+        setLiveSource('backend')
+        setLiveError('')
+    }, [])
+
+    useEffect(() => {
+        refreshLive()
+    }, [refreshLive])
+
+    const totalTitles = catalogBooks.length
+    const totalCopies = catalogBooks.reduce((sum, row) => sum + (Number(row.totalCopies) || 0), 0)
+    const activeCirculation = issuedList.filter(isActiveLoan).length
+    const overdueBooks = issuedList.filter(isOverdueLoan)
+    const studentMembers = members.filter((m) => String(m.memberType || m.role || '').toLowerCase().includes('student')).length
+    const facultyMembers = Math.max(0, members.length - studentMembers)
+
+    const categoryBreakdown = useMemo(() => {
+        const counts = new Map()
+        catalogBooks.forEach((book) => {
+            const key = String(book.category || 'Uncategorized').trim() || 'Uncategorized'
+            counts.set(key, (counts.get(key) || 0) + 1)
+        })
+        return [...counts.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 6)
+            .map(([name, count]) => ({ name, count: `${count} Title${count === 1 ? '' : 's'}` }))
+    }, [catalogBooks])
 
     const handleApproveRequest = (reqId) => {
         const updated = bookRequests.map((r) =>
@@ -45,29 +105,105 @@ const Dashboard = () => {
         )
         setBookRequests(updated)
         saveBookRequests(updated)
-        setActionNotice(`Book request #${reqId} approved and allocated to borrower.`)
+        setActionNotice(`Book request #${reqId} approved locally (no FastAPI book-requests collection).`)
         setTimeout(() => setActionNotice(''), 4000)
     }
 
-    const handleMarkReturned = (issueId) => {
+    const handleMarkReturned = async (issueId) => {
+        if (live) {
+            const target = issuedList.find((item) => item.id === issueId)
+            if (!target) {
+                toast.error('Issue record not found.')
+                return
+            }
+            const returnDateStr = new Date().toLocaleDateString('en-GB')
+            const nextIssues = issuedList.map((item) => (
+                item.id === issueId
+                    ? { ...item, status: 'Returned', returnDate: returnDateStr, returnComment: 'Returned in good condition' }
+                    : item
+            ))
+            const nextBooks = catalogBooks.map((b) => (
+                b.id === target.bookId
+                    ? {
+                        ...b,
+                        availableCopies: Math.min(
+                            Number(b.totalCopies) || (Number(b.availableCopies) || 0) + 1,
+                            (Number(b.availableCopies) || 0) + 1,
+                        ),
+                        status: 'Available',
+                    }
+                    : b
+            ))
+            const nextMembers = members.map((m) => (
+                m.id === target.memberId
+                    ? { ...m, currentlyBorrowedCount: Math.max(0, (Number(m.currentlyBorrowedCount) || 0) - 1) }
+                    : m
+            ))
+            setSaving(true)
+            const [booksRes, issuesRes, membersRes] = await Promise.all([
+                replaceLibraryBooks(nextBooks),
+                replaceLibraryIssues(nextIssues),
+                replaceLibraryMembers(nextMembers),
+            ])
+            setSaving(false)
+            if (!booksRes.success || !issuesRes.success || !membersRes.success) {
+                toast.error(booksRes.error || issuesRes.error || membersRes.error || 'Server rejected return.')
+                return
+            }
+            await refreshLive()
+            setActionNotice(`Book "${target.bookTitle}" returned (server confirmed).`)
+            toast.success('Return persisted on the server.')
+            setTimeout(() => setActionNotice(''), 4000)
+            return
+        }
+
         const updated = issuedList.map((i) =>
             i.id === issueId
                 ? { ...i, status: 'Returned', returnDate: new Date().toLocaleDateString('en-GB') }
                 : i
         )
         setIssuedList(updated)
-        setActionNotice(`Book returned and restored to circulation shelf.`)
+        setActionNotice('Book returned and restored to circulation shelf (browser only).')
         setTimeout(() => setActionNotice(''), 4000)
     }
 
     const handleSendReminder = (borrowerName, bookTitle) => {
-        setActionNotice(`Overdue return notification and SMS alert dispatched to ${borrowerName} for "${bookTitle}".`)
-        setTimeout(() => setActionNotice(''), 4000)
+        setActionNotice(
+            live
+                ? `Reminder UI only — no SMS/email gateway for library overdue alerts. Recorded intent for ${borrowerName} / "${bookTitle}".`
+                : `Overdue return notification and SMS alert dispatched to ${borrowerName} for "${bookTitle}" (demo).`,
+        )
+        setTimeout(() => setActionNotice(''), 4500)
     }
 
     return (
         <section className='space-y-6 pb-10'>
-            {/* Header & Quick Action Hub */}
+            {liveSource === 'backend' ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Live library dashboard'
+                    description='Catalog, circulation, overdue, and member KPIs hydrate from GET /api/v1/ops/library-books|issues|members. Mark Returned persists via full-collection PUT. Book requisitions and SMS reminders remain browser MOCK (no FastAPI collection/gateway).'
+                />
+            ) : liveSource === 'error' ? (
+                <IntegrationNotice
+                    state='failed'
+                    title='Library dashboard unavailable'
+                    description={liveError || 'Could not load /api/v1/ops/library-* collections.'}
+                />
+            ) : liveSource === 'loading' ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Loading library dashboard'
+                    description='Fetching /api/v1/ops/library-* collections…'
+                />
+            ) : (
+                <IntegrationNotice
+                    state='mock'
+                    title='Browser mock library dashboard'
+                    description='KPI charts and requisition queue use local demo data. Enable live API for ops library collections.'
+                />
+            )}
+
             <div className='bg-white rounded-2xl shadow-sm border border-slate-100 p-6'>
                 <div className='flex flex-col md:flex-row md:items-center justify-between gap-4'>
                     <div>
@@ -100,7 +236,6 @@ const Dashboard = () => {
                     </div>
                 </div>
 
-                {/* Borrowing Rules Banner */}
                 <div className='mt-5 pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs bg-indigo-50/50 p-3 rounded-xl border border-indigo-100'>
                     <div className='flex items-center gap-2 text-indigo-900 font-semibold'>
                         <ShieldAlert size={16} className='text-[#515DEF]' />
@@ -116,7 +251,6 @@ const Dashboard = () => {
                 </div>
             </div>
 
-            {/* Action Notice */}
             {actionNotice && (
                 <div className='p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-2 animate-in fade-in'>
                     <CheckCircle2 size={16} className='text-emerald-600 shrink-0' />
@@ -124,7 +258,6 @@ const Dashboard = () => {
                 </div>
             )}
 
-            {/* 4 Core KPI Cards */}
             <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4'>
                 <NavLink
                     to='/librarian/book-management/book-list'
@@ -139,7 +272,7 @@ const Dashboard = () => {
                         <span className='text-xs text-slate-400'>({totalCopies.toLocaleString()} copies)</span>
                     </div>
                     <span className='text-xs text-emerald-600 font-medium block mt-1'>
-                        98.2% catalog verified →
+                        {liveSource === 'backend' ? 'From library-books →' : '98.2% catalog verified →'}
                     </span>
                 </NavLink>
 
@@ -162,7 +295,7 @@ const Dashboard = () => {
 
                 <button
                     type='button'
-                    onClick={() => setActiveTab('overdue')}
+                    onClick={() => setActiveTab('overview')}
                     className='bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-rose-300 transition-all group text-left cursor-pointer'
                 >
                     <div className='flex items-center justify-between text-slate-500'>
@@ -187,16 +320,15 @@ const Dashboard = () => {
                         <Users size={18} className='text-emerald-600' />
                     </div>
                     <div className='mt-3 flex items-baseline gap-2'>
-                        <span className='text-2xl font-bold text-emerald-600'>1,250</span>
+                        <span className='text-2xl font-bold text-emerald-600'>{members.length.toLocaleString()}</span>
                         <span className='text-xs text-slate-400'>active</span>
                     </div>
                     <span className='text-xs text-slate-500 font-medium block mt-1'>
-                        1,180 Students • 70 Faculty →
+                        {studentMembers} Students • {facultyMembers} Faculty →
                     </span>
                 </NavLink>
             </div>
 
-            {/* View Switcher Tabs */}
             <div className='flex items-center gap-2 p-1.5 bg-slate-100 rounded-2xl w-fit'>
                 <button
                     type='button'
@@ -222,10 +354,8 @@ const Dashboard = () => {
                 </button>
             </div>
 
-            {/* TAB 1: Overdue Books & Active Circulation */}
             {activeTab === 'overview' && (
                 <div className='space-y-6'>
-                    {/* Overdue Books Table */}
                     <div className='bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden'>
                         <div className='p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2'>
                             <div>
@@ -233,7 +363,11 @@ const Dashboard = () => {
                                     <AlertCircle className='text-rose-600' size={18} />
                                     <h3 className='text-base font-bold text-slate-900'>Overdue Books Tracking</h3>
                                 </div>
-                                <p className='text-xs text-slate-500 mt-0.5'>Books that have exceeded loan duration; automated fine calculations applied.</p>
+                                <p className='text-xs text-slate-500 mt-0.5'>
+                                    {liveSource === 'backend'
+                                        ? 'Derived from live library-issues with status Overdue. Mark Returned writes books + issues + members.'
+                                        : 'Books that have exceeded loan duration; automated fine calculations applied.'}
+                                </p>
                             </div>
                             <span className='text-xs font-semibold text-rose-600 bg-rose-50 px-3 py-1 rounded-full border border-rose-200'>
                                 {overdueBooks.length} Overdue Loans
@@ -254,6 +388,13 @@ const Dashboard = () => {
                                     </tr>
                                 </thead>
                                 <tbody className='divide-y divide-slate-100'>
+                                    {overdueBooks.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={7} className='px-4 py-8 text-center text-xs text-slate-500'>
+                                                {liveSource === 'loading' ? 'Loading overdue loans…' : 'No overdue loans in the current library-issues collection.'}
+                                            </td>
+                                        </tr>
+                                    ) : null}
                                     {overdueBooks.map((item) => (
                                         <tr key={item.id} className='hover:bg-slate-50/50'>
                                             <td className='px-4 py-3.5'>
@@ -286,8 +427,9 @@ const Dashboard = () => {
                                                 </button>
                                                 <button
                                                     type='button'
+                                                    disabled={saving}
                                                     onClick={() => handleMarkReturned(item.id)}
-                                                    className='inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-all'
+                                                    className='inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-all disabled:opacity-50'
                                                 >
                                                     <CheckCircle2 size={11} /> Mark Returned
                                                 </button>
@@ -299,104 +441,118 @@ const Dashboard = () => {
                         </div>
                     </div>
 
-                    {/* Category Distribution Cards */}
                     <div className='bg-white rounded-2xl shadow-sm border border-slate-100 p-5'>
                         <h3 className='text-sm font-bold text-slate-900 mb-4'>Collection by Subject Category</h3>
                         <div className='grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-center'>
-                            {[
-                                { name: 'Science & Physics', count: '480 Titles', color: 'bg-blue-50 text-blue-700' },
-                                { name: 'Mathematics', count: '320 Titles', color: 'bg-purple-50 text-purple-700' },
-                                { name: 'Literature & Fiction', count: '290 Titles', color: 'bg-rose-50 text-rose-700' },
-                                { name: 'Computer Science', count: '180 Titles', color: 'bg-cyan-50 text-cyan-700' },
-                                { name: 'History & Civics', count: '110 Titles', color: 'bg-amber-50 text-amber-700' },
-                                { name: 'Reference & Dict', count: '100 Titles', color: 'bg-emerald-50 text-emerald-700' },
-                            ].map((cat) => (
+                            {(categoryBreakdown.length
+                                ? categoryBreakdown.map((cat) => ({
+                                    ...cat,
+                                    color: 'bg-slate-50 text-slate-700',
+                                }))
+                                : [
+                                    { name: 'Science & Physics', count: '480 Titles', color: 'bg-blue-50 text-blue-700' },
+                                    { name: 'Mathematics', count: '320 Titles', color: 'bg-purple-50 text-purple-700' },
+                                    { name: 'Literature & Fiction', count: '290 Titles', color: 'bg-rose-50 text-rose-700' },
+                                    { name: 'Computer Science', count: '180 Titles', color: 'bg-cyan-50 text-cyan-700' },
+                                    { name: 'History & Civics', count: '110 Titles', color: 'bg-amber-50 text-amber-700' },
+                                    { name: 'Reference & Dict', count: '100 Titles', color: 'bg-emerald-50 text-emerald-700' },
+                                ]
+                            ).map((cat) => (
                                 <div key={cat.name} className={`p-3 rounded-xl border border-slate-100 ${cat.color}`}>
                                     <span className='font-bold text-xs block'>{cat.name}</span>
                                     <span className='text-xs opacity-80 mt-1 block font-medium'>{cat.count}</span>
                                 </div>
                             ))}
                         </div>
+                        {liveSource === 'backend' && categoryBreakdown.length === 0 ? (
+                            <p className='text-xs text-slate-500 mt-3'>No category tags on live catalog titles yet.</p>
+                        ) : null}
                     </div>
                 </div>
             )}
 
-            {/* TAB 2: Book Requests & Requisitions Queue */}
             {activeTab === 'requests' && (
-                <div className='bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden'>
-                    <div className='p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2'>
-                        <div>
-                            <div className='flex items-center gap-2'>
-                                <BookmarkCheck className='text-[#515DEF]' size={18} />
-                                <h3 className='text-base font-bold text-slate-900'>Student & Staff Book Requests</h3>
+                <div className='space-y-4'>
+                    <IntegrationNotice
+                        state='mock'
+                        title='Book requisitions — LOCAL ONLY / MOCK'
+                        description='No FastAPI library-requests collection. Approve/reserve stays in browser localStorage only.'
+                    />
+                    <div className='bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden'>
+                        <div className='p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2'>
+                            <div>
+                                <div className='flex items-center gap-2'>
+                                    <BookmarkCheck className='text-[#515DEF]' size={18} />
+                                    <h3 className='text-base font-bold text-slate-900'>Student & Staff Book Requests</h3>
+                                </div>
+                                <p className='text-xs text-slate-500 mt-0.5'>Review requisition requests for new titles or reserved library acquisitions.</p>
                             </div>
-                            <p className='text-xs text-slate-500 mt-0.5'>Review requisition requests for new titles or reserved library acquisitions.</p>
+                            <span className='text-xs font-semibold text-[#515DEF] bg-indigo-50 px-3 py-1 rounded-full border border-indigo-200'>
+                                {bookRequests.length} Total Requests
+                            </span>
                         </div>
-                        <span className='text-xs font-semibold text-[#515DEF] bg-indigo-50 px-3 py-1 rounded-full border border-indigo-200'>
-                            {bookRequests.length} Total Requests
-                        </span>
-                    </div>
 
-                    <div className='overflow-x-auto'>
-                        <table className='w-full text-sm text-left'>
-                            <thead className='text-xs bg-slate-50 text-slate-600 uppercase font-semibold'>
-                                <tr>
-                                    <th className='px-4 py-3'>Requisition ID</th>
-                                    <th className='px-4 py-3'>Requested Book & Author</th>
-                                    <th className='px-4 py-3'>Category</th>
-                                    <th className='px-4 py-3'>Requested By</th>
-                                    <th className='px-4 py-3'>Reason / Purpose</th>
-                                    <th className='px-4 py-3'>Status</th>
-                                    <th className='px-4 py-3 text-right'>Action</th>
-                                </tr>
-                            </thead>
-                            <tbody className='divide-y divide-slate-100'>
-                                {bookRequests.map((req) => (
-                                    <tr key={req.id} className='hover:bg-slate-50/50'>
-                                        <td className='px-4 py-3.5 font-bold text-slate-800'>{req.id}</td>
-                                        <td className='px-4 py-3.5'>
-                                            <span className='font-bold text-slate-900 block'>{req.title}</span>
-                                            <span className='text-xs text-slate-400'>By: {req.author} • ISBN: {req.isbn}</span>
-                                        </td>
-                                        <td className='px-4 py-3.5 text-xs text-slate-600 font-medium'>{req.category}</td>
-                                        <td className='px-4 py-3.5'>
-                                            <span className='font-semibold text-slate-800 block text-xs'>{req.requestedBy}</span>
-                                            <span className='text-xs text-slate-400'>{req.requestedByRole}</span>
-                                        </td>
-                                        <td className='px-4 py-3.5 text-xs text-slate-600 max-w-xs'>{req.reason}</td>
-                                        <td className='px-4 py-3.5'>
-                                            <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                                                req.status === 'Approved & Reserved'
-                                                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                                                    : req.status === 'Ready for Pickup'
-                                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                                    : 'bg-amber-50 text-amber-700 border border-amber-200'
-                                            }`}>
-                                                {req.status}
-                                            </span>
-                                            {req.librarianRemarks && (
-                                                <span className='block text-[11px] text-slate-400 mt-0.5 italic'>
-                                                    {req.librarianRemarks}
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td className='px-4 py-3.5 text-right whitespace-nowrap'>
-                                            {req.status === 'Pending Review' ? (
-                                                <button
-                                                    type='button'
-                                                    onClick={() => handleApproveRequest(req.id)}
-                                                    className='inline-flex items-center gap-1 px-3 py-1.5 bg-[#515DEF] hover:bg-[#434ecb] text-white text-xs font-bold rounded-lg shadow-xs transition-all'
-                                                >
-                                                    <CheckCircle2 size={12} /> Approve & Reserve
-                                                </button>
-                                            ) : (
-                                                <span className='text-xs font-semibold text-emerald-600'>Processed</span>
-                                            )}
-                                        </td>
+                        <div className='overflow-x-auto'>
+                            <table className='w-full text-sm text-left'>
+                                <thead className='text-xs bg-slate-50 text-slate-600 uppercase font-semibold'>
+                                    <tr>
+                                        <th className='px-4 py-3'>Requisition ID</th>
+                                        <th className='px-4 py-3'>Requested Book & Author</th>
+                                        <th className='px-4 py-3'>Category</th>
+                                        <th className='px-4 py-3'>Requested By</th>
+                                        <th className='px-4 py-3'>Reason / Purpose</th>
+                                        <th className='px-4 py-3'>Status</th>
+                                        <th className='px-4 py-3 text-right'>Action</th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody className='divide-y divide-slate-100'>
+                                    {bookRequests.map((req) => (
+                                        <tr key={req.id} className='hover:bg-slate-50/50'>
+                                            <td className='px-4 py-3.5 font-bold text-slate-800'>{req.id}</td>
+                                            <td className='px-4 py-3.5'>
+                                                <span className='font-bold text-slate-900 block'>{req.title}</span>
+                                                <span className='text-xs text-slate-400'>By: {req.author} • ISBN: {req.isbn}</span>
+                                            </td>
+                                            <td className='px-4 py-3.5 text-xs text-slate-600 font-medium'>{req.category}</td>
+                                            <td className='px-4 py-3.5'>
+                                                <span className='font-semibold text-slate-800 block text-xs'>{req.requestedBy}</span>
+                                                <span className='text-xs text-slate-400'>{req.requestedByRole}</span>
+                                            </td>
+                                            <td className='px-4 py-3.5 text-xs text-slate-600 max-w-xs'>{req.reason}</td>
+                                            <td className='px-4 py-3.5'>
+                                                <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                                                    req.status === 'Approved & Reserved'
+                                                        ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                                        : req.status === 'Ready for Pickup'
+                                                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                                        : 'bg-amber-50 text-amber-700 border border-amber-200'
+                                                }`}>
+                                                    {req.status}
+                                                </span>
+                                                {req.librarianRemarks && (
+                                                    <span className='block text-[11px] text-slate-400 mt-0.5 italic'>
+                                                        {req.librarianRemarks}
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td className='px-4 py-3.5 text-right whitespace-nowrap'>
+                                                {req.status === 'Pending Review' ? (
+                                                    <button
+                                                        type='button'
+                                                        onClick={() => handleApproveRequest(req.id)}
+                                                        className='inline-flex items-center gap-1 px-3 py-1.5 bg-[#515DEF] hover:bg-[#434ecb] text-white text-xs font-bold rounded-lg shadow-xs transition-all'
+                                                    >
+                                                        <CheckCircle2 size={12} /> Approve & Reserve
+                                                    </button>
+                                                ) : (
+                                                    <span className='text-xs font-semibold text-emerald-600'>Processed</span>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             )}

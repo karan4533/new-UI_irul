@@ -1,22 +1,61 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
+import { toast } from 'react-toastify'
 import { useActiveStudent } from '../../../context/ActiveStudentContext'
-import { createTcRequest } from '../../../Common/TcRequest/tcRequestData'
+import { createTcRequest as createTcRequestLocal } from '../../../Common/TcRequest/tcRequestData'
+import { createTcRequest as createTcRequestApi } from '../../../services/api/tcApiService'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import IntegrationNotice from '../../../Common/ui/IntegrationNotice'
 
 const inputClass =
     'text-sm font-normal text-[#808080] border border-[#D9D9D9] rounded-md px-2 py-2 w-full bg-white'
 
+/** Convert DD-MM-YYYY (or already ISO) to YYYY-MM-DD for the API. */
+function toIsoAttendanceDate(value) {
+    const raw = String(value || '').trim()
+    if (!raw) return ''
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw
+    const match = raw.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/)
+    if (!match) return raw
+    const [, dd, mm, yyyy] = match
+    return `${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`
+}
+
 const AddTcRequest = () => {
+    const live = isLiveApiEnabled()
     const navigate = useNavigate()
     const { activeStudent, routePrefix, isParentPortal } = useActiveStudent()
     const [reason, setReason] = useState('')
     const [transferTo, setTransferTo] = useState('')
     const [lastDateOfAttendance, setLastDateOfAttendance] = useState('')
+    const [saving, setSaving] = useState(false)
 
-    const handleSubmit = (event) => {
+    const handleSubmit = async (event) => {
         event.preventDefault()
-        const created = createTcRequest({
+        const requestedBy = isParentPortal ? 'Parent' : 'Student'
+
+        if (live) {
+            setSaving(true)
+            const res = await createTcRequestApi({
+                studentRef: activeStudent?.id || activeStudent?.admissionNumber,
+                reason,
+                transferTo,
+                lastDateOfAttendance: toIsoAttendanceDate(lastDateOfAttendance),
+                requestedBy,
+            })
+            setSaving(false)
+            if (!res.success) {
+                toast.error(typeof res.error === 'string' ? res.error : 'Unable to submit TC request.')
+                return
+            }
+            const id = res.data?.id || res.data?.requestId
+            toast.success('TC request submitted to PRM.')
+            navigate(`${routePrefix}/tc-request/view/${id}`)
+            return
+        }
+
+        const created = createTcRequestLocal({
             studentId: activeStudent.id,
             studentName: activeStudent.name,
             classSection: activeStudent.classSection,
@@ -24,7 +63,7 @@ const AddTcRequest = () => {
             reason,
             transferTo,
             lastDateOfAttendance,
-            requestedBy: isParentPortal ? 'Parent' : 'Student',
+            requestedBy,
         })
         navigate(`${routePrefix}/tc-request/view/${created.id}`)
     }
@@ -39,6 +78,20 @@ const AddTcRequest = () => {
                 <ArrowLeft size={18} />
                 Back to list
             </button>
+
+            {live ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Live TC create'
+                    description='Submit posts to POST /api/v1/tc-requests for the active student.'
+                />
+            ) : (
+                <IntegrationNotice
+                    state='mock'
+                    title='Browser TC create'
+                    description='This form saves into browser storage only.'
+                />
+            )}
 
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <h1 className='text-2xl font-semibold text-black'>Request Transfer Certificate</h1>
@@ -117,9 +170,10 @@ const AddTcRequest = () => {
                     </button>
                     <button
                         type='submit'
-                        className='bg-[#515DEF] text-white text-sm px-8 py-2 rounded-md border border-[#515DEF] hover:opacity-90 transition-all duration-200 cursor-pointer md:w-auto w-full'
+                        disabled={saving}
+                        className='bg-[#515DEF] text-white text-sm px-8 py-2 rounded-md border border-[#515DEF] hover:opacity-90 transition-all duration-200 cursor-pointer md:w-auto w-full disabled:opacity-60'
                     >
-                        Submit to PRM
+                        {saving ? 'Submitting…' : 'Submit to PRM'}
                     </button>
                 </div>
             </form>

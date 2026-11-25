@@ -8,6 +8,7 @@ export { default as Dialog } from './Dialog'
 export { default as Drawer } from './Drawer'
 export { default as FormField } from './FormField'
 export { default as IntegrationNotice } from './IntegrationNotice'
+export { default as DataSourceIndicator } from './DataSourceIndicator'
 export { default as PageHeader } from './PageHeader'
 export { default as Pagination } from './Pagination'
 export { default as ResponsiveRecordList } from './ResponsiveRecordList'
@@ -27,3 +28,10 @@ export { default as EnterpriseDonutChart } from './EnterpriseDonutChart'
 export { default as HierarchyFilterBar } from './HierarchyFilterBar'
 export { default as RejectRequestModal } from '../CommonComponents/RejectRequestModal'
 export { default as RejectionAlertBanner } from '../CommonComponents/RejectionAlertBanner'
+export {
+  IMMUTABLE_STATUSES,
+  IMMUTABLE_NOTICE,
+  isRecordImmutable,
+  assertCanEdit,
+  assertCanDelete,
+} from './immutableRecords'

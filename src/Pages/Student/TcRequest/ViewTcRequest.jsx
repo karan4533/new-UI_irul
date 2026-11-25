@@ -1,9 +1,12 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Download, CheckCircle2 } from 'lucide-react'
 import pdf_icon from '../../../assets/images/pdf-icon.png'
 import { useActiveStudent } from '../../../context/ActiveStudentContext'
 import { getTcRequestById, statusBadgeColor, DEFAULT_NOC_CLEARANCES } from '../../../Common/TcRequest/tcRequestData'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { getTcRequest } from '../../../services/api/tcApiService'
+import IntegrationNotice from '../../../Common/ui/IntegrationNotice'
 
 const Section = ({ title, children }) => (
     <div className='bg-white rounded-2xl shadow-md p-4'>
@@ -20,10 +23,41 @@ const Field = ({ label, value }) => (
 )
 
 const ViewTcRequest = () => {
+    const live = isLiveApiEnabled()
     const { id } = useParams()
     const navigate = useNavigate()
     const { routePrefix } = useActiveStudent()
-    const request = getTcRequestById(id)
+    const [request, setRequest] = useState(() => (live ? null : getTcRequestById(id)))
+    const [loading, setLoading] = useState(Boolean(live))
+    const [source, setSource] = useState(live ? 'backend' : 'local')
+    const [error, setError] = useState('')
+
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            setRequest(getTcRequestById(id))
+            setSource('local')
+            setLoading(false)
+            setError('')
+            return
+        }
+        let cancelled = false
+        ;(async () => {
+            setLoading(true)
+            setError('')
+            const res = await getTcRequest(id)
+            if (cancelled) return
+            setLoading(false)
+            if (!res.success) {
+                setSource('error')
+                setError(typeof res.error === 'string' ? res.error : 'TC request not found on the server.')
+                setRequest(null)
+                return
+            }
+            setRequest(res.data || null)
+            setSource('backend')
+        })()
+        return () => { cancelled = true }
+    }, [id])
 
     return (
         <section className='space-y-6'>
@@ -36,14 +70,36 @@ const ViewTcRequest = () => {
                 Back to list
             </button>
 
-            {!request ? (
+            {source === 'backend' ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Live TC detail'
+                    description={`Loaded from GET /api/v1/tc-requests/${id}.`}
+                />
+            ) : source === 'error' ? (
+                <IntegrationNotice
+                    state='failed'
+                    title='TC API unavailable'
+                    description={error || 'Could not load this TC request.'}
+                />
+            ) : (
+                <IntegrationNotice
+                    state='mock'
+                    title='Browser TC detail'
+                    description='Showing the browser-stored TC request record.'
+                />
+            )}
+
+            {loading ? (
+                <div className='bg-white rounded-2xl shadow-md p-8 text-center text-[#667085]'>Loading TC request…</div>
+            ) : !request ? (
                 <div className='bg-white rounded-2xl shadow-md p-8 text-center text-[#667085]'>TC request not found.</div>
             ) : (
                 <>
                     <div className='bg-white rounded-2xl shadow-md p-4'>
                         <div className='flex flex-wrap items-center gap-3'>
                             <h1 className='text-2xl font-semibold text-black'>{request.requestId}</h1>
-                            <span className={`px-3 py-1.5 rounded-lg text-sm font-semibold whitespace-nowrap ${statusBadgeColor[request.status]}`}>
+                            <span className={`px-3 py-1.5 rounded-lg text-sm font-semibold whitespace-nowrap ${statusBadgeColor[request.status] || ''}`}>
                                 {request.status}
                             </span>
                         </div>
@@ -81,7 +137,7 @@ const ViewTcRequest = () => {
                                 </thead>
                                 <tbody className='divide-y divide-slate-100'>
                                     {(request.nocClearances || DEFAULT_NOC_CLEARANCES).map((noc) => (
-                                        <tr key={noc.departmentKey} className='hover:bg-slate-50/70 transition-colors'>
+                                        <tr key={noc.departmentKey || noc.department} className='hover:bg-slate-50/70 transition-colors'>
                                             <td className='py-3 px-4 font-bold text-slate-900'>{noc.department}</td>
                                             <td className='py-3 px-4 font-medium text-slate-700'>{noc.manager}</td>
                                             <td className='py-3 px-4'>

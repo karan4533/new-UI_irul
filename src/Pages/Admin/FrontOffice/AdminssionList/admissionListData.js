@@ -1,11 +1,9 @@
 import noProfile from '../../../../assets/images/no-profile.png'
 import {
-    ensureParentForEnrolledStudent,
     validateAdmissionAccountFields,
 } from '../../../../Common/ParentAccounts/parentAccountsData.js'
 import {
     createEnrolledStudentFromAdmission,
-    updateEnrolledStudentRecord,
 } from '../../../../Common/StudentDatabase/enrolledStudentsData.js'
 import { ensureStudentAllocationRecord } from '../../../../Common/StudentAllocation/studentAllocationData.js'
 
@@ -91,7 +89,14 @@ const formatDate = (date) => {
 const parseStoredDate = (value) => {
     if (!value) return null
     if (value instanceof Date) return value
-    const [day, month, year] = String(value).split('-').map(Number)
+    const raw = String(value).trim()
+    // ISO from API: YYYY-MM-DD or full timestamp
+    if (/^\d{4}-\d{2}-\d{2}/.test(raw)) {
+        const parsed = new Date(raw)
+        return Number.isNaN(parsed.getTime()) ? null : parsed
+    }
+    // Local demo format: DD-MM-YYYY
+    const [day, month, year] = raw.split('-').map(Number)
     if (!day || !month || !year) return null
     return new Date(year, month - 1, day)
 }
@@ -281,13 +286,7 @@ export const enrollAdmissionAsStudent = (id) => {
     const enrollResult = createEnrolledStudentFromAdmission(records[index])
     if (!enrollResult.success) return enrollResult
 
-    const parentResult = ensureParentForEnrolledStudent(records[index], enrollResult.record.id)
-    if (!parentResult.success) return parentResult
-
-    if (parentResult.parent?.id) {
-        updateEnrolledStudentRecord(enrollResult.record.id, { parentId: parentResult.parent.id })
-    }
-
+    // Client rule: no separate parent login at enrol. Portal opens after Finance payment.
     records[index] = {
         ...records[index],
         status: 'Enrolled',
@@ -300,10 +299,11 @@ export const enrollAdmissionAsStudent = (id) => {
         success: true,
         record: records[index],
         student: enrollResult.record,
-        parent: parentResult.parent ?? null,
-        parentCreated: Boolean(parentResult.created),
-        parentMapped: Boolean(parentResult.parentMapped),
-        parentSkipped: Boolean(parentResult.skipped),
+        parent: null,
+        parentCreated: false,
+        parentMapped: false,
+        parentSkipped: true,
+        portalNote: 'Student portal is created after Finance admission payment. No separate parent login.',
     }
 }
 

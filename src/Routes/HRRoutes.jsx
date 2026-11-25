@@ -27,6 +27,9 @@ import AddAnnouncement from '../Pages/HR/Announcements/AddAnnouncement'
 import ViewAnnouncement from '../Pages/HR/Announcements/ViewAnnouncement'
 import ReceivedLeaveRequests from '../Pages/HR/LeaveRequest/ReceivedLeaveRequests'
 import ViewReceivedLeaveRequest from '../Pages/HR/LeaveRequest/ViewReceivedLeaveRequest'
+import MyLeaveRequestsList from '../Common/LeaveRequest/MyLeaveRequestsList'
+import AddLeaveRequestForm from '../Common/LeaveRequest/AddLeaveRequestForm'
+import ViewMyLeaveRequestPage from '../Common/LeaveRequest/ViewMyLeaveRequestPage'
 import { EMPLOYEES } from '../Pages/HR/EmployeeManagement/employeeData'
 
 const defaultEmployeeId = EMPLOYEES[0]?.id ?? 'EMP-2026-001'
@@ -56,13 +59,13 @@ const HRRoutes = () => {
             <Route path="/hr/leave-management/policies" element={<LeaveManagement />} />
             <Route path="/hr/leave-management" element={<LeaveManagement />} />
             {/* Formal leave — declare before EnterpriseOperationsRoutes so stubs cannot shadow. */}
-            <Route path="/hr/leave-request/my-requests" element={<AttendanceAndLeaveWorkspace defaultTab="my-leave" roleOverride="hr" />} />
-            <Route path="/hr/leave-request/my-requests/add" element={<AttendanceAndLeaveWorkspace defaultTab="my-leave" roleOverride="hr" />} />
-            <Route path="/hr/leave-request/my-requests/view/:id" element={<AttendanceAndLeaveWorkspace defaultTab="my-leave" roleOverride="hr" />} />
+            <Route path="/hr/leave-request/my-requests" element={<MyLeaveRequestsList roleKey="hr" />} />
+            <Route path="/hr/leave-request/my-requests/add" element={<AddLeaveRequestForm roleKey="hr" />} />
+            <Route path="/hr/leave-request/my-requests/view/:id" element={<ViewMyLeaveRequestPage roleKey="hr" />} />
             <Route path="/hr/leave-request/received" element={<ReceivedLeaveRequests />} />
             <Route path="/hr/leave-request/received/view/:id" element={<ViewReceivedLeaveRequest />} />
             <Route path="/hr/leave-request/received-leaves" element={<ReceivedLeaveRequests />} />
-            <Route path="/hr/leave-request" element={<AttendanceAndLeaveWorkspace defaultTab="my-leave" roleOverride="hr" />} />
+            <Route path="/hr/leave-request" element={<MyLeaveRequestsList roleKey="hr" />} />
             <Route path="/hr/training-records" element={<Training />} />
             <Route path="/hr/training-feedback" element={<Training />} />
             <Route path="/hr/training" element={<Training />} />

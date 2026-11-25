@@ -1,48 +1,21 @@
 ﻿import React from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
-import VehicleHealthStatusForm from './Components/VehicleHealthStatusForm'
-import { getHealthStatusById } from './vehicleHealthStatusData'
+import { Link } from 'react-router-dom'
+import { FeedbackState } from '../../../../Common/ui'
 
-const EditVehicleHealthStatus = () => {
-    const { id } = useParams()
-    const navigate = useNavigate()
-    const record = getHealthStatusById(id)
+const EditVehicleHealthStatus = () => (
+    <section className='space-y-6'>
+        <FeedbackState
+            kind='empty'
+            title='LOCAL ONLY — dedicated edit form not LIVE'
+            description='Create via Add. List/view/add persist via /api/v1/ops/transport-vehicle-health. This edit route is UI-only for this slice.'
 
-    if (!record) {
-        return (
-            <section className='space-y-6'>
-                <div className='bg-white rounded-2xl shadow-md p-8 text-center text-[#667085]'>
-                    Vehicle health status record not found.
-                </div>
-            </section>
-        )
-    }
-
-    return (
-        <section className='space-y-6'>
-            <div className='bg-white rounded-2xl shadow-md p-4 md:p-6'>
-                <h2 className='text-xl font-semibold text-black'>Vehicle Health Status Information</h2>
-                <VehicleHealthStatusForm record={record} />
-            </div>
-
-            <div className='flex sm:justify-end justify-center gap-x-4'>
-                <button
-                    type='button'
-                    onClick={() => navigate('/driver/vehicle-management/vehicle-health-status')}
-                    className='bg-white text-[#515DEF] text-sm text-center px-12 py-2 rounded-md border border-[#515DEF] hover:bg-[#515DEF] hover:text-white transition-all cursor-pointer md:w-auto w-full'
-                >
-                    Discard Changes
-                </button>
-                <button
-                    type='button'
-                    onClick={() => navigate('/driver/vehicle-management/vehicle-health-status')}
-                    className='bg-[#515DEF] text-white text-sm text-center px-12 py-2 rounded-md border border-[#515DEF] hover:opacity-90 transition-all cursor-pointer md:w-auto w-full'
-                >
-                    Save Changes
-                </button>
-            </div>
-        </section>
-    )
-}
+        />
+        <div className='flex justify-center'>
+            <Link to='/driver/vehicle-management/vehicle-health-status' className='bg-[#515DEF] text-white text-sm px-8 py-2 rounded-md'>
+                Back to Vehicle Health
+            </Link>
+        </div>
+    </section>
+)
 
 export default EditVehicleHealthStatus

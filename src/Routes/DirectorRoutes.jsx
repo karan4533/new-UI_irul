@@ -21,6 +21,7 @@ import ViewStudentLMS from '../Pages/Director/LMS/ViewStudentLMS'
 import ViewTeacherLMS from '../Pages/Director/LMS/ViewTeacherLMS'
 import RequestApprovals from '../Pages/Director/Request-Approvals/RequestApprovals'
 import ViewRequestApproval from '../Pages/Director/Request-Approvals/ViewRequestApproval'
+import FinalApprovalsCentre from '../Pages/Director/FinalApprovals/FinalApprovalsCentre'
 import EscalationList from '../Pages/Director/EscalationManagement/EscalationList'
 import AddEscalation from '../Pages/Director/EscalationManagement/AddEscalation'
 import ViewEscalation from '../Pages/Director/EscalationManagement/ViewEscalation'
@@ -89,6 +90,7 @@ const DirectorRoutes = () => {
             <Route path="/director/lms/view-student-lms" element={<ViewStudentLMS />} />
             <Route path="/director/lms/teacher-lms" element={<TeacherLMS />} />
             <Route path="/director/lms/view-teacher-lms" element={<ViewTeacherLMS />} />
+            <Route path="/director/final-approvals" element={<FinalApprovalsCentre />} />
             <Route path="/director/request-approvals" element={<RequestApprovals />} />
             <Route path="/director/request-approvals/view-request" element={<ViewRequestApproval />} />
             <Route path="/director/academic-calendar" element={<AcademicCalendar />} />

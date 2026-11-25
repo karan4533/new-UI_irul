@@ -146,10 +146,48 @@ const findBestSidebarMatch = (pathname, sidebarLinks = []) => {
  * Builds breadcrumb crumbs from the current route using sidebar + title mappings.
  * Home is handled separately by the UI (house icon).
  */
+const ACTIVITY_LOG_LABELS = {
+    'login-history': 'Login History',
+    'data-changes': 'Data Changes',
+    'deleted-records': 'Deleted Records',
+    'approval-actions': 'Approval Actions',
+    'audit-logs': 'Audit Logs',
+    'failed-logins': 'Failed Logins',
+    'demo-activity': 'Demo Activity',
+}
+
+/** Avoid sidebar prefix-match to Login History on Activity Log detail routes. */
+const getActivityLogViewCrumbs = (normalizedPath) => {
+    const typed = normalizedPath.match(
+        /^\/super-admin\/activity-logs\/([^/]+)\/view\/[^/]+$/
+    )
+    if (typed) {
+        const logType = typed[1]
+        if (logType === 'view') return null
+        const label = ACTIVITY_LOG_LABELS[logType] || formatSegmentLabel(logType)
+        return [
+            { label, to: `/super-admin/activity-logs/${logType}` },
+            { label: 'View Activity Log', to: null, isCurrent: true },
+        ]
+    }
+    if (/^\/super-admin\/activity-logs\/view\/[^/]+$/.test(normalizedPath)) {
+        return [
+            { label: 'Activity Logs', to: '/super-admin/activity-logs/login-history' },
+            { label: 'View Activity Log', to: null, isCurrent: true },
+        ]
+    }
+    return null
+}
+
 export const getBreadcrumbItems = (pathname) => {
     const normalizedPath = (pathname || '').replace(/\/+$/, '') || '/'
     const roleConfig = getRoleConfigForPath(normalizedPath)
     if (!roleConfig) return { homePath: '/', crumbs: [] }
+
+    const activityLogCrumbs = getActivityLogViewCrumbs(normalizedPath)
+    if (activityLogCrumbs) {
+        return { homePath: roleConfig.homePath, crumbs: activityLogCrumbs }
+    }
 
     const currentTitle =
         getPageTitle(normalizedPath) ||

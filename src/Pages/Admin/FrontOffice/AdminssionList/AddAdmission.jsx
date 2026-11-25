@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, ArrowRight, Check, Circle, Save } from 'lucide-react'
 import { toast } from 'react-toastify'
@@ -27,13 +27,19 @@ import {
 } from '../../../../Common/Admissions/admissionDraft'
 import { ADMISSION_STAGES, getAdmissionStageProgress } from '../../../../Common/ui/governance'
 import { ConfirmAction, FeedbackState, IntegrationNotice, PageHeader, Surface } from '../../../../Common/ui'
+import { isLiveApiEnabled } from '../../../../services/api/tokenStore'
+import {
+    createAdmissionRecord,
+    getAdmission,
+    updateAdmissionRecord,
+} from '../../../../services/api/admissionsApiService'
 
 const stagePanels = {
     admission: { title: 'Admission information', Component: AdmissionInfo },
     student: { title: 'Student information', Component: StudentInfo },
     transport: { title: 'Transport information', Component: TransportInfo },
     parents: { title: 'Parents and guardians', Component: ParentsInfo },
-    account: { title: 'Guardian account', Component: AccountInformation },
+    account: { title: 'Contact emails (no parent login)', Component: AccountInformation },
     fees: { title: 'Fees timeline', Component: FeesTimeLine },
 }
 
@@ -48,16 +54,24 @@ const AddAdmission = () => {
     const navigate = useNavigate()
     const { id } = useParams()
     const isEdit = Boolean(id)
+    const live = isLiveApiEnabled()
     const { pathname, state: locationState } = useLocation()
     const listPath = getAdmissionListPath(pathname)
     const draftKey = getAdmissionDraftKey(pathname, id || 'new')
-    const [record] = useState(() => (isEdit ? getAdmissionById(id) : null))
+
+    const [record, setRecord] = useState(() => (!live && isEdit ? getAdmissionById(id) : null))
+    const [loading, setLoading] = useState(Boolean(live && isEdit))
+    const [loadError, setLoadError] = useState('')
+    const [saving, setSaving] = useState(false)
     const [initialDraft] = useState(() => (
         locationState?.enquiry ? null : loadAdmissionDraft(draftKey)
     ))
     const [form, setForm] = useState(() => {
         if (initialDraft?.form) return initialDraft.form
-        if (record) return toAdmissionFormState(record)
+        if (!live && isEdit) {
+            const local = getAdmissionById(id)
+            return local ? toAdmissionFormState(local) : buildInitialAdmissionForm()
+        }
         const prefill = locationState?.enquiry
             ? mapEnquiryToAdmissionPrefill(locationState.enquiry)
             : null
@@ -67,13 +81,85 @@ const AddAdmission = () => {
     const [draftSavedAt, setDraftSavedAt] = useState(() => initialDraft?.savedAt || '')
     const [error, setError] = useState('')
     const [discardOpen, setDiscardOpen] = useState(false)
+    const [formReady, setFormReady] = useState(!(live && isEdit) || Boolean(initialDraft?.form))
 
-    if (isEdit && !record) {
+    useEffect(() => {
+        let cancelled = false
+
+        async function loadLiveEdit() {
+            if (!isLiveApiEnabled() || !isEdit) {
+                setLoading(false)
+                return
+            }
+            // Prefer local draft if user already started editing this admission.
+            if (initialDraft?.form) {
+                setLoading(false)
+                setFormReady(true)
+                return
+            }
+
+            setLoading(true)
+            setLoadError('')
+            const res = await getAdmission(id)
+            if (cancelled) return
+            setLoading(false)
+
+            if (!res.success || !res.data) {
+                setRecord(null)
+                setLoadError(typeof res.error === 'string' ? res.error : 'Failed to load admission for edit.')
+                setFormReady(true)
+                return
+            }
+
+            if (res.data.status === 'Enrolled') {
+                setRecord(res.data)
+                setLoadError('Enrolled admissions cannot be edited.')
+                setFormReady(true)
+                return
+            }
+
+            setRecord(res.data)
+            setForm(toAdmissionFormState(res.data))
+            setFormReady(true)
+        }
+
+        loadLiveEdit()
+        return () => {
+            cancelled = true
+        }
+    }, [id, isEdit, initialDraft])
+
+    if (loading || (live && isEdit && !formReady)) {
+        return (
+            <FeedbackState
+                kind='loading'
+                title='Loading admission'
+                description='Fetching admission details for edit…'
+            />
+        )
+    }
+
+    if (isEdit && !record && !initialDraft?.form) {
         return (
             <FeedbackState
                 kind='error'
                 title='Admission not found'
-                description='The admission may have been removed or the link is no longer valid.'
+                description={loadError || 'The admission may have been removed or the link is no longer valid.'}
+                action={(
+                    <button type='button' onClick={() => navigate(listPath)} className='text-sm font-semibold text-[var(--erp-indigo)]'>
+                        Back to admission list
+                    </button>
+                )}
+            />
+        )
+    }
+
+    if (isEdit && (record?.status === 'Enrolled' || loadError === 'Enrolled admissions cannot be edited.')) {
+        return (
+            <FeedbackState
+                kind='error'
+                title='Cannot edit enrolled admission'
+                description='Enrolled admissions are locked. Use View to review student and parent details.'
                 action={(
                     <button type='button' onClick={() => navigate(listPath)} className='text-sm font-semibold text-[var(--erp-indigo)]'>
                         Back to admission list
@@ -106,8 +192,24 @@ const AddAdmission = () => {
         window.scrollTo({ top: 0, behavior: 'smooth' })
     }
 
-    const handleSave = () => {
+    const handleSave = async () => {
         setError('')
+        if (isLiveApiEnabled()) {
+            setSaving(true)
+            const res = isEdit
+                ? await updateAdmissionRecord(id, form)
+                : await createAdmissionRecord(form)
+            setSaving(false)
+            if (!res.success) {
+                setError(typeof res.error === 'string' ? res.error : 'Failed to save admission on the API.')
+                return
+            }
+            clearAdmissionDraft(draftKey)
+            toast.success(isEdit ? 'Admission updated on the server.' : 'Admission created on the server.')
+            navigate(listPath)
+            return
+        }
+
         const result = isEdit ? updateAdmission(id, form) : createAdmission(form)
         if (!result.success) {
             setError(result.message)
@@ -135,7 +237,9 @@ const AddAdmission = () => {
         <section className='space-y-5'>
             <PageHeader
                 title={isEdit ? 'Edit admission' : 'New admission'}
-                description='Complete the application in stages. Progress is saved locally so the record can be resumed before final submission.'
+                description={live
+                    ? 'Complete the application in stages. Final save writes to the admissions API.'
+                    : 'Complete the application in stages. Progress is saved locally so the record can be resumed before final submission.'}
                 context={locationState?.fromEnquiryId ? `Converted from enquiry ${locationState.fromEnquiryId}` : 'Admissions workflow'}
                 meta={draftSavedAt ? <span>Draft saved at {formatSavedTime(draftSavedAt)}</span> : <span>Draft not yet saved</span>}
             />
@@ -200,18 +304,18 @@ const AddAdmission = () => {
                     <button
                         type='button'
                         onClick={() => moveToStage(ADMISSION_STAGES[activeStageIndex - 1].key)}
-                        disabled={activeStageIndex === 0}
+                        disabled={activeStageIndex === 0 || saving}
                         className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] px-4 text-sm font-semibold text-[var(--erp-ink)] disabled:cursor-not-allowed disabled:opacity-40'
                     >
                         <ArrowLeft aria-hidden='true' size={16} /> Previous
                     </button>
                     {activeStageIndex < ADMISSION_STAGES.length - 1 ? (
-                        <button type='button' onClick={() => moveToStage(ADMISSION_STAGES[activeStageIndex + 1].key)} className='inline-flex min-h-10 items-center gap-2 rounded-lg bg-[var(--erp-indigo)] px-4 text-sm font-semibold text-white'>
+                        <button type='button' onClick={() => moveToStage(ADMISSION_STAGES[activeStageIndex + 1].key)} disabled={saving} className='inline-flex min-h-10 items-center gap-2 rounded-lg bg-[var(--erp-indigo)] px-4 text-sm font-semibold text-white disabled:opacity-60'>
                             Next <ArrowRight aria-hidden='true' size={16} />
                         </button>
                     ) : (
-                        <button type='button' onClick={handleSave} className='inline-flex min-h-10 items-center gap-2 rounded-lg bg-[var(--erp-indigo)] px-4 text-sm font-semibold text-white'>
-                            <Check aria-hidden='true' size={16} /> {isEdit ? 'Update admission' : 'Create admission'}
+                        <button type='button' onClick={handleSave} disabled={saving} className='inline-flex min-h-10 items-center gap-2 rounded-lg bg-[var(--erp-indigo)] px-4 text-sm font-semibold text-white disabled:opacity-60'>
+                            <Check aria-hidden='true' size={16} /> {saving ? 'Saving…' : (isEdit ? 'Update admission' : 'Create admission')}
                         </button>
                     )}
                 </div>

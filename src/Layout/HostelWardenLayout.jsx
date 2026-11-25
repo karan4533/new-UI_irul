@@ -12,7 +12,7 @@ const HostelWardenLayout = () => {
                 <IntegrationNotice
                     state='connected'
                     title='Live Hostel Warden workspace'
-                    description='Assignments and payments use FastAPI /api/v1/ops/hostel-assignments and hostel-payments. No dedicated blocks/rooms, outpass, visitors, mess, or check-in APIs. No finance collect or admin-user access.'
+                    description='LIVE: assignments + payments dues register via /api/v1/ops/hostel-assignments and hostel-payments; announcements read; my leave. BLOCKED/MOCK: room master, bed availability, outpass, visitors, mess, complaints, maintenance, payment gateway. No finance collect or admin-user access.'
                 />
             ) : null}
             <HostelWardenRoutes />

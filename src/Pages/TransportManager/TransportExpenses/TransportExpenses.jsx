@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
@@ -8,6 +8,9 @@ import ExportModal from '../../../Common/CommonComponents/ExportModal'
 import EditRequestModal from '../../../Common/CommonComponents/EditRequestModal'
 import DeleteRequestModal from '../../../Common/CommonComponents/DeleteRequestModal'
 import ReactECharts from 'echarts-for-react'
+import { IntegrationNotice } from '../../../Common/ui'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { listTransportExpenses } from '../../../services/api/transportApiService'
 import {
     FUEL_EXPENSES,
     SERVICE_EXPENSES,
@@ -17,6 +20,47 @@ import {
     OTHER_EXPENSE_TYPES,
 } from './transportExpensesData'
 import { transportBudgetOverview } from './transportBudget'
+
+const normalizeCategory = (value) => {
+    const key = String(value || '').toLowerCase()
+    if (key.includes('fuel')) return 'fuel'
+    if (key.includes('service')) return 'service'
+    return 'other'
+}
+
+const toFuelRow = (row) => ({
+    id: row.id,
+    expenseId: row.expenseId || row.id,
+    vehicleNumber: row.vehicleNumber || '',
+    driverName: row.driverName || '',
+    fuelDate: row.expenseDate || '',
+    fuelStation: row.remarks || '—',
+    fuelQuantity: row.quantityLitres || '—',
+    amount: row.amount || 0,
+    paymentMode: row.paymentMode || '',
+})
+
+const toServiceRow = (row) => ({
+    id: row.id,
+    expenseId: row.expenseId || row.id,
+    vehicleNumber: row.vehicleNumber || '',
+    serviceType: row.serviceType || '',
+    serviceDate: row.expenseDate || '',
+    serviceCenter: row.remarks || '—',
+    amount: row.amount || 0,
+    paymentMode: row.paymentMode || '',
+})
+
+const toOtherRow = (row) => ({
+    id: row.id,
+    expenseId: row.expenseId || row.id,
+    expenseType: row.otherType || row.category || 'Other',
+    expenseDate: row.expenseDate || '',
+    vehicleNumber: row.vehicleNumber || '',
+    amount: row.amount || 0,
+    paymentMode: row.paymentMode || '',
+    remarks: row.remarks || '',
+})
 
 const TABS = [
     { id: 1, label: 'Fuel Management', key: 'fuel' },
@@ -31,28 +75,92 @@ const ADD_BUTTONS = {
 }
 
 const TransportExpenses = () => {
+    const live = isLiveApiEnabled()
     const [fromDate, setFromDate] = useState(new Date())
     const [toDate, setToDate] = useState(new Date())
     const [activeTab, setActiveTab] = useState(1)
     const [exportModal, setExportModal] = useState(false)
     const [editRequestModal, setEditRequestModal] = useState(false)
     const [deleteRequestModal, setDeleteRequestModal] = useState(false)
+    const [liveRows, setLiveRows] = useState([])
+    const [loading, setLoading] = useState(Boolean(live))
+    const [error, setError] = useState('')
+
+    const load = useCallback(async () => {
+        if (!isLiveApiEnabled()) {
+            setLiveRows([])
+            setLoading(false)
+            setError('')
+            return
+        }
+        setLoading(true)
+        setError('')
+        const res = await listTransportExpenses()
+        setLoading(false)
+        if (!res.success) {
+            setError(typeof res.error === 'string' ? res.error : 'Failed to load transport-expenses.')
+            setLiveRows([])
+            return
+        }
+        setLiveRows(Array.isArray(res.data) ? res.data : [])
+    }, [])
+
+    useEffect(() => {
+        load()
+    }, [load])
+
+    const fuelRows = useMemo(() => {
+        if (!live) return FUEL_EXPENSES
+        return liveRows.filter((row) => normalizeCategory(row.category) === 'fuel').map(toFuelRow)
+    }, [live, liveRows])
+    const serviceRows = useMemo(() => {
+        if (!live) return SERVICE_EXPENSES
+        return liveRows.filter((row) => normalizeCategory(row.category) === 'service').map(toServiceRow)
+    }, [live, liveRows])
+    const otherRows = useMemo(() => {
+        if (!live) return OTHER_EXPENSES
+        return liveRows.filter((row) => normalizeCategory(row.category) === 'other').map(toOtherRow)
+    }, [live, liveRows])
 
     const budget = transportBudgetOverview()
+    const liveActual = liveRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0)
     const budgetOption = {
         tooltip: { trigger: 'axis' },
         xAxis: { type: 'category', data: ['Previous Budget', 'Current Budget', 'Actual Expenses'] },
         yAxis: { type: 'value' },
-        series: [{ type: 'bar', data: [budget.previous, budget.current, budget.actual], itemStyle: { color: '#515DEF' } }],
+        series: [{
+            type: 'bar',
+            data: [budget.previous, budget.current, live ? liveActual : budget.actual],
+            itemStyle: { color: '#515DEF' },
+        }],
     }
     const activeCount = activeTab === 1
-        ? FUEL_EXPENSES.length
+        ? fuelRows.length
         : activeTab === 2
-            ? SERVICE_EXPENSES.length
-            : OTHER_EXPENSES.length
+            ? serviceRows.length
+            : otherRows.length
 
     return (
         <section>
+            {live && !error && !loading ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Transport expenses ledger is live'
+                    description='Expense rows hydrate from GET /api/v1/ops/transport-expenses. Budget overview chart still uses local budget helper (MOCK for previous/current budget). GPS remains DEMO.'
+                    className='mb-4'
+                />
+            ) : null}
+            {!live ? (
+                <IntegrationNotice
+                    state='mock'
+                    title='Transport expenses browser mock'
+                    description='Enable live API for /api/v1/ops/transport-expenses.'
+                    className='mb-4'
+                />
+            ) : null}
+            {error ? (
+                <IntegrationNotice state='failed' title='Expenses API failed' description={error} className='mb-4' />
+            ) : null}
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='flex justify-between md:items-center sm:items-stretch md:flex-row sm:flex-col flex-col gap-y-4'>
                     <button type='button' className='bg-[#515DEF] text-white uppercase text-sm px-6 py-1.5 border border-[#515DEF] rounded-lg hover:opacity-90 transition-all duration-200 cursor-pointer'>
@@ -209,7 +317,7 @@ const TransportExpenses = () => {
                                 </tr>
                             </thead>
                             <tbody>
-                                {FUEL_EXPENSES.map((expense) => (
+                                {fuelRows.map((expense) => (
                                     <tr key={expense.id} className='border-b text-[#667085] border-[#f2f4f7] hover:bg-[#f2f4f7] rounded-lg'>
                                         <td className='px-2 py-4 font-medium text-[#1E1E1E] rounded-s-lg'>{expense.expenseId}</td>
                                         <td className='px-2 py-4 font-medium text-[#1E1E1E]'>{expense.vehicleNumber}</td>
@@ -258,7 +366,7 @@ const TransportExpenses = () => {
                                 </tr>
                             </thead>
                             <tbody>
-                                {SERVICE_EXPENSES.map((expense) => (
+                                {serviceRows.map((expense) => (
                                     <tr key={expense.id} className='border-b text-[#667085] border-[#f2f4f7] hover:bg-[#f2f4f7] rounded-lg'>
                                         <td className='px-2 py-4 font-medium text-[#1E1E1E] rounded-s-lg'>{expense.expenseId}</td>
                                         <td className='px-2 py-4 font-medium text-[#1E1E1E]'>{expense.vehicleNumber}</td>
@@ -307,7 +415,7 @@ const TransportExpenses = () => {
                                 </tr>
                             </thead>
                             <tbody>
-                                {OTHER_EXPENSES.map((expense) => (
+                                {otherRows.map((expense) => (
                                     <tr key={expense.id} className='border-b text-[#667085] border-[#f2f4f7] hover:bg-[#f2f4f7] rounded-lg'>
                                         <td className='px-2 py-4 font-medium text-[#1E1E1E] rounded-s-lg'>{expense.expenseId}</td>
                                         <td className='px-2 py-4 font-medium text-[#1E1E1E]'>{expense.vehicleNumber}</td>

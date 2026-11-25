@@ -1,7 +1,10 @@
-import React from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import BusTrackingMap from './Components/BusTrackingMap'
+import { FeedbackState, IntegrationNotice } from '../../../Common/ui'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { listTransportRoutes } from '../../../services/api/transportApiService'
 import { getRouteById } from '../RouteManagement/routeManagementData'
 
 const Field = ({ label, value }) => (
@@ -21,8 +24,37 @@ const TRACKING_PRESETS = [
 const TrackBus = () => {
     const { id } = useParams()
     const navigate = useNavigate()
-    const route = getRouteById(id)
-    const trackingPreset = TRACKING_PRESETS[(parseInt(route?.id?.split('-')[1] ?? '1', 10) - 1) % TRACKING_PRESETS.length]
+    const live = isLiveApiEnabled()
+    const [route, setRoute] = useState(null)
+    const [loading, setLoading] = useState(Boolean(live))
+    const [error, setError] = useState('')
+
+    const load = useCallback(async () => {
+        if (!isLiveApiEnabled()) {
+            setRoute(getRouteById(id))
+            setLoading(false)
+            setError('')
+            return
+        }
+        setLoading(true)
+        setError('')
+        const res = await listTransportRoutes()
+        setLoading(false)
+        if (!res.success) {
+            setRoute(null)
+            setError(typeof res.error === 'string' ? res.error : 'Failed to load routes.')
+            return
+        }
+        const found = (res.data || []).find((row) => String(row.id) === String(id)) || null
+        setRoute(found)
+        if (!found) setError('Route not found on the server.')
+    }, [id])
+
+    useEffect(() => {
+        load()
+    }, [load])
+
+    const trackingPreset = TRACKING_PRESETS[(parseInt(String(route?.id || '1').split('-').pop() || '1', 10) - 1) % TRACKING_PRESETS.length]
 
     return (
         <section className='space-y-6'>
@@ -37,18 +69,38 @@ const TrackBus = () => {
                 </button>
             </div>
 
-            {!route ? (
+            <IntegrationNotice
+                state='mock'
+                title='ProTrack GPS not configured — fail closed'
+                description='Map position, ETA and speed below are demonstration presets. No live GPS telemetry is read or written.'
+            />
+            {error && live ? (
+                <IntegrationNotice state='failed' title='Could not load route metadata' description={error} />
+            ) : null}
+            {live && route && !error ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Route metadata from live ops'
+                    description='Route fields come from GET /api/v1/ops/transport-routes; map motion remains mock.'
+                />
+            ) : null}
+
+            {loading ? <FeedbackState kind='loading' title='Loading route' description='Fetching route details…' /> : null}
+
+            {!loading && !route ? (
                 <div className='bg-white rounded-2xl shadow-md p-8 text-center text-[#667085]'>
                     Route not found or could not be loaded.
                 </div>
-            ) : (
+            ) : null}
+
+            {!loading && route ? (
                 <>
                     <div className='bg-white rounded-2xl shadow-md p-4'>
                         <h1 className='text-2xl font-semibold text-black'>{route.routeName}</h1>
                         <p className='text-sm text-[#667085] mt-2'>
                             <span className='font-medium text-[#1E1E1E]'>Route ID: {route.id}</span>
-                            {' · '}
-                            <span>{route.distance} · {route.estimatedTime}</span>
+                            {route.distance ? ` · ${route.distance}` : ''}
+                            {route.estimatedTime ? ` · ${route.estimatedTime}` : ''}
                         </p>
                     </div>
 
@@ -78,13 +130,14 @@ const TrackBus = () => {
                             startSubtitle='Pickup Point'
                             endLocation={route.endLocation}
                             endSubtitle='School Campus'
-                            busLabel={route.vehicleId}
+                            busLabel={route.vehicleId || route.vehicleNumber}
                             stats={trackingPreset.stats}
                             busIndex={trackingPreset.busIndex}
+                            trackingMode='demo'
                         />
                     </div>
                 </>
-            )}
+            ) : null}
         </section>
     )
 }

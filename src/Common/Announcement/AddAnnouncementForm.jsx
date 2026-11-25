@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ClipboardCheck, Save, Send } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
+import { toast } from 'react-toastify'
 import {
     Dialog,
     FileDropzone,
@@ -19,6 +20,8 @@ import {
     resolveAnnouncementAudience,
     validateAnnouncementDraft,
 } from './announcementComposerState.js'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
+import { createAnnouncement } from '../../services/api/announcementApiService'
 
 const controlClass = 'min-h-11 w-full rounded-lg border border-[var(--erp-line)] bg-white px-3 py-2.5 text-sm text-[var(--erp-ink)] outline-none transition focus:border-[var(--erp-primary)] focus:ring-2 focus:ring-[color:var(--erp-primary-soft)]'
 
@@ -49,6 +52,7 @@ const ReviewField = ({ label, value }) => (
 
 export default function AddAnnouncementForm({ roleKey }) {
     const navigate = useNavigate()
+    const live = isLiveApiEnabled()
     const routes = getAnnouncementRoutes(roleKey)
     const sentBy = routes.sentByDefault || ''
     const storageKey = `schoolerp:announcement-draft:${roleKey}`
@@ -58,6 +62,7 @@ export default function AddAnnouncementForm({ roleKey }) {
     const [errors, setErrors] = useState({})
     const [message, setMessage] = useState(initialState.message)
     const [reviewOpen, setReviewOpen] = useState(false)
+    const [publishing, setPublishing] = useState(false)
 
     if (!canCreateAnnouncements(roleKey)) {
         return <UnavailableWorkflowPage title='Announcement publishing is restricted' description='Your role can read announcements but cannot publish to the school audience.' alternateHref={routes.list} alternateLabel='Open announcements' />
@@ -99,7 +104,30 @@ export default function AddAnnouncementForm({ roleKey }) {
         setReviewOpen(true)
     }
 
-    const publishLocalDemo = () => {
+    const publishAnnouncement = async () => {
+        if (isLiveApiEnabled()) {
+            setPublishing(true)
+            const res = await createAnnouncement({
+                title: draft.title,
+                category: draft.category,
+                message: draft.message,
+                announcementDate: draft.announcementDate,
+            })
+            setPublishing(false)
+            if (!res.success) {
+                toast.error(typeof res.error === 'string' ? res.error : 'Announcement was not saved on the server.')
+                return
+            }
+            try {
+                window.localStorage.removeItem(storageKey)
+            } catch {
+                /* Browser draft cleanup is best effort. */
+            }
+            setReviewOpen(false)
+            toast.success('Announcement published on the server.')
+            navigate(routes.list)
+            return
+        }
         addAnnouncement({
             ...draft,
             audience: resolveAnnouncementAudience(draft.audienceGroup),
@@ -116,7 +144,13 @@ export default function AddAnnouncementForm({ roleKey }) {
     return (
         <section className='space-y-5'>
             <PageHeader title='Compose announcement' description='Define the intended audience, publication context and acknowledgement policy before review.' status={readiness} actions={<Link to={routes.list} className='inline-flex min-h-10 items-center rounded-lg border border-[var(--erp-line)] bg-white px-3 text-sm font-semibold text-[var(--erp-primary)] hover:bg-[var(--erp-primary-soft)]'>Back to announcements</Link>} />
-            <IntegrationNotice state='demo' title='Browser publication only' description='Saving the reviewed notice adds it to this browser’s demonstration register. Files, recipient delivery, push/email/SMS notifications, read receipts and audit evidence require the communication backend.' />
+            <IntegrationNotice
+                state={live ? 'connected' : 'demo'}
+                title={live ? 'Live announcement publish' : 'Browser publication only'}
+                description={live
+                    ? 'Review confirms POST /api/v1/announcements. Success is shown only after the server accepts the notice. Audience portals still follow backend visibility rules.'
+                    : 'Saving the reviewed notice adds it to this browser’s demonstration register. Files, recipient delivery, push/email/SMS notifications, read receipts and audit evidence require the communication backend.'}
+            />
             {message && <p role='status' className='rounded-lg border border-[var(--erp-line)] bg-white px-4 py-3 text-sm text-[var(--erp-slate)]'>{message}</p>}
 
             <form className='space-y-5' onSubmit={reviewAnnouncement} noValidate>
@@ -158,8 +192,14 @@ export default function AddAnnouncementForm({ roleKey }) {
                 </div>
             </form>
 
-            <Dialog open={reviewOpen} onClose={() => setReviewOpen(false)} title='Review announcement' description='Confirm content, audience and acknowledgement policy before adding this notice to the browser demo register.' size='lg' footer={<><button type='button' onClick={() => setReviewOpen(false)} className='min-h-10 rounded-lg border border-[var(--erp-line)] px-4 text-sm font-semibold text-[var(--erp-slate)]'>Return to form</button><button type='button' onClick={publishLocalDemo} className='inline-flex min-h-10 items-center gap-2 rounded-lg bg-[var(--erp-primary)] px-4 text-sm font-semibold text-white'><Send aria-hidden='true' size={16} /> Add to browser demo</button></>}>
-                <IntegrationNotice state='demo' title='No recipient delivery' description='This action updates only the browser demonstration register. It does not send the notice or create authoritative delivery receipts.' />
+            <Dialog open={reviewOpen} onClose={() => !publishing && setReviewOpen(false)} title='Review announcement' description={live ? 'Confirm content before posting to the announcements API.' : 'Confirm content, audience and acknowledgement policy before adding this notice to the browser demo register.'} size='lg' footer={<><button type='button' disabled={publishing} onClick={() => setReviewOpen(false)} className='min-h-10 rounded-lg border border-[var(--erp-line)] px-4 text-sm font-semibold text-[var(--erp-slate)]'>Return to form</button><button type='button' disabled={publishing} onClick={publishAnnouncement} className='inline-flex min-h-10 items-center gap-2 rounded-lg bg-[var(--erp-primary)] px-4 text-sm font-semibold text-white disabled:opacity-50'><Send aria-hidden='true' size={16} /> {publishing ? 'Publishing…' : (live ? 'Publish to server' : 'Add to browser demo')}</button></>}>
+                <IntegrationNotice
+                    state={live ? 'connected' : 'demo'}
+                    title={live ? 'Server publish confirmation' : 'No recipient delivery'}
+                    description={live
+                        ? 'This posts title, category, message and date to POST /api/v1/announcements. Push/email/SMS delivery still depends on backend notification workers.'
+                        : 'This action updates only the browser demonstration register. It does not send the notice or create authoritative delivery receipts.'}
+                />
                 <dl className='mt-4 grid gap-3 sm:grid-cols-2'><ReviewField label='Title' value={draft.title} /><ReviewField label='Category' value={draft.category} /><ReviewField label='Audience' value={`${audienceGroup?.label} · ${resolveAnnouncementAudience(draft.audienceGroup).length} role portals`} /><ReviewField label='Priority' value={draft.priority} /><ReviewField label='Publication date' value={draft.announcementDate} /><ReviewField label='Acknowledgement requested' value={draft.requireAcknowledgement ? 'Yes' : 'No'} /><ReviewField label='Message' value={draft.message} /><ReviewField label='Attachment' value={draft.attachmentName || 'No attachment'} /></dl>
             </Dialog>
         </section>

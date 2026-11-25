@@ -9,6 +9,7 @@ import PosTerminalsTab from './Components/PosTerminalsTab'
 import RolesPermissionsTab from './Components/RolesPermissionsTab'
 import NotificationsTab from './Components/NotificationsTab'
 import IntegrationsTab from './Components/IntegrationsTab'
+import ApprovalLimitsSettings from './ApprovalLimitsSettings'
 import { SETTINGS_TABS } from './settingsData'
 
 const Settings = () => {
@@ -23,6 +24,7 @@ const Settings = () => {
             {activeTab === 'general' && <GeneralTab />}
             {activeTab === 'payment-configuration' && <PaymentConfigurationTab />}
             {activeTab === 'fine-rules' && <FineRulesTab />}
+            {activeTab === 'approval-limits' && <ApprovalLimitsSettings />}
             {activeTab === 'bank-accounts' && <BankAccountsTab />}
             {activeTab === 'pos-terminals' && <PosTerminalsTab />}
             {activeTab === 'roles-permissions' && <RolesPermissionsTab />}

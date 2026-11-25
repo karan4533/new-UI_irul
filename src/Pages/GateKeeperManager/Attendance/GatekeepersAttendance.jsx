@@ -1,139 +1,234 @@
-import React, { useState } from 'react'
-import DatePicker from 'react-datepicker'
-import 'react-datepicker/dist/react-datepicker.css'
-import { Calendar, ChevronLeft, ChevronRight, Download } from 'lucide-react'
-import ExportModal from '../../../Common/CommonComponents/ExportModal'
-import {
-    ATTENDANCE_STATUSES,
-    GATEKEEPERS_ATTENDANCE_LIST,
-    statusBadgeColor,
-} from './gatekeepersAttendanceData'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { Plus, X, CheckCircle2 } from 'lucide-react'
+import { toast } from 'react-toastify'
+import { FeedbackState, IntegrationNotice } from '../../../Common/ui'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { listGateTeamAttendance, upsertGateTeamAttendance } from '../../../services/api/gateApiService'
+
+const STATUS_OPTIONS = ['Present', 'Absent', 'Late', 'On Leave']
+
+const emptyForm = {
+    employeeId: '',
+    name: '',
+    gate: '',
+    date: new Date().toISOString().slice(0, 10),
+    inTime: '',
+    outTime: '',
+    attendanceStatus: 'Present',
+}
 
 const GatekeepersAttendance = () => {
-    const [fromDate, setFromDate] = useState(new Date())
-    const [toDate, setToDate] = useState(new Date())
-    const [exportModal, setExportModal] = useState(false)
+    const live = isLiveApiEnabled()
+    const [rows, setRows] = useState([])
+    const [loading, setLoading] = useState(live)
+    const [error, setError] = useState('')
+    const [search, setSearch] = useState('')
+    const [statusFilter, setStatusFilter] = useState('')
+    const [modalOpen, setModalOpen] = useState(false)
+    const [saving, setSaving] = useState(false)
+    const [form, setForm] = useState(emptyForm)
+
+    const load = useCallback(async () => {
+        if (!live) {
+            setLoading(false)
+            setError('Live API is disabled.')
+            return
+        }
+        setLoading(true)
+        setError('')
+        const res = await listGateTeamAttendance()
+        if (!res.success) {
+            setRows([])
+            setError(res.error || 'Failed to load /api/v1/ops/gate-team-attendance.')
+            setLoading(false)
+            return
+        }
+        setRows(res.data || [])
+        setLoading(false)
+    }, [live])
+
+    useEffect(() => {
+        load()
+    }, [load])
+
+    const filtered = useMemo(() => {
+        return rows.filter((row) => {
+            if (statusFilter && row.attendanceStatus !== statusFilter) return false
+            if (search.trim()) {
+                const q = search.trim().toLowerCase()
+                const hay = `${row.employeeId} ${row.name} ${row.gate} ${row.date}`.toLowerCase()
+                if (!hay.includes(q)) return false
+            }
+            return true
+        })
+    }, [rows, search, statusFilter])
+
+    const save = async (event) => {
+        event.preventDefault()
+        if (!form.name.trim() || !form.date.trim()) {
+            toast.error('Name and date are required.')
+            return
+        }
+        setSaving(true)
+        const saved = await upsertGateTeamAttendance(form)
+        setSaving(false)
+        if (!saved.success) {
+            toast.error(saved.error || 'Could not save attendance on the server.')
+            return
+        }
+        setRows(saved.rows || [])
+        setModalOpen(false)
+        setForm(emptyForm)
+        toast.success('Attendance row saved on the server')
+    }
+
+    if (!live) {
+        return (
+            <FeedbackState
+                kind='error'
+                title='Live API required'
+                description='Gatekeepers attendance uses GET/PUT /api/v1/ops/gate-team-attendance.'
+            />
+        )
+    }
 
     return (
-        <section>
-            <div className='bg-white rounded-2xl shadow-md p-4'>
-                <div className='flex justify-between md:items-center sm:items-stretch md:flex-row sm:flex-col flex-col gap-y-4'>
-                    <button type='button' className='bg-[#515DEF] text-white uppercase text-sm px-6 py-1.5 border border-[#515DEF] rounded-lg hover:opacity-90 transition-all duration-200 cursor-pointer'>
-                        Clear Filters
-                    </button>
-                    <select className='text-sm font-normal text-[#808080] border border-[#D9D9D9] rounded-md px-2 py-2 w-full md:max-w-xs sm:max-w-full'>
-                        <option value=''>From Beginning</option>
-                    </select>
+        <section className='space-y-4'>
+            {!error && !loading ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Gatekeepers attendance is live'
+                    description='GET/PUT /api/v1/ops/gate-team-attendance. Static mock list removed.'
+                />
+            ) : null}
+            {error ? <IntegrationNotice state='failed' title='API failed' description={error} /> : null}
+
+            <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
+                <div>
+                    <h1 className='text-xl font-semibold text-slate-900'>Gatekeepers attendance</h1>
+                    <p className='text-xs text-slate-500'>Live ops collection · no mock seed</p>
                 </div>
-                <div className='grid grid-cols-1 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 lg:mt-8 mt-2'>
-                    <div className='flex flex-col gap-y-2'>
-                        <label htmlFor='search' className='text-base font-medium text-[#808080]'>Search</label>
-                        <input type='text' id='search' placeholder='Gatekeeper name, ID, gate...' className='text-sm font-normal text-[#808080] border border-[#D9D9D9] rounded-md px-2 py-2 w-full' />
-                    </div>
-                    <div className='flex flex-col gap-y-2'>
-                        <label htmlFor='status-filter' className='text-base font-medium text-[#808080]'>Attendance Status</label>
-                        <select id='status-filter' className='text-sm font-normal text-[#808080] border border-[#D9D9D9] rounded-md px-2 py-2 w-full'>
-                            <option value=''>All</option>
-                            {ATTENDANCE_STATUSES.map((status) => (
-                                <option key={status} value={status}>{status}</option>
-                            ))}
-                        </select>
-                    </div>
-                    <div className='flex flex-col gap-y-2'>
-                        <label className='text-base font-medium text-[#808080]'>From</label>
-                        <div className='relative w-full'>
-                            <DatePicker
-                                selected={fromDate}
-                                onChange={(date) => setFromDate(date)}
-                                isClearable
-                                showMonthYearDropdown
-                                scrollableMonthYearDropdown
-                                className='w-full text-sm text-[#808080] border border-[#D9D9D9] rounded-md px-3 py-2 pr-10 focus:outline-none'
-                            />
-                            <Calendar size={16} className='absolute right-3 top-1/2 -translate-y-1/2 text-[#808080] pointer-events-none' />
-                        </div>
-                    </div>
-                    <div className='flex flex-col gap-y-2'>
-                        <label className='text-base font-medium text-[#808080]'>To</label>
-                        <div className='relative'>
-                            <DatePicker
-                                selected={toDate}
-                                onChange={(date) => setToDate(date)}
-                                isClearable
-                                showMonthYearDropdown
-                                scrollableMonthYearDropdown
-                                className='w-full text-sm text-[#808080] border border-[#D9D9D9] rounded-md px-3 py-2 pr-10 focus:outline-none'
-                            />
-                            <Calendar size={16} className='absolute right-3 top-1/2 -translate-y-1/2 text-[#808080] pointer-events-none' />
-                        </div>
-                    </div>
-                </div>
+                <button
+                    type='button'
+                    onClick={() => {
+                        setForm(emptyForm)
+                        setModalOpen(true)
+                    }}
+                    className='inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white'
+                >
+                    <Plus size={16} /> Add attendance
+                </button>
             </div>
 
-            <div className='bg-white rounded-2xl shadow-md p-4 mt-8'>
-                <div className='flex justify-between items-center sm:flex-row flex-col gap-y-2 mb-4'>
-                    <h2 className='text-xl font-medium text-black'>Gatekeepers Attendance List</h2>
-                    <button
-                        type='button'
-                        onClick={() => setExportModal(true)}
-                        className='bg-[#515DEF] text-white text-sm px-4 py-2 rounded-md hover:opacity-90 transition-all duration-200 cursor-pointer flex items-center gap-x-2'
-                    >
-                        <Download size={16} />
-                        Export
-                    </button>
-                </div>
-                <div className='relative overflow-x-auto'>
-                    <table className='w-full text-sm text-left rtl:text-right'>
-                        <thead className='text-xs bg-[#EDEEF5] whitespace-nowrap rounded-lg'>
-                            <tr className='rounded-lg'>
-                                <th className='px-2 py-3.5 text-[#0C1E5B] font-medium uppercase rounded-s-lg'>Employee ID</th>
-                                <th className='px-2 py-3.5 text-[#0C1E5B] font-medium uppercase'>Name</th>
-                                <th className='px-2 py-3.5 text-[#0C1E5B] font-medium uppercase'>Gate</th>
-                                <th className='px-2 py-3.5 text-[#0C1E5B] font-medium uppercase'>Date</th>
-                                <th className='px-2 py-3.5 text-[#0C1E5B] font-medium uppercase'>In Time</th>
-                                <th className='px-2 py-3.5 text-[#0C1E5B] font-medium uppercase'>Out Time</th>
-                                <th className='px-2 py-3.5 text-[#0C1E5B] font-medium uppercase rounded-e-lg'>Attendance Status</th>
+            <div className='grid grid-cols-1 gap-3 md:grid-cols-2'>
+                <input
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder='Search name, ID, gate…'
+                    className='rounded-lg border border-slate-200 px-3 py-2 text-sm'
+                />
+                <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className='rounded-lg border border-slate-200 px-3 py-2 text-sm'
+                >
+                    <option value=''>All statuses</option>
+                    {STATUS_OPTIONS.map((status) => (
+                        <option key={status} value={status}>{status}</option>
+                    ))}
+                </select>
+            </div>
+
+            <div className='overflow-x-auto rounded-2xl border border-slate-200 bg-white'>
+                {loading ? (
+                    <p className='p-6 text-sm text-slate-500'>Loading…</p>
+                ) : (
+                    <table className='w-full text-sm'>
+                        <thead className='bg-slate-50 text-xs uppercase text-slate-600'>
+                            <tr>
+                                <th className='px-3 py-3 text-left'>Employee ID</th>
+                                <th className='px-3 py-3 text-left'>Name</th>
+                                <th className='px-3 py-3 text-left'>Gate</th>
+                                <th className='px-3 py-3 text-left'>Date</th>
+                                <th className='px-3 py-3 text-left'>In</th>
+                                <th className='px-3 py-3 text-left'>Out</th>
+                                <th className='px-3 py-3 text-left'>Status</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {GATEKEEPERS_ATTENDANCE_LIST.map((record) => (
-                                <tr key={record.id} className='border-b text-[#667085] border-[#f2f4f7] hover:bg-[#f2f4f7] rounded-lg'>
-                                    <td className='px-2 py-4 font-medium text-[#1E1E1E] rounded-s-lg'>{record.employeeId}</td>
-                                    <td className='px-2 py-4 font-medium text-[#1E1E1E]'>{record.name}</td>
-                                    <td className='px-2 py-4'>{record.gate}</td>
-                                    <td className='px-2 py-4'>{record.date}</td>
-                                    <td className='px-2 py-4'>{record.inTime}</td>
-                                    <td className='px-2 py-4'>{record.outTime}</td>
-                                    <td className='px-2 py-4 rounded-e-lg'>
-                                        <span className={`px-2 py-1 rounded-lg text-xs font-semibold whitespace-nowrap ${statusBadgeColor[record.attendanceStatus]}`}>
-                                            {record.attendanceStatus}
-                                        </span>
-                                    </td>
+                            {filtered.map((row) => (
+                                <tr key={row.id} className='border-t border-slate-100'>
+                                    <td className='px-3 py-3'>{row.employeeId || '—'}</td>
+                                    <td className='px-3 py-3 font-medium'>{row.name || '—'}</td>
+                                    <td className='px-3 py-3'>{row.gate || '—'}</td>
+                                    <td className='px-3 py-3'>{row.date || '—'}</td>
+                                    <td className='px-3 py-3'>{row.inTime || '—'}</td>
+                                    <td className='px-3 py-3'>{row.outTime || '—'}</td>
+                                    <td className='px-3 py-3'>{row.attendanceStatus || '—'}</td>
                                 </tr>
                             ))}
+                            {filtered.length === 0 ? (
+                                <tr>
+                                    <td colSpan={7} className='px-3 py-8 text-center text-slate-400'>
+                                        No attendance rows on the server yet.
+                                    </td>
+                                </tr>
+                            ) : null}
                         </tbody>
                     </table>
-                </div>
+                )}
             </div>
 
-            <div className='flex justify-between items-center px-4 mt-4'>
-                <p className='text-sm font-medium text-[#515DEF]'>
-                    Showing 1 to {GATEKEEPERS_ATTENDANCE_LIST.length} of {GATEKEEPERS_ATTENDANCE_LIST.length} entries
-                </p>
-                <div className='flex justify-center gap-x-2 flex-wrap'>
-                    <button type='button' className='size-8 flex justify-center items-center p-2 bg-white text-[#515DEF] border border-[#E2E8F0] hover:bg-[#515DEF] hover:text-white rounded-full cursor-pointer'>
-                        <ChevronLeft size={16} />
-                    </button>
-                    <button type='button' className='size-8 flex justify-center items-center p-2 bg-[#515DEF] text-white border border-[#515DEF] rounded-full cursor-pointer'>
-                        1
-                    </button>
-                    <button type='button' className='size-8 flex justify-center items-center p-2 bg-white text-[#515DEF] border border-[#E2E8F0] hover:bg-[#515DEF] hover:text-white rounded-full cursor-pointer'>
-                        <ChevronRight size={16} />
-                    </button>
+            {modalOpen ? (
+                <div className='fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4'>
+                    <div className='w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl'>
+                        <div className='mb-4 flex items-center justify-between'>
+                            <h2 className='text-lg font-semibold'>Add attendance</h2>
+                            <button type='button' onClick={() => setModalOpen(false)} className='p-1 text-slate-500'>
+                                <X size={16} />
+                            </button>
+                        </div>
+                        <form onSubmit={save} className='grid gap-3'>
+                            {[
+                                ['employeeId', 'Employee ID'],
+                                ['name', 'Name'],
+                                ['gate', 'Gate'],
+                                ['date', 'Date'],
+                                ['inTime', 'In time'],
+                                ['outTime', 'Out time'],
+                            ].map(([key, label]) => (
+                                <label key={key} className='text-sm text-slate-600'>
+                                    {label}
+                                    <input
+                                        value={form[key]}
+                                        onChange={(e) => setForm((prev) => ({ ...prev, [key]: e.target.value }))}
+                                        className='mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm'
+                                    />
+                                </label>
+                            ))}
+                            <label className='text-sm text-slate-600'>
+                                Status
+                                <select
+                                    value={form.attendanceStatus}
+                                    onChange={(e) => setForm((prev) => ({ ...prev, attendanceStatus: e.target.value }))}
+                                    className='mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm'
+                                >
+                                    {STATUS_OPTIONS.map((status) => (
+                                        <option key={status} value={status}>{status}</option>
+                                    ))}
+                                </select>
+                            </label>
+                            <button
+                                type='submit'
+                                disabled={saving}
+                                className='mt-2 inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60'
+                            >
+                                <CheckCircle2 size={16} /> {saving ? 'Saving…' : 'Save on server'}
+                            </button>
+                        </form>
+                    </div>
                 </div>
-            </div>
-
-            <ExportModal exportModal={exportModal} setExportModal={setExportModal} />
+            ) : null}
         </section>
     )
 }

@@ -965,6 +965,7 @@ const dynamicTitleMatchers = [
     { test: (p) => /^\/super-admin\/user-database\/students\/view\/[^/]+$/.test(p), title: 'View Student Details' },
     { test: (p) => /^\/super-admin\/user-database\/employees\/view\/[^/]+$/.test(p), title: 'View Employee Details' },
     { test: (p) => /^\/super-admin\/gate-pass\/view\/[^/]+$/.test(p), title: 'View Gate Pass' },
+    { test: (p) => /^\/super-admin\/activity-logs\/[^/]+\/view\/[^/]+$/.test(p), title: 'View Activity Log' },
     { test: (p) => /^\/super-admin\/activity-logs\/view\/[^/]+$/.test(p), title: 'View Activity Log' },
     { test: (p) => /^\/super-admin\/approvals\/view\/[^/]+$/.test(p), title: 'View Approval Request' },
     { test: (p) => /^\/super-admin\/user-creation\/view\/[^/]+$/.test(p), title: 'View Admin User' },

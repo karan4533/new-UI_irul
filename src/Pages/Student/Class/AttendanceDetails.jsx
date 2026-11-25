@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react'
+import React, { useCallback, useMemo, useState, useEffect } from 'react'
 import { toast } from 'react-toastify'
 import ReactECharts from 'echarts-for-react'
 import { CalendarRange, BadgePercent, CircleCheck, Download, Calendar, XCircle, ArrowRight } from 'lucide-react'
@@ -11,12 +11,23 @@ import {
     getStudentAttendanceSummary,
     STUDENT_ATTENDANCE_UPDATED_EVENT,
 } from '../../../Common/AttendanceAndLeave/attendanceLeaveData'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { getStudentAttendanceCalendar, listAttendance } from '../../../services/api/attendanceApiService'
+import IntegrationNotice from '../../../Common/ui/IntegrationNotice'
 
 const DEFAULT_ATTENDANCE_STATS = {
     percentage: 75,
     totalClasses: 8,
     classesAttended: 6,
     classesMissed: 2,
+    minimumRequired: 75,
+}
+
+const ZERO_ATTENDANCE_STATS = {
+    percentage: 0,
+    totalClasses: 0,
+    classesAttended: 0,
+    classesMissed: 0,
     minimumRequired: 75,
 }
 
@@ -43,13 +54,87 @@ const recentStatusStyles = {
     H: 'bg-[#EDEEF5] text-[#808080]',
 }
 
+const toIsoDate = (value) => {
+    const d = value instanceof Date ? value : new Date(value)
+    if (Number.isNaN(d.getTime())) return ''
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+}
+
+const formatDisplayDate = (iso) => {
+    if (!iso) return ''
+    const d = new Date(`${iso}T00:00:00`)
+    if (Number.isNaN(d.getTime())) return iso
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
+const statusToCode = (status) => {
+    const raw = String(status || '').toLowerCase()
+    if (raw.includes('absent')) return 'A'
+    if (raw.includes('holiday')) return 'H'
+    if (raw.includes('late')) return 'L'
+    if (raw.includes('present')) return 'P'
+    return 'P'
+}
+
+const matchesStudentRow = (row, activeStudent, activeStudentId) => {
+    if (!row) return false
+    const ids = [activeStudentId, activeStudent?.id, activeStudent?.admissionNumber, activeStudent?.admissionNo]
+        .filter(Boolean).map(String)
+    const candidates = [row.studentId, row.admissionNumber, row.id].filter(Boolean).map(String)
+    return candidates.some((value) => ids.includes(value))
+}
+
+const deriveLiveSummary = (rows) => {
+    const present = rows.filter((row) => {
+        const code = statusToCode(row.attendanceStatus)
+        return code === 'P' || code === 'L'
+    }).length
+    const absent = rows.filter((row) => statusToCode(row.attendanceStatus) === 'A').length
+    const holiday = rows.filter((row) => statusToCode(row.attendanceStatus) === 'H').length
+    const working = present + absent
+    const percentage = working > 0 ? Number(((present / working) * 100).toFixed(2)) : 0
+    return {
+        totalWorkingDays: working,
+        presentDays: present,
+        absentDays: absent,
+        holidayDays: holiday,
+        percentage,
+        stats: {
+            percentage,
+            totalClasses: working,
+            classesAttended: present,
+            classesMissed: absent,
+            minimumRequired: 75,
+        },
+        subjectWiseAttendance: [],
+        recentAttendance: rows
+            .slice()
+            .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
+            .slice(0, 8)
+            .map((row) => ({
+                status: statusToCode(row.attendanceStatus),
+                date: formatDisplayDate(row.date),
+                subject: row.className ? `${row.className}${row.section ? `-${row.section}` : ''}` : 'Class',
+            })),
+    }
+}
+
 const AttendanceDetails = () => {
-    const { routePrefix, activeStudentId } = useActiveStudent()
+    const live = isLiveApiEnabled()
+    const { routePrefix, activeStudentId, activeStudent } = useActiveStudent()
     const [selectMonth, setSelectMonth] = useState(new Date())
     const [examFilter, setExamFilter] = useState('')
     const [syncKey, setSyncKey] = useState(0)
+    const [liveRows, setLiveRows] = useState([])
+    const [liveLoading, setLiveLoading] = useState(Boolean(live))
+    const [liveSource, setLiveSource] = useState(live ? 'backend' : 'local')
+    const [liveError, setLiveError] = useState('')
 
     useEffect(() => {
+        if (isLiveApiEnabled()) return undefined
         const handleSync = () => setSyncKey((k) => k + 1)
         window.addEventListener('storage', handleSync)
         window.addEventListener(STUDENT_ATTENDANCE_UPDATED_EVENT, handleSync)
@@ -59,18 +144,85 @@ const AttendanceDetails = () => {
         }
     }, [])
 
-    const summary = useMemo(() => {
+    const loadLiveAttendance = useCallback(async (monthDate) => {
+        setLiveLoading(true)
+        setLiveError('')
+        const year = monthDate.getFullYear()
+        const month = monthDate.getMonth()
+        const daysInMonth = new Date(year, month + 1, 0).getDate()
+        const todayIso = toIsoDate(new Date())
+        const dates = new Set([todayIso])
+        for (let day = 1; day <= daysInMonth; day += 1) {
+            const dt = new Date(year, month, day)
+            if (dt.getDay() === 0 || dt.getDay() === 6) continue
+            dates.add(toIsoDate(dt))
+        }
+        const className = activeStudent?.className || undefined
+        const section = activeStudent?.section || undefined
+        const results = await Promise.all(
+            [...dates].map((date) => listAttendance({ date, className, section })),
+        )
+        const failed = results.find((res) => !res.success)
+        const rows = []
+        results.forEach((res) => {
+            if (!res.success || !Array.isArray(res.data)) return
+            res.data.forEach((row) => {
+                if (matchesStudentRow(row, activeStudent, activeStudentId)) rows.push(row)
+            })
+        })
+        setLiveLoading(false)
+        if (failed && rows.length === 0) {
+            setLiveSource('error')
+            setLiveError(typeof failed.error === 'string' ? failed.error : 'Failed to load attendance.')
+            setLiveRows([])
+            return
+        }
+        setLiveRows(rows)
+        setLiveSource('backend')
+    }, [activeStudent, activeStudentId])
+
+    useEffect(() => {
+        if (!isLiveApiEnabled()) {
+            setLiveSource('local')
+            setLiveLoading(false)
+            setLiveError('')
+            return
+        }
+        loadLiveAttendance(selectMonth || new Date())
+    }, [loadLiveAttendance, selectMonth])
+
+    const mockSummary = useMemo(() => {
+        if (live) return null
         void syncKey
         return getStudentAttendanceSummary(activeStudentId || 'STU-2025-1001')
-    }, [activeStudentId, syncKey])
+    }, [activeStudentId, syncKey, live])
 
-    const attendanceStats = summary?.stats || DEFAULT_ATTENDANCE_STATS
-    const subjectWiseAttendance = summary?.subjectWiseAttendance || DEFAULT_SUBJECT_WISE
-    const recentAttendance = summary?.recentAttendance || DEFAULT_RECENT_ATTENDANCE
-    const totalWorkingDays = summary?.totalWorkingDays ?? 22
-    const presentDays = summary?.presentDays ?? 18
-    const absentDays = summary?.absentDays ?? 4
-    const overallPercentage = summary?.percentage ?? 81.82
+    const liveSummary = useMemo(() => {
+        if (!live) return null
+        return deriveLiveSummary(liveRows)
+    }, [live, liveRows])
+
+    const attendanceStats = live
+        ? (liveSummary?.stats || ZERO_ATTENDANCE_STATS)
+        : (mockSummary?.stats || DEFAULT_ATTENDANCE_STATS)
+    const subjectWiseAttendance = live
+        ? (liveSummary?.subjectWiseAttendance || [])
+        : (mockSummary?.subjectWiseAttendance || DEFAULT_SUBJECT_WISE)
+    const recentAttendance = live
+        ? (liveSummary?.recentAttendance || [])
+        : (mockSummary?.recentAttendance || DEFAULT_RECENT_ATTENDANCE)
+    const totalWorkingDays = live
+        ? (liveSummary?.totalWorkingDays ?? 0)
+        : (mockSummary?.totalWorkingDays ?? 22)
+    const presentDays = live
+        ? (liveSummary?.presentDays ?? 0)
+        : (mockSummary?.presentDays ?? 18)
+    const absentDays = live
+        ? (liveSummary?.absentDays ?? 0)
+        : (mockSummary?.absentDays ?? 4)
+    const overallPercentage = live
+        ? (liveSummary?.percentage ?? 0)
+        : (mockSummary?.percentage ?? 81.82)
 
     const handleDownloadReport = () => {
         toast.success('Attendance report generated and download initiated')
@@ -112,6 +264,35 @@ const AttendanceDetails = () => {
 
     return (
         <section>
+            {liveSource === 'backend' ? (
+                <div className='mt-2 mb-4'>
+                    <IntegrationNotice
+                        state='connected'
+                        title='Live attendance'
+                        description='Summary from GET /api/v1/attendance (client-filtered to the active student). Calendar uses GET /api/v1/attendance/students/{id}/calendar when a student UUID is available — otherwise the widget stays empty rather than inventing P/A codes.'
+                    />
+                </div>
+            ) : liveSource === 'error' ? (
+                <div className='mt-2 mb-4'>
+                    <IntegrationNotice
+                        state='failed'
+                        title='Attendance API unavailable'
+                        description={liveError || 'Could not load attendance marks.'}
+                    />
+                </div>
+            ) : (
+                <div className='mt-2 mb-4'>
+                    <IntegrationNotice
+                        state='mock'
+                        title='Browser attendance demo'
+                        description='Showing local demo attendance defaults for this portal.'
+                    />
+                </div>
+            )}
+
+            {liveLoading ? (
+                <div className='bg-white rounded-2xl shadow-md p-4 mt-2 text-sm text-[#667085]'>Loading attendance…</div>
+            ) : null}
 
             <div className='bg-white rounded-2xl shadow-md p-4 mt-2'>
                 <div className='grid grid-cols-1 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end'>
@@ -222,7 +403,23 @@ const AttendanceDetails = () => {
 
             <div className='grid grid-cols-1 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-x-6 gap-y-4 mt-6'>
                 <div className='col-span-4'>
-                    <AttendanceCalendar />
+                    <AttendanceCalendar
+                        fetchAttendance={live
+                            ? async (year, month) => {
+                                const studentRef =
+                                    activeStudent?.uuid
+                                    || activeStudent?.backendId
+                                    || (activeStudent?.id && /^[0-9a-f-]{36}$/i.test(String(activeStudent.id))
+                                        ? activeStudent.id
+                                        : null)
+                                // Prefer UUID calendar endpoint; never invent P/A codes in live mode.
+                                if (!studentRef || !/^[0-9a-f-]{36}$/i.test(String(studentRef))) return {}
+                                const res = await getStudentAttendanceCalendar(studentRef, { year, month })
+                                if (!res.success) return {}
+                                return res.data || {}
+                            }
+                            : undefined}
+                    />
                 </div>
 
                 <div className='col-span-2'>

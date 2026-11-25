@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'react-toastify'
-import { FeedbackState } from '../../../Common/ui'
+import { FeedbackState, IntegrationNotice } from '../../../Common/ui'
 import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 import { listHostelAssignments, listHostelPayments, upsertHostelPayment } from '../../../services/api/hostelApiService'
 
@@ -71,14 +71,31 @@ const PaymentsPage = () => {
         const res = await upsertHostelPayment({
             ...form,
             amount: Number(form.amount) || 0,
+            paidDate: form.status === 'Paid' ? (form.paidDate || new Date().toISOString().slice(0, 10)) : form.paidDate || '',
         })
         setSaving(false)
         if (!res.success) {
             toast.error(typeof res.error === 'string' ? res.error : 'Could not save payment.')
             return
         }
-        toast.success('Hostel payment saved on the server.')
+        toast.success('Hostel payment dues row saved on the server (register only — not a gateway).')
         setForm(emptyForm)
+        setRows(res.rows || [])
+    }
+
+    const handleMarkPaid = async (row) => {
+        setSaving(true)
+        const res = await upsertHostelPayment({
+            ...row,
+            status: 'Paid',
+            paidDate: new Date().toISOString().slice(0, 10),
+        })
+        setSaving(false)
+        if (!res.success) {
+            toast.error(typeof res.error === 'string' ? res.error : 'Could not update payment status.')
+            return
+        }
+        toast.success('Marked Paid on ops dues register (not a payment gateway confirmation).')
         setRows(res.rows || [])
     }
 
@@ -87,14 +104,26 @@ const PaymentsPage = () => {
             <div>
                 <h1 className='text-2xl font-semibold text-black'>Hostel Payments</h1>
                 <p className='text-sm text-[#667085] mt-1'>
-                    Payment dues recorded on /api/v1/ops/hostel-payments (not a live payment gateway).
+                    Payment dues register on /api/v1/ops/hostel-payments. Status changes are ops rows only — not Razorpay/gateway confirmation.
                 </p>
             </div>
 
-            {live ? (
-                <p className='text-xs font-medium text-[#027A48]'>Live · GET/PUT /api/v1/ops/hostel-payments</p>
+            {live && !error && !loading ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Hostel payments dues register is live'
+                    description='GET/PUT /api/v1/ops/hostel-payments. Mark Paid updates the register only — do not treat as bank/gateway settlement.'
+                />
             ) : null}
-            {error ? <FeedbackState kind='error' title='Payments API unavailable' description={error} /> : null}
+            {!live ? (
+                <IntegrationNotice state='mock' title='Live API disabled' description='Enable live API to persist hostel payment rows on FastAPI ops.' />
+            ) : null}
+            {error ? (
+                <>
+                    <IntegrationNotice state='failed' title='Payments API failed' description={error} />
+                    <FeedbackState kind='error' title='Payments API unavailable' description={error} />
+                </>
+            ) : null}
             {loading ? <FeedbackState kind='loading' title='Loading payments' description='Fetching hostel payments…' /> : null}
 
             {!loading && !error ? (
@@ -152,11 +181,12 @@ const PaymentsPage = () => {
                                     <th className='px-2 py-3'>Amount</th>
                                     <th className='px-2 py-3'>Status</th>
                                     <th className='px-2 py-3'>Due</th>
+                                    <th className='px-2 py-3'>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {filtered.length === 0 ? (
-                                    <tr><td colSpan={5} className='px-2 py-8 text-center text-[#667085]'>No payment records.</td></tr>
+                                    <tr><td colSpan={6} className='px-2 py-8 text-center text-[#667085]'>No payment records.</td></tr>
                                 ) : filtered.map((row) => (
                                     <tr key={row.id} className='border-b border-[#f2f4f7]'>
                                         <td className='px-2 py-3'>{row.id}</td>
@@ -164,6 +194,18 @@ const PaymentsPage = () => {
                                         <td className='px-2 py-3'>{row.amount}</td>
                                         <td className='px-2 py-3'>{row.status}</td>
                                         <td className='px-2 py-3'>{row.dueDate || '—'}</td>
+                                        <td className='px-2 py-3'>
+                                            {String(row.status || '').toLowerCase() !== 'paid' ? (
+                                                <button
+                                                    type='button'
+                                                    disabled={saving}
+                                                    onClick={() => handleMarkPaid(row)}
+                                                    className='text-[#027A48] font-semibold hover:underline disabled:opacity-60'
+                                                >
+                                                    Mark Paid
+                                                </button>
+                                            ) : (row.paidDate || 'Paid')}
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>

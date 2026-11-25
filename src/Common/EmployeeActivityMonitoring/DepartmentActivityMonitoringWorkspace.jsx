@@ -194,6 +194,8 @@ export default function DepartmentActivityMonitoringWorkspace({ defaultTab = 'ac
         return tabs
     }, [isSupervisoryRole, live, monitoringData.summary?.pendingReviewCount])
 
+    // Only sync from route/defaultTab — do NOT depend on availableTabs identity
+    // (pending badge counts change after review/filter and would bounce users to Overview).
     useEffect(() => {
         const currentTarget = tab || defaultTab
         if (currentTarget === 'overview' || !availableTabs.some((t) => t.id === currentTarget)) {
@@ -225,8 +227,13 @@ export default function DepartmentActivityMonitoringWorkspace({ defaultTab = 'ac
             })
             notify(`Activity ${selectedActivityForReview.id} marked as '${reviewDecision}' successfully.`)
             setSelectedActivityForReview(null)
+            setReviewDecision('Approved')
             setReviewRemarks('')
             setRefreshKey((k) => k + 1)
+            // Keep user on Team Activity Stream (or current tab) after successful review.
+            if (!tab) {
+                setActiveTab((prev) => prev || 'activity-stream')
+            }
         } catch (err) {
             notify(err.message || 'Failed to record review decision.')
         }
@@ -352,6 +359,10 @@ export default function DepartmentActivityMonitoringWorkspace({ defaultTab = 'ac
 
     return (
         <div className='space-y-6 p-4 md:p-6 bg-slate-50/50 min-h-screen'>
+            <DataSourceIndicator
+                status='LOCAL ONLY'
+                detail='Activity Monitoring uses local demo activity records. There is no dedicated monitoring API SoT for this workspace.'
+            />
             {/* Feedback Alert Toast */}
             {actionMessage && (
                 <div className='flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-xs font-semibold text-emerald-800 shadow-2xs'>

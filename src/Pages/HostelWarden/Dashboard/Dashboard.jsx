@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { NavLink } from 'react-router-dom'
-import { FeedbackState } from '../../../Common/ui'
+import { FeedbackState, IntegrationNotice } from '../../../Common/ui'
 import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 import { listHostelAssignments, listHostelPayments } from '../../../services/api/hostelApiService'
 
@@ -58,12 +58,22 @@ const Dashboard = () => {
                 </p>
             </div>
 
-            {live ? (
-                <p className='text-xs font-medium text-[#027A48]'>
-                    Live · GET /api/v1/ops/hostel-assignments · GET /api/v1/ops/hostel-payments
-                </p>
+            {live && !error && !loading ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Hostel dashboard counts are live'
+                    description='GET /api/v1/ops/hostel-assignments and hostel-payments. Counts reflect persisted ops rows only — not invented room availability or gateway payment confirmation. Blocks/rooms, outpass, mess remain unsupported.'
+                />
             ) : null}
-            {error ? <FeedbackState kind='error' title='Hostel API unavailable' description={error} /> : null}
+            {!live ? (
+                <IntegrationNotice state='mock' title='Live API disabled' description='Enable live API for hostel assignment and payment KPIs.' />
+            ) : null}
+            {error ? (
+                <>
+                    <IntegrationNotice state='failed' title='Hostel API failed' description={error} />
+                    <FeedbackState kind='error' title='Hostel API unavailable' description={error} />
+                </>
+            ) : null}
             {loading ? <FeedbackState kind='loading' title='Loading hostel data' description='Fetching assignments and payments…' /> : null}
 
             {!loading && !error ? (

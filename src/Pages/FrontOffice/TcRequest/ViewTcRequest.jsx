@@ -11,10 +11,12 @@ import {
 } from '../../../Common/TcRequest/tcRequestData'
 import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 import {
+    advanceTcRequest,
     forwardTcRequest,
     getTcRequest,
     rejectTcRequestAtPrm,
 } from '../../../services/api/tcApiService'
+import { CLIENT_TC_WORKFLOW_STEPS } from '../../../Common/TcRequest/tcRequestData'
 
 const Section = ({ title, children }) => (
     <div className='bg-white rounded-2xl shadow-md p-4'>
@@ -134,6 +136,42 @@ const ViewTcRequest = () => {
                             {request.studentName} · {request.classSection} · Requested by {request.requestedBy}
                         </p>
                     </div>
+
+                    <Section title='Client TC workflow'>
+                        <ol className='grid gap-2 text-sm text-slate-700'>
+                            {CLIENT_TC_WORKFLOW_STEPS.map((step, index) => {
+                                const stage = String(request.workflowStage || '').toLowerCase()
+                                const active = stage === step.key
+                                  || (step.key === 'class_teacher' && stage === 'prm')
+                                return (
+                                    <li key={step.key} className={`flex gap-2 rounded-lg px-2 py-1 ${active ? 'bg-indigo-50 font-semibold text-indigo-900' : ''}`}>
+                                        <span className='font-semibold text-slate-500'>{index + 1}.</span>
+                                        <span>{step.label}{active ? ' · current' : ''}</span>
+                                    </li>
+                                )
+                            })}
+                        </ol>
+                        {live && !['Approved', 'Rejected'].includes(request.status) && request.workflowStage && request.workflowStage !== 'prm' && request.workflowStage !== 'md' ? (
+                            <button
+                                type='button'
+                                disabled={busy}
+                                onClick={async () => {
+                                    setBusy(true)
+                                    const res = await advanceTcRequest(request.requestId || id, prmRemarks || 'Stage advanced')
+                                    setBusy(false)
+                                    if (!res.success) {
+                                        toast.error(typeof res.error === 'string' ? res.error : 'Could not advance TC stage.')
+                                        return
+                                    }
+                                    setRequest(res.data)
+                                    toast.success(`Advanced to ${res.data.workflowStage || 'next stage'}.`)
+                                }}
+                                className='mt-3 min-h-10 rounded-md border border-[#515DEF] px-4 text-sm font-semibold text-[#515DEF] disabled:opacity-50'
+                            >
+                                Advance academic stage
+                            </button>
+                        ) : null}
+                    </Section>
 
                     <Section title='TC Request Information'>
                         <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6'>

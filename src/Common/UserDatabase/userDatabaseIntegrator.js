@@ -430,17 +430,49 @@ export const getIntegratedStudentProfile = (studentId, selectedYear = CURRENT_AC
         { academicYear: '2026-2027', class: student.classSection, classTeacher: student.classTeacher, gpa: '9.1 / 10 (Mid-Term)', result: 'Enrolled / In Progress', promotionDate: 'Active' },
     ]
 
-    // 4. STUDENT TIMETABLE (Weekly):
-    const studentWeeklyTimetable = [
-        { period: '1', time: '09:00 - 09:45 AM', mon: 'Mathematics (Priya M)', tue: 'Physics (Dr. Subramanian)', wed: 'Chemistry (Ananya R)', thu: 'Mathematics (Priya M)', fri: 'Computer Science', sat: 'Library / Reading' },
-        { period: '2', time: '09:45 - 10:30 AM', mon: 'Physics (Dr. Subramanian)', tue: 'Mathematics (Priya M)', wed: 'English (Ravi K)', thu: 'Chemistry (Ananya R)', fri: 'Mathematics (Priya M)', sat: 'Physical Education' },
-        { period: 'Break', time: '10:30 - 10:45 AM', mon: 'Morning Recess', tue: 'Morning Recess', wed: 'Morning Recess', thu: 'Morning Recess', fri: 'Morning Recess', sat: 'Morning Recess' },
-        { period: '3', time: '10:45 - 11:30 AM', mon: 'English (Ravi K)', tue: 'Computer Science', wed: 'Mathematics (Priya M)', thu: 'Social Science', fri: 'Physics Lab', sat: 'Club Activity' },
-        { period: '4', time: '11:30 - 12:15 PM', mon: 'Chemistry (Ananya R)', tue: 'Social Science', wed: 'Physics (Dr. Subramanian)', thu: 'English (Ravi K)', fri: 'Physics Lab', sat: 'Inter-House Debate' },
-        { period: 'Lunch', time: '12:15 - 01:15 PM', mon: 'Lunch Break', tue: 'Lunch Break', wed: 'Lunch Break', thu: 'Lunch Break', fri: 'Lunch Break', sat: 'Dismissal / Co-curricular' },
-        { period: '5', time: '01:15 - 02:00 PM', mon: 'Computer Science', tue: 'Chemistry Lab', wed: 'Social Science', thu: 'Physics (Dr. Subramanian)', fri: 'English (Ravi K)', sat: '—' },
-        { period: '6', time: '02:00 - 02:45 PM', mon: 'Social Science', tue: 'Chemistry Lab', wed: 'Computer Science', thu: 'Mathematics (Priya M)', fri: 'Games / Sports', sat: '—' },
-    ]
+    // 4. STUDENT TIMETABLE (Weekly) — session-scoped; historical years do not reuse current effective dates.
+    const timetableByYear = {
+        '2026-2027': {
+            classSection: student.classSection,
+            effectiveDate: '01 Jun 2026',
+            weeklySchedule: [
+                { period: '1', time: '09:00 - 09:45 AM', mon: 'Mathematics (Priya M)', tue: 'Physics (Dr. Subramanian)', wed: 'Chemistry (Ananya R)', thu: 'Mathematics (Priya M)', fri: 'Computer Science', sat: 'Library / Reading' },
+                { period: '2', time: '09:45 - 10:30 AM', mon: 'Physics (Dr. Subramanian)', tue: 'Mathematics (Priya M)', wed: 'English (Ravi K)', thu: 'Chemistry (Ananya R)', fri: 'Mathematics (Priya M)', sat: 'Physical Education' },
+                { period: 'Break', time: '10:30 - 10:45 AM', mon: 'Morning Recess', tue: 'Morning Recess', wed: 'Morning Recess', thu: 'Morning Recess', fri: 'Morning Recess', sat: 'Morning Recess' },
+                { period: '3', time: '10:45 - 11:30 AM', mon: 'English (Ravi K)', tue: 'Computer Science', wed: 'Mathematics (Priya M)', thu: 'Social Science', fri: 'Physics Lab', sat: 'Club Activity' },
+                { period: '4', time: '11:30 - 12:15 PM', mon: 'Chemistry (Ananya R)', tue: 'Social Science', wed: 'Physics (Dr. Subramanian)', thu: 'English (Ravi K)', fri: 'Physics Lab', sat: 'Inter-House Debate' },
+                { period: 'Lunch', time: '12:15 - 01:15 PM', mon: 'Lunch Break', tue: 'Lunch Break', wed: 'Lunch Break', thu: 'Lunch Break', fri: 'Lunch Break', sat: 'Dismissal / Co-curricular' },
+                { period: '5', time: '01:15 - 02:00 PM', mon: 'Computer Science', tue: 'Chemistry Lab', wed: 'Social Science', thu: 'Physics (Dr. Subramanian)', fri: 'English (Ravi K)', sat: '—' },
+                { period: '6', time: '02:00 - 02:45 PM', mon: 'Social Science', tue: 'Chemistry Lab', wed: 'Computer Science', thu: 'Mathematics (Priya M)', fri: 'Games / Sports', sat: '—' },
+            ],
+        },
+        '2025-2026': {
+            classSection: promotionHistory.find((p) => p.academicYear === '2025-2026')?.class || 'Grade 9 - Section A',
+            effectiveDate: '02 Jun 2025',
+            weeklySchedule: [
+                { period: '1', time: '09:00 - 09:40 AM', mon: 'Mathematics (Kavita M)', tue: 'Science (Lab)', wed: 'English', thu: 'Mathematics', fri: 'Social Science', sat: 'Art' },
+                { period: '2', time: '09:40 - 10:20 AM', mon: 'English', tue: 'Mathematics', wed: 'Science', thu: 'Hindi', fri: 'Computer Basics', sat: 'Physical Education' },
+                { period: 'Break', time: '10:20 - 10:35 AM', mon: 'Recess', tue: 'Recess', wed: 'Recess', thu: 'Recess', fri: 'Recess', sat: 'Recess' },
+                { period: '3', time: '10:35 - 11:15 AM', mon: 'Science', tue: 'Social Science', wed: 'Mathematics', thu: 'English', fri: 'Science Lab', sat: 'Club' },
+                { period: '4', time: '11:15 - 11:55 AM', mon: 'Social Science', tue: 'Hindi', wed: 'English', thu: 'Science', fri: 'Science Lab', sat: 'Library' },
+            ],
+        },
+        '2024-2025': {
+            classSection: promotionHistory.find((p) => p.academicYear === '2024-2025')?.class || 'Grade 8 - Section A',
+            effectiveDate: '03 Jun 2024',
+            weeklySchedule: [
+                { period: '1', time: '09:00 - 09:40 AM', mon: 'Mathematics', tue: 'English', wed: 'Science', thu: 'Mathematics', fri: 'Social Science', sat: 'Craft' },
+                { period: '2', time: '09:40 - 10:20 AM', mon: 'English', tue: 'Mathematics', wed: 'Hindi', thu: 'Science', fri: 'Physical Education', sat: 'Games' },
+                { period: 'Break', time: '10:20 - 10:35 AM', mon: 'Recess', tue: 'Recess', wed: 'Recess', thu: 'Recess', fri: 'Recess', sat: 'Recess' },
+                { period: '3', time: '10:35 - 11:15 AM', mon: 'Science', tue: 'Social Science', wed: 'Mathematics', thu: 'English', fri: 'Computer', sat: 'Library' },
+            ],
+        },
+    }
+    const yearTimetable = timetableByYear[selectedYear] || null
+    const studentWeeklyTimetable = yearTimetable?.weeklySchedule || []
+    const timetableEffectiveDate = yearTimetable?.effectiveDate || null
+    const timetableClassSection = yearTimetable?.classSection || student.classSection
+    const timetableHasData = studentWeeklyTimetable.length > 0
 
     // 5. ACTIVITIES & ACHIEVEMENTS:
     const activitiesAndAchievements = [
@@ -719,12 +751,16 @@ export const getIntegratedStudentProfile = (studentId, selectedYear = CURRENT_AC
             paymentHistory: paymentReceipts,
         },
 
-        // 6. Timetable
+        // 6. Timetable (session-scoped)
         timetable: {
             academicYear: selectedYear,
-            classSection: student.classSection,
-            effectiveDate: '01 Jun 2026',
+            classSection: timetableClassSection,
+            effectiveDate: timetableEffectiveDate,
             weeklySchedule: studentWeeklyTimetable,
+            hasData: timetableHasData,
+            emptyMessage: timetableHasData
+                ? ''
+                : `No historical timetable is available for academic session ${selectedYear}.`,
         },
 
         // 7. Activities & Achievements
@@ -820,6 +856,30 @@ export const getIntegratedTeachersList = ({
             else if (teacher.id.includes('CRD')) attendancePct = 98.2
             else if (teacher.id.includes('PRN')) attendancePct = 99.1
 
+            const yearAssignments = {
+                '2026-2027': {
+                    assignedClasses: teacher.roleKey === 'teacher' || teacher.department?.includes('Academic')
+                        ? ['Grade 10-A', 'Grade 9-B']
+                        : teacher.roleKey === 'coordinator'
+                            ? ['Grade 8–10 Band']
+                            : ['Campus-wide'],
+                    subjects: teacher.roleKey === 'teacher' ? ['Mathematics', 'Science'] : ['Administration'],
+                    workloadPeriods: teacher.roleKey === 'teacher' ? 24 : 12,
+                },
+                '2025-2026': {
+                    assignedClasses: teacher.roleKey === 'teacher' ? ['Grade 9-A'] : ['Campus-wide'],
+                    subjects: teacher.roleKey === 'teacher' ? ['Mathematics'] : ['Administration'],
+                    workloadPeriods: teacher.roleKey === 'teacher' ? 22 : 10,
+                },
+                '2024-2025': {
+                    assignedClasses: teacher.roleKey === 'teacher' ? ['Grade 8-C'] : [],
+                    subjects: teacher.roleKey === 'teacher' ? ['General Science'] : [],
+                    workloadPeriods: teacher.roleKey === 'teacher' ? 18 : 0,
+                },
+            }
+            const assignment = yearAssignments[academicYear] || { assignedClasses: [], subjects: [], workloadPeriods: 0 }
+            const hasYearAssignment = Array.isArray(assignment.assignedClasses) && assignment.assignedClasses.length > 0
+
             return {
                 id: teacher.id,
                 employeeId: teacher.employeeId,
@@ -835,6 +895,13 @@ export const getIntegratedTeachersList = ({
                 email: teacher.email,
                 joiningDate: teacher.joiningDate,
                 reportingTo: teacher.reportingTo,
+                // Permanent master fields above; year-dependent assignment fields below.
+                yearAssignment: assignment,
+                hasYearAssignment,
+                assignedClassesLabel: hasYearAssignment
+                    ? assignment.assignedClasses.join(', ')
+                    : `No class assignment recorded for ${academicYear}`,
+                subjectsLabel: hasYearAssignment ? assignment.subjects.join(', ') : '—',
             }
         })
         .filter((item) => {
@@ -842,7 +909,7 @@ export const getIntegratedTeachersList = ({
             if (employmentStatus && item.currentStatus !== employmentStatus) return false
             if (search) {
                 const q = search.trim().toLowerCase()
-                const haystack = `${item.name} ${item.employeeId} ${item.department} ${item.designation} ${item.email}`.toLowerCase()
+                const haystack = `${item.name} ${item.employeeId} ${item.department} ${item.designation} ${item.email} ${item.assignedClassesLabel}`.toLowerCase()
                 if (!haystack.includes(q)) return false
             }
             return true

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { Bus, MapPinned, Users, UserRound } from 'lucide-react'
-import { FeedbackState, PageHeader } from '../../../Common/ui'
+import { FeedbackState, IntegrationNotice, PageHeader } from '../../../Common/ui'
 import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 import {
     listTransportDrivers,
@@ -75,7 +75,22 @@ const Dashboard = () => {
                 context={live ? 'Live · /api/v1/ops/transport-*' : 'Live API disabled'}
             />
 
-            {error ? <FeedbackState kind='error' title='Transport API unavailable' description={error} /> : null}
+            {live && !error && !loading ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Fleet KPI counts are live'
+                    description='Drivers, vehicles, routes and student assignments from /api/v1/ops/transport-*. GPS / ProTrack remains mock on Route Data.'
+                />
+            ) : null}
+            {!live ? (
+                <IntegrationNotice state='mock' title='Live API disabled' description='Enable live API for transport ops KPI counts.' />
+            ) : null}
+            {error ? (
+                <>
+                    <IntegrationNotice state='failed' title='Transport API failed' description={error} />
+                    <FeedbackState kind='error' title='Transport API unavailable' description={error} />
+                </>
+            ) : null}
             {loading ? <FeedbackState kind='loading' title='Loading transport data' description='Fetching ops collections…' /> : null}
 
             {!loading && !error ? (

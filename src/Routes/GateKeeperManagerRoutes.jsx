@@ -20,7 +20,6 @@ import ViewEscalation from '../Pages/GateKeeperManager/EscalationManagement/View
 import CommunicationInbox from '../Pages/GateKeeperManager/Communication/Inbox'
 import RedirectLegacyDirectMessages from '../Common/Communication/RedirectLegacyDirectMessages'
 import AcademicCalendar from '../Pages/GateKeeperManager/AcademicCalendar/AcademicCalendar'
-import MyAttendance from '../Pages/GateKeeperManager/Attendance/MyAttendance'
 import GatekeepersAttendance from '../Pages/GateKeeperManager/Attendance/GatekeepersAttendance'
 import Notifications from '../Pages/GateKeeperManager/Notifications/Notifications'
 import { TaskManagementRoutes } from '../Common/TaskManagement/TaskManagementRoutes'
@@ -51,7 +50,7 @@ const GateKeeperManagerRoutes = () => {
             <Route path="/gatekeeper-manager/attendance" element={<Navigate to="/gatekeeper-manager/attendance/my-attendance" replace />} />
             <Route path="/gatekeeper-manager/attendance-and-leave" element={<AttendanceAndLeaveWorkspace defaultTab="overview" />} />
             <Route path="/gatekeeper-manager/attendance/my-attendance" element={<AttendanceAndLeaveWorkspace defaultTab="records" />} />
-            <Route path="/gatekeeper-manager/attendance/gatekeepers-attendance" element={<AttendanceAndLeaveWorkspace defaultTab="records" />} />
+            <Route path="/gatekeeper-manager/attendance/gatekeepers-attendance" element={<GatekeepersAttendance />} />
             <Route path="/gatekeeper-manager/academic-calendar" element={<AcademicCalendar />} />
             <Route path="/gatekeeper-manager/notifications" element={<Notifications />} />
             {TaskManagementRoutes({ basePath: '/gatekeeper-manager' })}

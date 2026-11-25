@@ -23,11 +23,13 @@ import { isLiveApiEnabled } from '../../services/api/tokenStore'
 import { listEscalations } from '../../services/api/escalationApiService'
 
 const EscalationListPage = ({ roleKey }) => {
+    const live = isLiveApiEnabled()
     const { pathname } = useLocation()
     const effectiveRoleKey = roleKey || (pathname.startsWith('/parent') ? 'parent' : (pathname.startsWith('/student') ? 'student' : null))
     const roleConfig = getRoleConfig(effectiveRoleKey || roleKey)
     const { currentUser } = useEscalationContext(effectiveRoleKey || roleKey)
-    const canAdd = Boolean(roleConfig?.escalatesToRoleKey)
+    const parentLiveBlocked = live && String(effectiveRoleKey || '').toLowerCase() === 'parent'
+    const canAdd = Boolean(roleConfig?.escalatesToRoleKey) && !parentLiveBlocked
     const [urlParams, setUrlParams] = useSearchParams()
     const initialTableState = parseTableState(urlParams)
     const [listView, setListView] = useState(initialTableState.filters.view || (canAdd ? 'sent' : 'received'))
@@ -37,6 +39,68 @@ const EscalationListPage = ({ roleKey }) => {
     const [search, setSearch] = useState(initialTableState.query)
     const [page, setPage] = useState(initialTableState.page)
     const [pageSize, setPageSize] = useState(initialTableState.pageSize)
+    const [liveSent, setLiveSent] = useState([])
+    const [liveReceived, setLiveReceived] = useState([])
+    const [listSource, setListSource] = useState(live ? 'syncing' : 'mock')
+    const [listError, setListError] = useState('')
+    const [listLoading, setListLoading] = useState(Boolean(live))
+
+    const loadLive = useCallback(async () => {
+        if (!isLiveApiEnabled()) {
+            setListSource('mock')
+            setListLoading(false)
+            setListError('')
+            return
+        }
+        setListLoading(true)
+        setListError('')
+        const [sentRes, receivedRes] = await Promise.all([
+            listEscalations({ box: 'mine' }),
+            listEscalations({ box: 'received' }),
+        ])
+        setListLoading(false)
+        const sentOk = Boolean(sentRes?.success)
+        const receivedOk = Boolean(receivedRes?.success)
+        setLiveSent(sentOk && Array.isArray(sentRes.data) ? sentRes.data : [])
+        setLiveReceived(receivedOk && Array.isArray(receivedRes.data) ? receivedRes.data : [])
+        if (!sentOk || !receivedOk) {
+            setListSource('failed')
+            setListError(
+                (typeof sentRes?.error === 'string' && sentRes.error) ||
+                (typeof receivedRes?.error === 'string' && receivedRes.error) ||
+                'Failed to load /api/v1/escalations.',
+            )
+            return
+        }
+        setListSource('connected')
+    }, [])
+
+    useEffect(() => {
+        if (!live) {
+            setListSource('mock')
+            setListLoading(false)
+            return
+        }
+        if (String(effectiveRoleKey || '').toLowerCase() === 'parent') {
+            setLiveSent([])
+            setLiveReceived([])
+            setListSource('blocked')
+            setListError('Parent portal has no escalations.* grants on FastAPI. Raise/list is blocked — no false success.')
+            setListLoading(false)
+            return
+        }
+        loadLive()
+    }, [live, loadLive, effectiveRoleKey, roleKey])
+
+    const sentEscalations = useMemo(() => {
+        if (live) return liveSent
+        return getSentEscalations(effectiveRoleKey || roleKey, currentUser)
+    }, [live, liveSent, effectiveRoleKey, roleKey, currentUser])
+
+    const receivedEscalations = useMemo(() => {
+        if (live) return liveReceived
+        return getReceivedEscalations(effectiveRoleKey || roleKey, currentUser)
+    }, [live, liveReceived, effectiveRoleKey, roleKey, currentUser])
 
     const live = isLiveApiEnabled()
     const seesAll = ['Super Admin', 'Admin'].includes(roleConfig?.roleLabel)
@@ -129,13 +193,21 @@ const EscalationListPage = ({ roleKey }) => {
         { key: 'escalatedTo', label: 'Owner', render: formatEscalatedToDisplay },
         { key: 'description', label: 'Issue', render: (item) => <span className='line-clamp-2 max-w-sm'>{item.description}</span> },
         { key: 'escalationDate', label: 'Raised' },
-        { key: 'resolveBy', label: 'SLA due', render: (item) => getResolveByDate(item).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) },
+        {
+            key: 'resolveBy',
+            label: 'SLA due',
+            render: (item) => {
+                const dueAt = item.resolveBy ? new Date(item.resolveBy) : getResolveByDate(item)
+                return dueAt.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+            },
+        },
         {
             key: 'status',
             label: 'Workflow state',
             render: (item) => {
-                const workflow = getWorkflowState(item.status, { dueAt: getResolveByDate(item) })
-                return <StatusBadge status={workflow.key} label={workflow.overdue ? `${item.status} · overdue` : item.status} />
+                const dueAt = item.resolveBy ? new Date(item.resolveBy) : getResolveByDate(item)
+                const workflow = getWorkflowState(item.status, { dueAt })
+                return <StatusBadge status={workflow.key} label={workflow.overdue || item.overdue ? `${item.status} · overdue` : item.status} />
             },
         },
     ]
@@ -146,11 +218,32 @@ const EscalationListPage = ({ roleKey }) => {
                 title={listView === 'received' ? 'Received Issues & Escalations' : 'Report Issue / Escalation'}
                 description={`Routing: ${roleConfig.hierarchyLabel || 'Not configured'}`}
                 context={`${activeList.length} total · ${filtered.length} matching`}
-                actions={canAdd && listView === 'sent' ? (
-                    <NavLink to={`${roleConfig.routeBase}/add-escalation`} className='inline-flex min-h-10 items-center gap-2 rounded-lg bg-[var(--erp-indigo)] px-4 text-sm font-semibold text-white'>
-                        <Plus aria-hidden='true' size={16} /> Report Issue / Escalate
-                    </NavLink>
-                ) : null}
+                actions={(
+                    <div className='flex flex-wrap items-center gap-2'>
+                        {live ? (
+                            <button
+                                type='button'
+                                onClick={async () => {
+                                    const res = await runEscalationSlaSweep()
+                                    if (!res.success) {
+                                        toast.error(typeof res.error === 'string' ? res.error : 'SLA sweep failed.')
+                                        return
+                                    }
+                                    toast.success('24h SLA sweep completed.')
+                                    loadLive()
+                                }}
+                                className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] bg-white px-4 text-sm font-semibold text-[var(--erp-ink)]'
+                            >
+                                Run 24h SLA sweep
+                            </button>
+                        ) : null}
+                        {canAdd && listView === 'sent' ? (
+                            <NavLink to={`${roleConfig.routeBase}/add-escalation`} className='inline-flex min-h-10 items-center gap-2 rounded-lg bg-[var(--erp-indigo)] px-4 text-sm font-semibold text-white'>
+                                <Plus aria-hidden='true' size={16} /> Report Issue / Escalate
+                            </NavLink>
+                        ) : null}
+                    </div>
+                )}
             />
 
             <div className='inline-flex rounded-lg border border-[var(--erp-line-strong)] bg-white p-1' role='tablist' aria-label='Escalation queue'>
@@ -220,4 +313,3 @@ const EscalationListPage = ({ roleKey }) => {
 }
 
 export default EscalationListPage
-

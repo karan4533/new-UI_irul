@@ -12,7 +12,7 @@ const TeacherLayout = () => {
                 <IntegrationNotice
                     state='connected'
                     title='Live Teacher workspace'
-                    description='Assigned student roster, class attendance, my-leave and announcements use verified FastAPI endpoints. Lesson-plan / exams / timetable UIs remain demonstration until fully wired; teacher has no exams.write, leave.decide, finance, or admin-user access.'
+                    description='Assigned student roster, class attendance, my-leave, lesson plans and announcements use verified FastAPI endpoints. Exam create is blocked without exams.write; Star Ratings, Stores and Helpdesk remain browser mock.'
                 />
             ) : null}
             <TeacherRoutes />

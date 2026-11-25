@@ -4,6 +4,8 @@
  * Implements role-based visibility, bulk selection, and automated Star of the Year calculations.
  */
 
+import { evaluateMandatorySoyGates } from '../../services/modules/soyEligibility.js'
+
 export const ACADEMIC_YEARS = ['2025-2026', '2026-2027']
 export const CURRENT_ACADEMIC_YEAR = '2025-2026'
 
@@ -852,9 +854,9 @@ export const saveNonAcademicSomRecord = (record) => {
 
 /**
  * Calculates Academic Star of the Year based on finalized Star of the Month records.
- * Formula:
- * - Minimum 2 monthly recognitions for eligibility.
- * - Cumulative Score = (Monthly Wins * 20 pts) + (Avg Monthly Score * 0.5) + (Attendance * 0.3)
+ * Ranking score remains the cumulative weighted formula; eligibility uses the four
+ * mandatory annual gates (≥2 SOM wins, GPA ≥ 8.5 on 10-pt scale from avgScore/10,
+ * attendance ≥ 95%, zero infractions) — same rules as awardsService.verifySoyEligibility.
  */
 export const calculateAcademicStarOfYear = (academicYear = CURRENT_ACADEMIC_YEAR) => {
     const records = getAcademicSomRecords().filter(
@@ -877,44 +879,72 @@ export const calculateAcademicStarOfYear = (academicYear = CURRENT_ACADEMIC_YEAR
             }
         }
         studentMap[record.studentId].monthlyWins.push(record.month)
-        studentMap[record.studentId].totalScorePoints += Number(record.score || 95)
-        studentMap[record.studentId].gpaList.push(Number(record.gpa || 3.8))
+        const scoreNum = Number(record.score)
+        studentMap[record.studentId].totalScorePoints += Number.isFinite(scoreNum) ? scoreNum : 0
+        const gpaNum = Number(record.gpa)
+        if (Number.isFinite(gpaNum)) {
+            studentMap[record.studentId].gpaList.push(gpaNum)
+        }
     })
 
     const aggregated = Object.values(studentMap).map((item) => {
         const somCount = item.monthlyWins.length
-        const avgScore = Number((item.totalScorePoints / somCount).toFixed(1))
-        const avgGpa = Number((item.gpaList.reduce((a, b) => a + b, 0) / somCount).toFixed(2))
+        const avgScore = somCount > 0
+            ? Number((item.totalScorePoints / somCount).toFixed(1))
+            : null
+        const avgGpa = item.gpaList.length > 0
+            ? Number((item.gpaList.reduce((a, b) => a + b, 0) / item.gpaList.length).toFixed(2))
+            : null
 
         // Look up registered student attendance from catalog
         const classInfo = CLASS_ASSIGNMENTS[item.classSection]
         const matchedStudent = classInfo?.students?.find((s) => s.id === item.studentId)
-        const attendance = matchedStudent?.attendance || 97.5
+        const attendanceRaw = matchedStudent?.attendance
+        // Catalog hit preferred; legacy fallback 97.5 when roster row is missing (ranking continuity).
+        // GPA is never invented — Gate 2 uses avgScore/10 only when avgScore is finite.
+        const attendance = Number.isFinite(Number(attendanceRaw)) ? Number(attendanceRaw) : 97.5
+        const infractions = Number.isFinite(Number(matchedStudent?.infractions))
+            ? Number(matchedStudent.infractions)
+            : 0
 
-        // Transparent cumulative evaluation score (Max: 100)
-        // Wins weight: 20 pts per win (capped at 40), avgScore weight: 40%, attendance: 20%
+        // 10-point cumulative GPA used by mandatory Gate 2 (avg monthly % / 10)
+        const cumulativeGpa = Number.isFinite(avgScore) ? Number((avgScore / 10).toFixed(2)) : null
+
+        // Transparent cumulative evaluation score (Max: 100) — ranking only
+        const scoreForRank = Number.isFinite(avgScore) ? avgScore : 0
+        const attForRank = Number.isFinite(attendance) ? attendance : 0
         const cumulativeScore = Math.min(
             100,
             Math.round(
                 Math.min(somCount * 15, 35) +
-                (avgScore * 0.45) +
-                (attendance * 0.20)
+                (scoreForRank * 0.45) +
+                (attForRank * 0.20)
             )
         )
 
-        const isEligible = somCount >= 2 && cumulativeScore >= 85
+        const evaluation = evaluateMandatorySoyGates({
+            somWinsCount: somCount,
+            cumulativeGpa,
+            attendancePercentage: attendance,
+            infractions,
+        })
 
         return {
             ...item,
             somCount,
             avgScore,
             avgGpa,
+            cumulativeGpa,
             attendance,
+            infractions,
             cumulativeScore,
-            isEligible,
-            eligibilityReason: isEligible
-                ? 'Met minimum threshold: ≥ 2 SOM awards and cumulative score ≥ 85%'
-                : 'Pending eligibility: requires ≥ 2 SOM awards',
+            isEligible: evaluation.isEligible,
+            overallResult: evaluation.overallResult,
+            eligibilityGates: evaluation.gates,
+            failedCriteria: evaluation.failedCriteria,
+            eligibilityReason: evaluation.isEligible
+                ? 'Met all mandatory annual criteria (≥2 SOM wins, GPA ≥ 8.5, attendance ≥ 95%, zero infractions)'
+                : `Ineligible: ${evaluation.failedCriteria.map((g) => g.reason).join('; ')}`,
         }
     })
 
@@ -931,6 +961,7 @@ export const calculateAcademicStarOfYear = (academicYear = CURRENT_ACADEMIC_YEAR
 
 /**
  * Calculates Non-Academic Star of the Year based on department SOM records.
+ * Eligibility uses the same four mandatory gates; KPI% / 10 maps to the GPA ≥ 8.5 gate.
  */
 export const calculateNonAcademicStarOfYear = (academicYear = CURRENT_ACADEMIC_YEAR) => {
     const records = getNonAcademicSomRecords().filter(
@@ -951,44 +982,68 @@ export const calculateNonAcademicStarOfYear = (academicYear = CURRENT_ACADEMIC_Y
             }
         }
         empMap[record.employeeId].monthlyWins.push(record.month)
-        empMap[record.employeeId].totalKpiPoints += Number(record.kpiScore || 95)
+        const kpiNum = Number(record.kpiScore)
+        empMap[record.employeeId].totalKpiPoints += Number.isFinite(kpiNum) ? kpiNum : 0
     })
 
     const aggregated = Object.values(empMap).map((item) => {
         const somCount = item.monthlyWins.length
-        const avgKpi = Number((item.totalKpiPoints / somCount).toFixed(1))
+        const avgKpi = somCount > 0
+            ? Number((item.totalKpiPoints / somCount).toFixed(1))
+            : null
 
-        // Find employee attendance
+        // Find employee attendance (legacy fallback 98.0 when dept roster miss)
         let attendance = 98.0
+        let infractions = 0
+        let foundEmp = false
         for (const dept of NON_ACADEMIC_DEPARTMENTS) {
             const emp = dept.employees.find((e) => e.id === item.employeeId)
             if (emp) {
-                attendance = emp.attendance
+                foundEmp = true
+                attendance = Number.isFinite(Number(emp.attendance)) ? Number(emp.attendance) : 98.0
+                infractions = Number.isFinite(Number(emp.infractions)) ? Number(emp.infractions) : 0
                 break
             }
         }
+        if (!foundEmp) {
+            attendance = 98.0
+        }
 
+        const cumulativeGpa = Number.isFinite(avgKpi) ? Number((avgKpi / 10).toFixed(2)) : null
+
+        const kpiForRank = Number.isFinite(avgKpi) ? avgKpi : 0
+        const attForRank = Number.isFinite(attendance) ? attendance : 0
         const cumulativeScore = Math.min(
             100,
             Math.round(
                 Math.min(somCount * 15, 35) +
-                (avgKpi * 0.45) +
-                (attendance * 0.20)
+                (kpiForRank * 0.45) +
+                (attForRank * 0.20)
             )
         )
 
-        const isEligible = somCount >= 2 && cumulativeScore >= 85
+        const evaluation = evaluateMandatorySoyGates({
+            somWinsCount: somCount,
+            cumulativeGpa,
+            attendancePercentage: attendance,
+            infractions,
+        })
 
         return {
             ...item,
             somCount,
             avgKpi,
+            cumulativeGpa,
             attendance,
+            infractions,
             cumulativeScore,
-            isEligible,
-            eligibilityReason: isEligible
-                ? 'Eligible: ≥ 2 Department recognitions and cumulative performance score ≥ 85%'
-                : 'Pending: requires ≥ 2 monthly recognitions',
+            isEligible: evaluation.isEligible,
+            overallResult: evaluation.overallResult,
+            eligibilityGates: evaluation.gates,
+            failedCriteria: evaluation.failedCriteria,
+            eligibilityReason: evaluation.isEligible
+                ? 'Met all mandatory annual criteria (≥2 SOM wins, KPI ≥ 8.5, attendance ≥ 95%, zero infractions)'
+                : `Ineligible: ${evaluation.failedCriteria.map((g) => g.reason).join('; ')}`,
         }
     })
 

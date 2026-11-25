@@ -460,6 +460,7 @@ export const FinanceProvider = ({ children }) => {
                     transaction: res.data?.transaction || null,
                     paymentReference: res.data?.paymentReference || res.data?.receipt?.transactionReference,
                     held: Boolean(res.data?.held),
+                    studentPortal: res.data?.studentPortal || res.data?.student_portal || null,
                     dataSource: 'backend',
                 }
             } finally {

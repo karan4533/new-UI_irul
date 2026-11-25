@@ -21,9 +21,11 @@ import {
     Receipt
 } from 'lucide-react'
 import { toast } from 'react-toastify'
+import { IntegrationNotice } from '../ui'
 import { hostelService } from '../../services/modules/hostelService'
 import { feeService } from '../../services/modules/feeService'
 import { useAuth } from '../../context/AuthContext'
+import { isLiveApiEnabled } from '../../services/api/tokenStore'
 import { getStudentsList } from '../../Pages/Teacher/StudentsList/studentsListData'
 
 const FINANCE_STORAGE_KEY = 'school_erp_finance_state_v1'
@@ -104,7 +106,7 @@ const HostelManagementWorkspace = ({ roleOverride }) => {
                 if (fRes?.success && fRes.data) setFeeInvoices(fRes.data)
             } catch (err) {
                 console.error('Failed to load hostel data:', err)
-                toast.error('Unable to fetch live hostel data.')
+                toast.error('Unable to load hostel mock service data.')
             } finally {
                 setLoading(false)
             }
@@ -252,8 +254,17 @@ const HostelManagementWorkspace = ({ roleOverride }) => {
         })
     }, [enrolments, searchQuery, selectedBlockFilter])
 
+    const live = isLiveApiEnabled()
+
     return (
         <div className='p-6 max-w-7xl mx-auto space-y-6'>
+            <IntegrationNotice
+                state='mock'
+                title={live
+                    ? 'Rooms / bed matrix / outpass / mess stay browser mock'
+                    : 'Browser mock hostel accommodation workspace'}
+                description='Block/room matrix and mess flows have no FastAPI ops collection. Hostel Warden assignments and payments are live on /hostel-warden/assignments and /payments via /api/v1/ops/hostel-*.'
+            />
             {/* Header */}
             <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-4'>
                 <div>
@@ -262,7 +273,7 @@ const HostelManagementWorkspace = ({ roleOverride }) => {
                         Hostel Accommodation & Bed Management
                     </h1>
                     <p className='text-sm text-slate-500 mt-1'>
-                        Centralised institutional room allocation, live bed matrix visualizer, resident registers, and automated Central Fee integration.
+                        Browser mock room matrix and enrol flows. Not FastAPI-backed. Hostel Warden LIVE assignments/payments are on /hostel-warden/assignments and /payments.
                     </p>
                 </div>
                 <div className='flex items-center gap-3'>

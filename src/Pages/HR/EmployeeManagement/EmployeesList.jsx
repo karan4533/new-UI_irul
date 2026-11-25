@@ -155,9 +155,6 @@ const EmployeesList = () => {
                 </div>
             </PageIntro>
 
-            {listSource === 'backend' ? (
-                <p className='mb-3 text-xs font-medium text-[#027A48]'>Live HR employees · GET/PUT /api/v1/hr/portal/employees · POST /api/v1/hr/employees</p>
-            ) : null}
             {listSource === 'error' ? (
                 <FeedbackState kind='error' title='Employees API unavailable' description={listError} />
             ) : null}

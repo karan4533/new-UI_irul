@@ -1145,13 +1145,14 @@ export const INITIAL_LOST_FOUND_DATA = {
       description: 'Found black digital watch with red dial accents after evening practice session.',
       custodialLocker: 'Security Gate 1 Custody Safe',
       custodianName: 'Head Gatekeeper',
-      status: 'Under Review',
+      status: 'Claim Approved - Ready for Handover',
       claimantDetails: {
         claimantId: 'STU-001',
         claimantName: 'Aarav Sharma',
         claimantContact: '+91 98400 11223',
         proofDescription: 'Minor scratch near top button; backlight is amber tone.',
-        claimDate: '2026-03-09'
+        claimDate: '2026-03-09',
+        status: 'Approved',
       }
     },
     {
@@ -1166,6 +1167,20 @@ export const INITIAL_LOST_FOUND_DATA = {
       custodialLocker: null,
       custodianName: null,
       status: 'Reported Lost',
+      claimantDetails: null
+    },
+    {
+      id: 'LF-2026-003',
+      type: 'FOUND',
+      title: 'Casio fx-991 Scientific Calculator with Slide Case',
+      category: 'Electronics & Gadgets',
+      location: 'Main Auditorium Front Stage',
+      dateReported: '2026-03-07',
+      photoUrl: 'https://images.unsplash.com/photo-1587825140708-dfaf72ae4b04?w=300&q=80',
+      description: 'Black Casio scientific calculator found after rehearsal.',
+      custodialLocker: 'Front Office / PRM Reception Safe',
+      custodianName: 'Anita Desai (PRM)',
+      status: 'In Custody / Unclaimed',
       claimantDetails: null
     }
   ]

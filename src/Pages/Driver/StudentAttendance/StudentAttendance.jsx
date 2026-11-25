@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import {
@@ -12,12 +12,21 @@ import {
     UserX,
     XCircle,
 } from 'lucide-react'
+import { toast } from 'react-toastify'
 import noProfile from '../../../assets/images/no-profile.png'
+import { FeedbackState } from '../../../Common/ui'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import {
+    listTransportRoutes,
+    listTransportStudentAssignments,
+    listTransportStudentAttendance,
+    listTransportVehicles,
+    upsertTransportStudentAttendance,
+} from '../../../services/api/transportApiService'
 import {
     ATTENDANCE_PERIODS,
     ATTENDANCE_PHASES,
     SCHOOL_NAME,
-    STUDENT_ATTENDANCE,
     filterStudents,
     getAttendanceLocation,
     getLocationColumnLabel,
@@ -27,12 +36,86 @@ import {
 
 const periodKey = (period) => period.toLowerCase()
 
+const toIsoDate = (date) => {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return ''
+    const y = date.getFullYear()
+    const m = String(date.getMonth() + 1).padStart(2, '0')
+    const d = String(date.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+}
+
+const blankPhases = () => ({ pickup: 'Pending', drop: 'Pending' })
+
+const assignmentToRecord = (row, scope) => ({
+    id: `TMP-${row.studentId || row.id}`,
+    studentId: row.studentId || '',
+    studentName: row.studentName || '',
+    classSection: row.classSection || '',
+    busStop: row.stopName || row.busStop || '',
+    profileImage: null,
+    vehicleNumber: row.vehicleNumber || scope.vehicleNumber || '',
+    routeName: row.routeName || scope.routeName || '',
+    morning: blankPhases(),
+    evening: blankPhases(),
+})
+
 const StudentAttendance = () => {
+    const live = isLiveApiEnabled()
     const [attendanceDate, setAttendanceDate] = useState(new Date())
     const [period, setPeriod] = useState('Morning')
     const [phase, setPhase] = useState('pickup')
     const [search, setSearch] = useState('')
-    const [records, setRecords] = useState(STUDENT_ATTENDANCE)
+    const [records, setRecords] = useState([])
+    const [scope, setScope] = useState({ vehicleNumber: '', routeName: '' })
+    const [loading, setLoading] = useState(live)
+    const [error, setError] = useState('')
+    const [savingId, setSavingId] = useState('')
+
+    const load = useCallback(async () => {
+        if (!live) {
+            setLoading(false)
+            setError('Live API is disabled.')
+            return
+        }
+        setLoading(true)
+        setError('')
+        const dateKey = toIsoDate(attendanceDate)
+        const [assignmentsRes, attendanceRes, vehiclesRes, routesRes] = await Promise.all([
+            listTransportStudentAssignments(),
+            listTransportStudentAttendance(),
+            listTransportVehicles(),
+            listTransportRoutes(),
+        ])
+        const parts = []
+        if (!assignmentsRes.success) parts.push(`assignments: ${assignmentsRes.error}`)
+        if (!attendanceRes.success) parts.push(`attendance: ${attendanceRes.error}`)
+        if (!vehiclesRes.success) parts.push(`vehicles: ${vehiclesRes.error}`)
+        if (!routesRes.success) parts.push(`routes: ${routesRes.error}`)
+        setError(parts.join(' · '))
+
+        const vehicleNumber = (vehiclesRes.data || [])[0]?.vehicleNumber || ''
+        const routeName = (routesRes.data || [])[0]?.routeName || ''
+        setScope({ vehicleNumber, routeName })
+
+        const dayRows = (attendanceRes.data || []).filter((row) => String(row.attendanceDate || '') === dateKey)
+        const byStudent = new Map(dayRows.map((row) => [String(row.studentId || row.id), row]))
+
+        const assignments = assignmentsRes.data || []
+        const roster = assignments.length
+            ? assignments.map((row) => {
+                const existing = byStudent.get(String(row.studentId || ''))
+                if (existing) return existing
+                return assignmentToRecord(row, { vehicleNumber, routeName })
+            })
+            : dayRows
+
+        setRecords(roster)
+        setLoading(false)
+    }, [live, attendanceDate])
+
+    useEffect(() => {
+        load()
+    }, [load])
 
     const filteredRecords = useMemo(
         () => filterStudents(records, search),
@@ -53,21 +136,54 @@ const StudentAttendance = () => {
         setPhase(ATTENDANCE_PHASES[nextPeriod][0].key)
     }
 
-    const markAttendance = (studentId, status) => {
-        setRecords((prev) => prev.map((record) => {
-            if (record.id !== studentId) return record
-            const bucket = periodKey(period)
-            return {
-                ...record,
-                [bucket]: {
-                    ...record[bucket],
-                    [phase]: status,
-                },
-            }
-        }))
+    const markAttendance = async (record, status) => {
+        const dateKey = toIsoDate(attendanceDate)
+        const bucket = periodKey(period)
+        const nextMorning = { ...(record.morning || blankPhases()) }
+        const nextEvening = { ...(record.evening || blankPhases()) }
+        if (bucket === 'morning') nextMorning[phase] = status
+        else nextEvening[phase] = status
+
+        const payload = {
+            id: String(record.id || '').startsWith('TMP-') ? '' : record.id,
+            attendanceDate: dateKey,
+            studentId: record.studentId,
+            studentName: record.studentName,
+            classSection: record.classSection,
+            busStop: record.busStop,
+            vehicleNumber: record.vehicleNumber || scope.vehicleNumber,
+            routeName: record.routeName || scope.routeName,
+            morning: nextMorning,
+            evening: nextEvening,
+        }
+
+        if (!payload.vehicleNumber && !payload.routeName) {
+            toast.error('No assigned vehicle/route in driver scope. Ask Transport Manager to link your profile.')
+            return
+        }
+
+        setSavingId(record.studentId || record.id)
+        const saved = await upsertTransportStudentAttendance(payload)
+        setSavingId('')
+        if (!saved.success) {
+            toast.error(saved.error || 'Could not save attendance on the server.')
+            return
+        }
+        toast.success(`${record.studentName || record.studentId} → ${status}`)
+        await load()
     }
 
     const currentStatus = (record) => record[periodKey(period)]?.[phase] ?? 'Pending'
+
+    if (!live) {
+        return (
+            <FeedbackState
+                kind='error'
+                title='Live API required'
+                description='Student boarding attendance uses GET/PUT /api/v1/ops/transport-student-attendance with roster from transport-student-assignments.'
+            />
+        )
+    }
 
     return (
         <section className='space-y-5'>
@@ -79,8 +195,11 @@ const StudentAttendance = () => {
                             <h1 className='text-2xl md:text-3xl font-bold mt-1'>Student Attendance</h1>
                             <p className='text-white/85 text-sm mt-2 flex items-center gap-2'>
                                 <Bus size={16} />
-                                Erode Central Route · TN 33 AB 1234
+                                {scope.routeName || 'Assigned route'}
+                                {' · '}
+                                {scope.vehicleNumber || 'No vehicle'}
                             </p>
+                            <p className='text-white/70 text-xs mt-1'>Live · /api/v1/ops/transport-student-attendance</p>
                         </div>
                         <div className='flex flex-col gap-1 min-w-[200px]'>
                             <label className='text-white/80 text-xs font-medium uppercase'>Attendance Date</label>
@@ -150,6 +269,9 @@ const StudentAttendance = () => {
                 </div>
             </div>
 
+            {loading ? <p className='text-sm text-slate-500'>Loading live boarding roster…</p> : null}
+            {error ? <FeedbackState kind='error' title='Partial load issues' description={error} /> : null}
+
             <div className='bg-white rounded-2xl shadow-md border border-[#EDEEF5] p-4'>
                 <div className='flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-5'>
                     <div>
@@ -188,16 +310,17 @@ const StudentAttendance = () => {
                 </div>
 
                 <div className='mt-3 space-y-3'>
-                    {filteredRecords.length === 0 ? (
+                    {!loading && filteredRecords.length === 0 ? (
                         <div className='text-center py-12 text-[#667085]'>
-                            No students found for the selected search.
+                            No students in driver scope for this date. Assignments come from Transport Manager (`transport-student-assignments`).
                         </div>
                     ) : (
                         filteredRecords.map((record) => {
                             const status = currentStatus(record)
+                            const busy = savingId === (record.studentId || record.id)
                             return (
                                 <div
-                                    key={record.id}
+                                    key={record.id || record.studentId}
                                     className='rounded-2xl border border-[#EDEEF5] bg-[#FAFBFF] hover:border-[#515DEF44] hover:shadow-sm transition-all p-4'
                                 >
                                     <div className='grid grid-cols-1 lg:grid-cols-[72px_1fr_1fr_1.2fr_auto] gap-4 lg:items-center'>
@@ -220,7 +343,7 @@ const StudentAttendance = () => {
 
                                         <div>
                                             <p className='text-xs text-[#808080] lg:hidden mb-1'>Class & Section</p>
-                                            <p className='text-sm font-medium text-[#1E1E1E]'>{record.classSection}</p>
+                                            <p className='text-sm font-medium text-[#1E1E1E]'>{record.classSection || '—'}</p>
                                         </div>
 
                                         <div>
@@ -237,8 +360,9 @@ const StudentAttendance = () => {
                                             </span>
                                             <button
                                                 type='button'
-                                                onClick={() => markAttendance(record.id, 'Present')}
-                                                className={`inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium border transition-all cursor-pointer ${
+                                                disabled={busy}
+                                                onClick={() => markAttendance(record, 'Present')}
+                                                className={`inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium border transition-all cursor-pointer disabled:opacity-60 ${
                                                     status === 'Present'
                                                         ? 'bg-[#4CAF50] text-white border-[#4CAF50] shadow-sm'
                                                         : 'bg-white text-[#2E7D32] border-[#A5D6A7] hover:bg-[#E8F5E9]'
@@ -249,8 +373,9 @@ const StudentAttendance = () => {
                                             </button>
                                             <button
                                                 type='button'
-                                                onClick={() => markAttendance(record.id, 'Absent')}
-                                                className={`inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium border transition-all cursor-pointer ${
+                                                disabled={busy}
+                                                onClick={() => markAttendance(record, 'Absent')}
+                                                className={`inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium border transition-all cursor-pointer disabled:opacity-60 ${
                                                     status === 'Absent'
                                                         ? 'bg-[#FF5722] text-white border-[#FF5722] shadow-sm'
                                                         : 'bg-white text-[#C62828] border-[#EF9A9A] hover:bg-[#FFEBEE]'

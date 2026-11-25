@@ -29,6 +29,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { getProfileLabel } from '../../Pages/Authentication/profileOptions'
+import { DataSourceIndicator } from '../ui'
 import {
     getPhysicalFiles,
     savePhysicalFiles,
@@ -294,25 +295,55 @@ function FileRoomWorkspaceInner({ defaultTab = 'overview', roleOverride = null }
     const handleInwardSubmit = (e) => {
         e.preventDefault()
         try {
+            if (!String(inwardFormData.title || '').trim()) {
+                throw new Error('File title / name is required before docket inward.')
+            }
+            const coords = inwardFormData.storageCoordinates || {}
             const result = logFileInward({
-                fileNumber: inwardFormData.fileNumber || `FILE-2026-${Math.floor(100 + Math.random() * 900)}`,
-                title: inwardFormData.title,
+                fileRefNo: inwardFormData.fileNumber || undefined,
+                fileName: inwardFormData.title,
                 department: inwardFormData.department,
                 category: inwardFormData.category,
-                confidentialityLevel: inwardFormData.confidentialityLevel,
-                sourceSender: inwardFormData.sourceSender,
-                medium: inwardFormData.medium,
-                trackingNumber: inwardFormData.trackingNumber,
-                storageCoordinates: inwardFormData.storageCoordinates,
-                receivedByEmployeeId: 'EMP-ADM-010',
-                receivedByEmployeeName: authName || 'Sunil Joshi (Head Archivist)',
-                summary: inwardFormData.summary
+                confidentiality: inwardFormData.confidentialityLevel,
+                receivedFrom: inwardFormData.sourceSender,
+                receivedByCustodian: authName || 'Sunil Joshi (Head Archivist)',
+                rackNo: coords.rackNumber,
+                shelfNo: coords.shelfLevel,
+                boxNo: coords.boxNumber,
+                remarks: [inwardFormData.summary, inwardFormData.medium, inwardFormData.trackingNumber]
+                    .filter(Boolean)
+                    .join(' · '),
             })
-            notify(`Inward document logged under ${result.file.fileNumber}! Coordinates assigned.`)
+            const savedFile = result?.newFile
+            if (!savedFile) {
+                throw new Error('Inward registration failed — no file record was returned by the archive service.')
+            }
+            const fileNumber = savedFile.fileRefNo || savedFile.id
+            if (!fileNumber) {
+                throw new Error('Inward registration failed — file number was not assigned.')
+            }
+            const rackLabel = [
+                savedFile.storageLocation?.rackNo || coords.rackNumber,
+                savedFile.storageLocation?.shelfNo || coords.shelfLevel,
+                savedFile.storageLocation?.boxNo || coords.boxNumber,
+            ].filter(Boolean).join(', ')
+            notify(`Inward document logged under ${fileNumber}! Rack assigned: ${rackLabel || 'default shelf'}.`)
             setIsInwardModalOpen(false)
+            setInwardFormData({
+                fileNumber: '',
+                title: '',
+                department: 'Administration',
+                category: 'Official Regulatory Document',
+                confidentialityLevel: 'Normal',
+                sourceSender: 'CBSE Regional Office, Preet Vihar, New Delhi',
+                medium: 'Speed Post Courier',
+                trackingNumber: '',
+                storageCoordinates: { rackNumber: 'Rack-03', shelfLevel: 'Shelf-B', boxNumber: 'Box-12' },
+                summary: '',
+            })
             setRefreshKey((k) => k + 1)
         } catch (err) {
-            alert(err.message)
+            alert(err.message || 'Failed to register inward docket.')
         }
     }
 
@@ -321,22 +352,27 @@ function FileRoomWorkspaceInner({ defaultTab = 'overview', roleOverride = null }
         if (!selectedFileForIssue) return
         try {
             const result = issuePhysicalFile({
-                fileNumber: selectedFileForIssue.fileNumber,
-                issuedToEmployeeId: issueFormData.issuedToEmployeeId,
-                issuedToEmployeeName: issueFormData.issuedToEmployeeName,
-                issuedToDepartment: issueFormData.issuedToDepartment,
-                issuedByEmployeeId: 'EMP-ADM-010',
-                issuedByEmployeeName: authName || 'Sunil Joshi (Head Archivist)',
+                fileId: selectedFileForIssue.id,
+                requestedById: issueFormData.issuedToEmployeeId,
+                requestedByName: issueFormData.issuedToEmployeeName,
+                department: issueFormData.issuedToDepartment,
+                issuedByCustodian: authName || 'Sunil Joshi (Head Archivist)',
                 expectedReturnDate: issueFormData.expectedReturnDate,
                 purpose: issueFormData.purpose,
-                directorApprovalObtained: issueFormData.directorApprovalObtained
+                approvedBy: issueFormData.directorApprovalObtained
+                    ? 'Managing Director'
+                    : 'HOD / Department Head',
             })
-            notify(`Physical file ${selectedFileForIssue.fileNumber} issued under Outward Slip ${result.outwardRecord.id}!`)
+            const outward = result?.newOutward
+            if (!outward?.id) {
+                throw new Error('Issue failed — no outward slip was created.')
+            }
+            notify(`Physical file ${selectedFileForIssue.fileNumber} issued under Outward Slip ${outward.id}!`)
             setIsIssueModalOpen(false)
             setSelectedFileForIssue(null)
             setRefreshKey((k) => k + 1)
         } catch (err) {
-            alert(err.message)
+            alert(err.message || 'Failed to issue physical file.')
         }
     }
 
@@ -344,19 +380,25 @@ function FileRoomWorkspaceInner({ defaultTab = 'overview', roleOverride = null }
         e.preventDefault()
         if (!selectedRecordForReturn) return
         try {
-            returnPhysicalFile({
-                outwardRecordId: selectedRecordForReturn.id,
-                receivedByEmployeeId: 'EMP-ADM-010',
-                receivedByEmployeeName: authName || 'Sunil Joshi (Head Archivist)',
-                conditionOnReturn: returnFormData.conditionOnReturn,
-                remarks: returnFormData.remarks
+            const issueId = selectedRecordForReturn.id
+            if (!issueId || String(issueId).startsWith('ISS-0.')) {
+                throw new Error('Outward issue record not found — refresh the custody register and try again.')
+            }
+            const result = returnPhysicalFile({
+                issueId,
+                custodianName: authName || 'Sunil Joshi (Head Archivist)',
+                returnCondition: returnFormData.conditionOnReturn,
+                remarks: returnFormData.remarks,
             })
+            if (!result?.targetOutward && !result?.targetFile) {
+                throw new Error('Receive-back failed — archive service did not confirm the return.')
+            }
             notify(`File ${selectedRecordForReturn.fileNumber} returned and restored to file room shelf!`)
             setIsReturnModalOpen(false)
             setSelectedRecordForReturn(null)
             setRefreshKey((k) => k + 1)
         } catch (err) {
-            alert(err.message)
+            alert(err.message || 'Failed to receive file back into archive.')
         }
     }
 
@@ -386,6 +428,10 @@ function FileRoomWorkspaceInner({ defaultTab = 'overview', roleOverride = null }
 
     return (
         <div className='space-y-6 p-4 md:p-6 bg-slate-50/50 min-h-screen'>
+            <DataSourceIndicator
+                status='LOCAL ONLY'
+                detail='Physical File Room records are browser localStorage. No mounted FastAPI file-room domain is the SoT for this UI.'
+            />
             {/* Feedback Alert Toast */}
             {actionMessage && (
                 <div className='flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-xs font-semibold text-emerald-800 shadow-2xs'>

@@ -23,7 +23,48 @@ import {
     ISSUE_TYPES,
     statusBadgeColor,
 } from './requestApprovalsData'
-import { RejectRequestModal } from '../../../Common/ui'
+import { IntegrationNotice, RejectRequestModal } from '../../../Common/ui'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import {
+    listTransportDriverFuel,
+    listTransportDriverMaintenance,
+    upsertTransportDriverFuel,
+    upsertTransportDriverMaintenance,
+} from '../../../services/api/transportApiService'
+
+const mapMaintRow = (row = {}) => ({
+    id: row.id,
+    requestId: row.maintenanceRequestId || row.id,
+    type: 'Maintenance',
+    vehicleNumber: row.vehicleNumber || '',
+    reportedBy: row.reportedBy || row.driverName || 'Driver',
+    driverName: row.driverName || row.reportedBy || 'Driver',
+    requestDate: row.requestDate || '',
+    issueType: row.issueType || '',
+    description: row.description || '',
+    priority: row.priority || 'Medium',
+    status: row.approvalStatus || row.status || 'Pending',
+    estimatedCost: Number(row.estimatedCost) || 0,
+    workshop: row.workshop || '',
+    source: row.source || 'backend',
+})
+
+const mapFuelRow = (row = {}) => ({
+    id: row.id,
+    requestId: row.fuelRequestId || row.id,
+    type: 'Fuel',
+    vehicleNumber: row.vehicleNumber || '',
+    driverName: row.driverName || 'Driver',
+    requestedDate: row.requestDate || '',
+    requestDate: row.requestDate || '',
+    fuelType: row.fuelType || '',
+    quantity: row.quantityLitres || '',
+    quantityLitres: row.quantityLitres || '',
+    estimatedCost: Number(row.estimatedCost) || 0,
+    status: row.approvalStatus || row.status || 'Pending',
+    remarks: row.remarks || '',
+    source: row.source || 'backend',
+})
 
 const TABS = [
     { id: 1, label: 'Maintenance Request' },
@@ -32,8 +73,11 @@ const TABS = [
 
 const RequestApprovals = () => {
     const navigate = useNavigate()
+    const live = isLiveApiEnabled()
     const [maintenanceList, setMaintenanceList] = useState([])
     const [fuelList, setFuelList] = useState([])
+    const [liveError, setLiveError] = useState('')
+    const [loading, setLoading] = useState(Boolean(live))
 
     // Filters
     const [searchQuery, setSearchQuery] = useState('')
@@ -51,13 +95,37 @@ const RequestApprovals = () => {
     const [showRejectModal, setShowRejectModal] = useState(false)
     const [toastMessage, setToastMessage] = useState('')
 
-    const loadData = () => {
-        setMaintenanceList(getMaintenanceRequests())
-        setFuelList(getFuelRequests())
+    const loadData = async () => {
+        if (!isLiveApiEnabled()) {
+            setMaintenanceList(getMaintenanceRequests())
+            setFuelList(getFuelRequests())
+            setLoading(false)
+            setLiveError('')
+            return
+        }
+        setLoading(true)
+        setLiveError('')
+        const [maint, fuel] = await Promise.all([
+            listTransportDriverMaintenance(),
+            listTransportDriverFuel(),
+        ])
+        setLoading(false)
+        if (!maint.success || !fuel.success) {
+            setLiveError(
+                [maint.error, fuel.error].find((item) => typeof item === 'string')
+                || 'Failed to load driver maintenance/fuel requests.',
+            )
+            setMaintenanceList([])
+            setFuelList([])
+            return
+        }
+        setMaintenanceList((maint.data || []).map(mapMaintRow))
+        setFuelList((fuel.data || []).map(mapFuelRow))
     }
 
     useEffect(() => {
         loadData()
+        if (isLiveApiEnabled()) return undefined
         const handleStorage = (e) => {
             if (
                 e.key === 'tm_maintenance_requests' ||
@@ -158,7 +226,28 @@ const RequestApprovals = () => {
         return currentList.slice(start, start + entriesPerPage)
     }, [currentList, currentPage, entriesPerPage])
 
-    const handleQuickApprove = (item) => {
+    const handleQuickApprove = async (item) => {
+        if (live) {
+            const isFuel = String(item.type || '').toLowerCase() === 'fuel'
+            const payload = {
+                ...item,
+                approvalStatus: 'Approved',
+                status: 'Approved',
+                approverRemarks: 'Quick approved via portal',
+            }
+            const res = isFuel
+                ? await upsertTransportDriverFuel(payload)
+                : await upsertTransportDriverMaintenance(payload)
+            if (!res.success) {
+                setToastMessage(typeof res.error === 'string' ? res.error : 'Approve failed on server.')
+                setTimeout(() => setToastMessage(''), 3500)
+                return
+            }
+            await loadData()
+            setToastMessage(`Request ${item.requestId} approved on the server.`)
+            setTimeout(() => setToastMessage(''), 3500)
+            return
+        }
         updateRequestStatus(item.id, 'Approved', 'Quick approved via portal', 'Transport Manager')
         loadData()
         setToastMessage(`Request ${item.requestId} approved successfully.`)
@@ -170,8 +259,32 @@ const RequestApprovals = () => {
         setShowRejectModal(true)
     }
 
-    const handleConfirmReject = ({ reason }) => {
+    const handleConfirmReject = async ({ reason }) => {
         if (!rejectTarget) return
+        if (live) {
+            const isFuel = String(rejectTarget.type || '').toLowerCase() === 'fuel'
+            const payload = {
+                ...rejectTarget,
+                approvalStatus: 'Rejected',
+                status: 'Rejected',
+                rejectionReason: reason,
+                remarks: reason,
+            }
+            const res = isFuel
+                ? await upsertTransportDriverFuel(payload)
+                : await upsertTransportDriverMaintenance(payload)
+            if (!res.success) {
+                setToastMessage(typeof res.error === 'string' ? res.error : 'Reject failed on server.')
+                setTimeout(() => setToastMessage(''), 3500)
+                return
+            }
+            await loadData()
+            setShowRejectModal(false)
+            setRejectTarget(null)
+            setToastMessage(`Request ${rejectTarget.requestId} rejected on the server.`)
+            setTimeout(() => setToastMessage(''), 3500)
+            return
+        }
         updateRequestStatus(rejectTarget.id, 'Rejected', reason, 'Transport Manager')
         loadData()
         setShowRejectModal(false)
@@ -182,6 +295,23 @@ const RequestApprovals = () => {
 
     return (
         <section className='space-y-6 pb-12'>
+            {live && !liveError && !loading ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Request approvals are live'
+                    description='Maintenance/fuel queues hydrate from GET /api/v1/ops/transport-driver-maintenance and transport-driver-fuel. Approve/reject persist via PUT. GPS remains DEMO.'
+                />
+            ) : null}
+            {!live ? (
+                <IntegrationNotice
+                    state='mock'
+                    title='Request approvals browser mock'
+                    description='Enable live API to decide driver fuel/maintenance requests on FastAPI ops.'
+                />
+            ) : null}
+            {liveError ? (
+                <IntegrationNotice state='failed' title='Approvals API failed' description={liveError} />
+            ) : null}
             {/* Filter Section */}
             <div className='bg-white rounded-2xl shadow-md p-4'>
                 <div className='flex justify-between md:items-center sm:items-stretch md:flex-row sm:flex-col flex-col gap-y-4'>

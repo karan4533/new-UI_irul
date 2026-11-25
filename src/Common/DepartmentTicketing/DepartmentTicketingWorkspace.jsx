@@ -35,11 +35,19 @@ import {
     raiseDepartmentTicket,
     assignTicketToStaff,
     updateTicketProgress,
-    confirmTicketClosure
+    confirmTicketClosure,
+    normalizeDepartmentConfigForUi,
 } from './departmentTicketingData'
 import { TICKETING_LIVE_COLLECTIONS } from './departmentTicketingData'
 import LiveOpsGate from '../ui/LiveOpsGate'
 import { ENTERPRISE_EMPLOYEES } from '../AttendanceAndLeave/attendanceLeaveData'
+import { downloadCsv } from '../utils/downloadCsv'
+import { DataSourceIndicator } from '../ui'
+
+const canAssignTicket = (status) => ['Open', 'Submitted', 'Assigned'].includes(status)
+const canResolveTicket = (status) => ['In-Progress', 'In Progress', 'Assigned'].includes(status)
+const canRateTicket = (status) =>
+    status === 'Resolved (Awaiting Confirmation)' || status === 'Resolved'
 
 function DepartmentTicketingWorkspaceInner({ defaultTab = 'overview', roleOverride = null }) {
     const { role: authRole, email: authEmail, name: authName } = useAuth()
@@ -101,6 +109,11 @@ function DepartmentTicketingWorkspaceInner({ defaultTab = 'overview', roleOverri
         return getDepartmentTickets()
     }, [refreshKey])
 
+    const departmentConfigs = useMemo(
+        () => DEPARTMENT_CONFIGS.map(normalizeDepartmentConfigForUi),
+        []
+    )
+
     // Tabs
     const availableTabs = useMemo(() => {
         const tabs = [
@@ -124,10 +137,12 @@ function DepartmentTicketingWorkspaceInner({ defaultTab = 'overview', roleOverri
     // KPIs
     const kpis = useMemo(() => {
         const total = allTickets.length
-        const open = allTickets.filter((t) => ['Open', 'In-Progress'].includes(t.status)).length
+        const open = allTickets.filter((t) =>
+            ['Open', 'Submitted', 'Assigned', 'In-Progress', 'In Progress'].includes(t.status)
+        ).length
         const breached = allTickets.filter((t) => t.isSlaBreached).length
-        const awaitingConfirm = allTickets.filter((t) => t.status === 'Resolved (Awaiting Confirmation)').length
-        const closed = allTickets.filter((t) => t.status === 'Closed').length
+        const awaitingConfirm = allTickets.filter((t) => canRateTicket(t.status)).length
+        const closed = allTickets.filter((t) => t.status === 'Closed' || t.status === 'Confirmed & Closed').length
 
         // Average CSAT
         const ratedTickets = allTickets.filter((t) => t.requesterRating > 0)
@@ -150,8 +165,8 @@ function DepartmentTicketingWorkspaceInner({ defaultTab = 'overview', roleOverri
     // ==========================================
     const [isRaiseModalOpen, setIsRaiseModalOpen] = useState(false)
     const [ticketFormData, setTicketFormData] = useState({
-        targetDepartment: 'IT Support',
-        category: 'Projector / Audio-Visual Fault',
+        targetDepartment: 'IT Support & Systems',
+        category: 'Classroom Interactive Smartboard / Projector',
         title: '',
         description: '',
         priority: 'High',
@@ -225,15 +240,17 @@ function DepartmentTicketingWorkspaceInner({ defaultTab = 'overview', roleOverri
                 description: ticketFormData.description,
                 location: ticketFormData.location
             })
-            notify(`Ticket ${result.ticketNumber} raised successfully! Routed to ${result.targetDepartment}.`)
+            const ticketNo = result.ticketNumber || result.id
+            notify(`Ticket ${ticketNo} raised successfully! Routed to ${result.targetDepartment}.`)
             setIsRaiseModalOpen(false)
             setTicketFormData({
-                targetDepartment: 'IT Support',
-                category: 'Projector / Audio-Visual Fault',
+                targetDepartment: 'IT Support & Systems',
+                category: 'Classroom Interactive Smartboard / Projector',
                 title: '',
                 description: '',
                 priority: 'High',
-                location: 'Room 304, Secondary Wing'
+                location: 'Room 304, Secondary Wing',
+                selectedMembers: []
             })
             setRefreshKey((k) => k + 1)
         } catch (err) {
@@ -246,6 +263,7 @@ function DepartmentTicketingWorkspaceInner({ defaultTab = 'overview', roleOverri
         if (!selectedTicketForAssign) return
         try {
             assignTicketToStaff({
+                ticketId: selectedTicketForAssign.id || selectedTicketForAssign.ticketNumber,
                 ticketNumber: selectedTicketForAssign.ticketNumber,
                 assignedStaffId: assignFormData.assignedStaffId,
                 assignedStaffName: assignFormData.assignedStaffName,
@@ -266,6 +284,7 @@ function DepartmentTicketingWorkspaceInner({ defaultTab = 'overview', roleOverri
         if (!selectedTicketForResolve) return
         try {
             updateTicketProgress({
+                ticketId: selectedTicketForResolve.id || selectedTicketForResolve.ticketNumber,
                 ticketNumber: selectedTicketForResolve.ticketNumber,
                 status: resolveFormData.status,
                 updatedByName: authName || 'Technician',
@@ -285,7 +304,9 @@ function DepartmentTicketingWorkspaceInner({ defaultTab = 'overview', roleOverri
         if (!selectedTicketForFeedback) return
         try {
             confirmTicketClosure({
+                ticketId: selectedTicketForFeedback.id || selectedTicketForFeedback.ticketNumber,
                 ticketNumber: selectedTicketForFeedback.ticketNumber,
+                action: 'Confirmed & Closed',
                 requesterRating: feedbackFormData.rating,
                 requesterFeedback: feedbackFormData.feedback,
                 requesterName: authName || selectedTicketForFeedback.raisedByName
@@ -299,8 +320,73 @@ function DepartmentTicketingWorkspaceInner({ defaultTab = 'overview', roleOverri
         }
     }
 
+    const handleExportSlaCsv = () => {
+        try {
+            const headers = [
+                'ticketNumber',
+                'title',
+                'targetDepartment',
+                'priority',
+                'status',
+                'slaHours',
+                'createdDateTime',
+                'targetResolutionDateTime',
+                'assignedStaffName',
+            ]
+            const rows = allTickets.map((t) => ({
+                ticketNumber: t.ticketNumber || t.id || '',
+                title: t.title || t.ticketTitle || '',
+                targetDepartment: t.targetDepartment || '',
+                priority: t.priority || '',
+                status: t.status || '',
+                slaHours: t.slaHours ?? '',
+                createdDateTime: t.createdDateTime || '',
+                targetResolutionDateTime: t.targetResolutionDateTime || '',
+                assignedStaffName: t.assignedStaffName || t.assignedToName || '',
+            }))
+            downloadCsv(`helpdesk-sla-performance-${new Date().toISOString().slice(0, 10)}.csv`, headers, rows)
+            notify(`SLA Performance CSV downloaded (${rows.length} tickets).`)
+        } catch (err) {
+            notify(err.message || 'Failed to export SLA Performance CSV.')
+        }
+    }
+
+    const handleExportFeedbackCsv = () => {
+        try {
+            const rated = allTickets.filter((t) => Number(t.requesterRating) > 0 || t.requesterFeedback)
+            const headers = [
+                'ticketNumber',
+                'title',
+                'targetDepartment',
+                'status',
+                'requesterRating',
+                'requesterFeedback',
+                'raisedByName',
+                'assignedStaffName',
+            ]
+            const rows = rated.map((t) => ({
+                ticketNumber: t.ticketNumber || t.id || '',
+                title: t.title || t.ticketTitle || '',
+                targetDepartment: t.targetDepartment || '',
+                status: t.status || '',
+                requesterRating: t.requesterRating ?? '',
+                requesterFeedback: t.requesterFeedback || '',
+                raisedByName: t.raisedByName || '',
+                assignedStaffName: t.assignedStaffName || '',
+            }))
+            downloadCsv(`helpdesk-feedback-register-${new Date().toISOString().slice(0, 10)}.csv`, headers, rows)
+            notify(`Feedback Register CSV downloaded (${rows.length} rated tickets).`)
+        } catch (err) {
+            notify(err.message || 'Failed to export Feedback Register CSV.')
+        }
+    }
+
     return (
         <div className='space-y-6 p-4 md:p-6 bg-slate-50/50 min-h-screen'>
+            <DataSourceIndicator
+                status='LOCAL ONLY'
+                detail='Helpdesk tickets are stored in browser localStorage. There is no dedicated FastAPI helpdesk domain yet.'
+            />
             {/* Feedback Alert Toast */}
             {actionMessage && (
                 <div className='flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-xs font-semibold text-emerald-800 shadow-2xs'>
@@ -436,12 +522,12 @@ function DepartmentTicketingWorkspaceInner({ defaultTab = 'overview', roleOverri
                     <div className='space-y-3'>
                         <h3 className='text-sm font-semibold text-slate-900'>11 Integrated Department Helpdesks & Standard SLAs</h3>
                         <div className='grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3'>
-                            {DEPARTMENT_CONFIGS.slice(0, 6).map((dept) => {
+                            {departmentConfigs.slice(0, 6).map((dept) => {
                                 const deptTickets = allTickets.filter((t) => t.targetDepartment === dept.name)
-                                const openCount = deptTickets.filter((t) => t.status !== 'Closed').length
+                                const openCount = deptTickets.filter((t) => t.status !== 'Closed' && t.status !== 'Confirmed & Closed').length
                                 return (
                                     <div
-                                        key={dept.id}
+                                        key={dept.code || dept.name}
                                         onClick={() => {
                                             setTicketFormData((prev) => ({ ...prev, targetDepartment: dept.name, category: dept.categories[0] }))
                                             setIsRaiseModalOpen(true)
@@ -449,9 +535,13 @@ function DepartmentTicketingWorkspaceInner({ defaultTab = 'overview', roleOverri
                                         className='rounded-xl border border-slate-200/80 bg-white p-3 hover:border-blue-400 hover:shadow-xs cursor-pointer transition text-xs space-y-1'
                                     >
                                         <div className='font-bold text-slate-900 truncate'>{dept.name}</div>
-                                        <div className='text-slate-500 text-[11px]'>Head: {dept.headOfDepartment}</div>
+                                        <div className='text-slate-500 text-[11px]'>
+                                            Head: {dept.headOfDepartment || 'Not configured'}
+                                        </div>
                                         <div className='flex items-center justify-between pt-1 border-t border-slate-100 text-[10px]'>
-                                            <span className='text-blue-600 font-bold'>SLA: {dept.slaHours}h</span>
+                                            <span className='text-blue-600 font-bold'>
+                                                SLA: {dept.slaHours != null ? `${dept.slaHours}h` : 'Not set'}
+                                            </span>
                                             <span className='font-semibold text-slate-600'>{openCount} active</span>
                                         </div>
                                     </div>
@@ -514,7 +604,7 @@ function DepartmentTicketingWorkspaceInner({ defaultTab = 'overview', roleOverri
                                                 <span className={`font-mono text-[11px] font-semibold ${
                                                     t.isSlaBreached ? 'text-rose-600 font-bold' : 'text-slate-600'
                                                 }`}>
-                                                    {t.slaHours}h target
+                                                    {t.slaHours != null ? `${t.slaHours}h target` : 'SLA not set'}
                                                 </span>
                                             </td>
                                             <td className='py-2.5 px-3 text-center'>
@@ -532,7 +622,7 @@ function DepartmentTicketingWorkspaceInner({ defaultTab = 'overview', roleOverri
                                             </td>
                                             <td className='py-2.5 px-3 text-right'>
                                                 <div className='flex items-center justify-end gap-1'>
-                                                    {t.status === 'Open' && (
+                                                    {isHOD && canAssignTicket(t.status) && (
                                                         <button
                                                             onClick={() => {
                                                                 setSelectedTicketForAssign(t)
@@ -543,7 +633,7 @@ function DepartmentTicketingWorkspaceInner({ defaultTab = 'overview', roleOverri
                                                             Assign
                                                         </button>
                                                     )}
-                                                    {t.status === 'In-Progress' && (
+                                                    {canResolveTicket(t.status) && (
                                                         <button
                                                             onClick={() => {
                                                                 setSelectedTicketForResolve(t)
@@ -554,7 +644,7 @@ function DepartmentTicketingWorkspaceInner({ defaultTab = 'overview', roleOverri
                                                             Resolve
                                                         </button>
                                                     )}
-                                                    {t.status === 'Resolved (Awaiting Confirmation)' && (
+                                                    {canRateTicket(t.status) && (
                                                         <button
                                                             onClick={() => {
                                                                 setSelectedTicketForFeedback(t)
@@ -635,7 +725,7 @@ function DepartmentTicketingWorkspaceInner({ defaultTab = 'overview', roleOverri
                                 </div>
 
                                 <div className='flex items-center justify-end pt-1'>
-                                    {t.status === 'Resolved (Awaiting Confirmation)' && (
+                                    {canRateTicket(t.status) && (
                                         <button
                                             onClick={() => {
                                                 setSelectedTicketForFeedback(t)
@@ -722,7 +812,7 @@ function DepartmentTicketingWorkspaceInner({ defaultTab = 'overview', roleOverri
                                             </td>
                                             <td className='py-3 px-4 text-right'>
                                                 <div className='flex items-center justify-end gap-1.5'>
-                                                    {t.status === 'Open' && (
+                                                    {isHOD && canAssignTicket(t.status) && (
                                                         <button
                                                             onClick={() => {
                                                                 setSelectedTicketForAssign(t)
@@ -733,7 +823,7 @@ function DepartmentTicketingWorkspaceInner({ defaultTab = 'overview', roleOverri
                                                             Assign Staff
                                                         </button>
                                                     )}
-                                                    {t.status === 'In-Progress' && (
+                                                    {canResolveTicket(t.status) && (
                                                         <button
                                                             onClick={() => {
                                                                 setSelectedTicketForResolve(t)
@@ -846,13 +936,15 @@ function DepartmentTicketingWorkspaceInner({ defaultTab = 'overview', roleOverri
                             <p className='text-xs text-slate-500 mb-4'>Download resolution logs & metrics</p>
                             <div className='space-y-2'>
                                 <button
-                                    onClick={() => notify('Helpdesk SLA report exported to CSV.')}
+                                    type='button'
+                                    onClick={handleExportSlaCsv}
                                     className='w-full rounded-xl border border-slate-200 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-1.5'
                                 >
                                     <Download size={14} /> Export SLA Performance (CSV)
                                 </button>
                                 <button
-                                    onClick={() => notify('Customer Satisfaction ratings exported.')}
+                                    type='button'
+                                    onClick={handleExportFeedbackCsv}
                                     className='w-full rounded-xl border border-slate-200 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-1.5'
                                 >
                                     <Download size={14} /> Export Feedback Register (CSV)
@@ -882,12 +974,21 @@ function DepartmentTicketingWorkspaceInner({ defaultTab = 'overview', roleOverri
                                     <label className='font-semibold text-slate-700 mb-1 block'>Target Department</label>
                                     <select
                                         value={ticketFormData.targetDepartment}
-                                        onChange={(e) => setTicketFormData({ ...ticketFormData, targetDepartment: e.target.value })}
+                                        onChange={(e) => {
+                                            const nextDept = e.target.value
+                                            const cats =
+                                                departmentConfigs.find((d) => d.name === nextDept)?.categories || []
+                                            setTicketFormData({
+                                                ...ticketFormData,
+                                                targetDepartment: nextDept,
+                                                category: cats[0] || ticketFormData.category,
+                                            })
+                                        }}
                                         className='w-full rounded-xl border border-slate-200 p-2 focus:border-blue-500 focus:outline-hidden'
                                     >
-                                        {DEPARTMENT_CONFIGS.map((d) => (
-                                            <option key={d.id} value={d.name}>
-                                                {d.name} (SLA: {d.slaHours}h)
+                                        {departmentConfigs.map((d) => (
+                                            <option key={d.code || d.name} value={d.name}>
+                                                {d.name} (SLA: {d.slaHours != null ? `${d.slaHours}h` : 'n/a'})
                                             </option>
                                         ))}
                                     </select>
@@ -990,6 +1091,26 @@ function DepartmentTicketingWorkspaceInner({ defaultTab = 'overview', roleOverri
                                         </button>
                                     )}
                                 </div>
+                            </div>
+
+                            <div>
+                                <label className='font-semibold text-slate-700 mb-1 block'>Issue Category</label>
+                                <select
+                                    value={ticketFormData.category}
+                                    onChange={(e) => setTicketFormData({ ...ticketFormData, category: e.target.value })}
+                                    className='w-full rounded-xl border border-slate-200 p-2 focus:border-blue-500 focus:outline-hidden'
+                                    required
+                                >
+                                    {(
+                                        departmentConfigs.find((d) => d.name === ticketFormData.targetDepartment)?.categories ||
+                                        departmentConfigs[0]?.categories ||
+                                        []
+                                    ).map((cat) => (
+                                        <option key={cat} value={cat}>
+                                            {cat}
+                                        </option>
+                                    ))}
+                                </select>
                             </div>
 
                             <div>

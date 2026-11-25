@@ -34,9 +34,11 @@ import {
     TrendingUp,
     Store,
     CheckSquare,
-    Trash2
+    Trash2,
+    Pencil
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
+import { DataSourceIndicator } from '../ui'
 import { purchaseService } from '../../services/modules/purchaseService'
 import { inventoryService } from '../../services/modules/inventoryService'
 import { getProfileLabel } from '../../Pages/Authentication/profileOptions'
@@ -51,6 +53,8 @@ import {
     getVendors,
     saveVendors,
     submitMaterialRequisition,
+    updateMaterialRequisition,
+    canEditMaterialRequisition,
     updateRequisitionApproval,
     issueMaterialFromStore,
     createPurchaseOrder,
@@ -81,30 +85,42 @@ import {
 
 function StoresProcurementWorkspaceInner({ defaultTab = 'overview', roleOverride = null }) {
     const { role: authRole, email: authEmail, name: authName } = useAuth()
+    const navigate = useNavigate()
+    const location = useLocation()
+    const { tab: routeTab } = useParams()
     const activeRole = roleOverride || authRole || 'stationery-store-manager'
+    const roleNorm = String(activeRole || '').trim().toLowerCase().replace(/_/g, '-')
+    const roleCompact = roleNorm.replace(/-/g, '')
     const roleLabel = getProfileLabel(activeRole)
 
-    // Role Capabilities
-    const isExecutiveOrAdmin = ['director', 'principal', 'super-admin', 'admin'].includes(activeRole)
-    const isStoreManager = ['stationery-store-manager', 'admin', 'super-admin'].includes(activeRole)
-    const isAccounts = ['account-head', 'director', 'admin'].includes(activeRole)
-    const isDepartmentHead = [
-        'stationery-store-manager',
-        'transport-manager',
-        'it-support-manager',
-        'gatekeeper-manager',
-        'housekeeping-manager',
-        'maintenance-manager',
-        'maintenancemanager',
-        'canteen-manager',
-        'coordinator',
-        'account-head'
-    ].includes(activeRole)
+    const roleMatches = (...candidates) => {
+        const set = new Set(candidates.map((c) => String(c).toLowerCase().replace(/_/g, '-').replace(/-/g, '')))
+        return set.has(roleCompact)
+    }
 
-    // Active Tab & Feedback State
-    const [activeTab, setActiveTab] = useState(defaultTab)
+    // Role Capabilities (accept hyphenated + compact auth role keys)
+    const isExecutiveOrAdmin = roleMatches('director', 'principal', 'super-admin', 'superadmin', 'admin')
+    const isStoreManager = roleMatches('stationery-store-manager', 'stationerystoremanager', 'admin', 'super-admin', 'superadmin')
+    const isAccounts = roleMatches('account-head', 'accounthead', 'director', 'admin', 'super-admin', 'superadmin')
+    const isDepartmentHead = roleMatches(
+        'stationery-store-manager', 'stationerystoremanager',
+        'transport-manager', 'transportmanager',
+        'it-support-manager', 'itsupportmanager',
+        'gatekeeper-manager', 'gatekeepermanager',
+        'housekeeping-manager', 'housekeepingmanager',
+        'maintenance-manager', 'maintenancemanager',
+        'canteen-manager', 'canteenmanager',
+        'coordinator',
+        'account-head', 'accounthead',
+        'super-admin', 'superadmin', 'admin',
+    )
+
+    // Active Tab & Feedback State — prefer route :tab when present
+    const initialTab = routeTab || defaultTab || 'overview'
+    const [activeTab, setActiveTab] = useState(initialTab)
     const [actionMessage, setActionMessage] = useState('')
     const [refreshKey, setRefreshKey] = useState(0)
+    const [editingRequisition, setEditingRequisition] = useState(null)
 
     const notify = (msg) => {
         setActionMessage(msg)
@@ -186,12 +202,30 @@ function StoresProcurementWorkspaceInner({ defaultTab = 'overview', roleOverride
     }, [isStoreManager, isExecutiveOrAdmin, isDepartmentHead])
 
     useEffect(() => {
-        if (defaultTab && availableTabs.some((t) => t.id === defaultTab)) {
-            setActiveTab(defaultTab)
-        } else if (!availableTabs.some((t) => t.id === activeTab)) {
+        const target = routeTab || defaultTab
+        if (target && availableTabs.some((t) => t.id === target)) {
+            setActiveTab(target)
+            return
+        }
+        if (!availableTabs.some((t) => t.id === activeTab)) {
             setActiveTab(availableTabs[0]?.id || 'inventory')
         }
-    }, [defaultTab, availableTabs, activeTab])
+        // Intentionally exclude activeTab from deps so user tab clicks are not reset to defaultTab
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [routeTab, defaultTab, availableTabs])
+
+    const handleTabChange = useCallback((tabId) => {
+        setActiveTab(tabId)
+        const base = location.pathname.replace(/\/stores-procurement(?:\/[^/]+)?$/, '/stores-procurement')
+            .replace(/\/stores$/, '/stores-procurement')
+        // Prefer route sync when under stores-procurement path
+        if (location.pathname.includes('/stores-procurement')) {
+            const next = `${base.replace(/\/$/, '')}/${tabId}`
+            if (next !== location.pathname) {
+                navigate(next)
+            }
+        }
+    }, [location.pathname, navigate])
 
     // ==========================================
     // METRICS / KPIS
@@ -728,6 +762,22 @@ function StoresProcurementWorkspaceInner({ defaultTab = 'overview', roleOverride
     // ==========================================
     // ACTION HANDLERS
     // ==========================================
+    const openEditRequisition = (req) => {
+        if (!canEditMaterialRequisition(req)) {
+            notify(`Editing unavailable — status is "${req.status}". Requests lock after HOD approval.`)
+            return
+        }
+        setEditingRequisition(req)
+        setReqFormData({
+            department: req.department || 'Academic - Secondary',
+            requiredByDate: req.requiredByDate || req.requiredDate || '2026-11-10',
+            urgency: req.urgency || req.priority || 'Medium',
+            purpose: req.purpose || '',
+            selectedItems: (req.items || req.requestedItems || []).map((it) => ({ ...it })),
+        })
+        setIsRequisitionModalOpen(true)
+    }
+
     const handleRequisitionSubmit = (e) => {
         e.preventDefault()
         if (reqFormData.selectedItems.length === 0) {
@@ -735,19 +785,35 @@ function StoresProcurementWorkspaceInner({ defaultTab = 'overview', roleOverride
             return
         }
         try {
-            const result = submitMaterialRequisition({
-                requestingEmployeeId: 'EMP-SEC-012',
-                requestingEmployeeName: authName || 'Sunita Verma',
-                requestingEmployeeEmail: authEmail || 'sunita.verma@school.edu',
-                department: reqFormData.department,
-                reportingManager: 'Dr. Kavita Sharma',
-                urgency: reqFormData.urgency,
-                requiredByDate: reqFormData.requiredByDate,
-                purpose: reqFormData.purpose || 'Classroom / Lab instructional supplies',
-                requestedItems: reqFormData.selectedItems
-            })
-            notify(`Requisition ${result.id} submitted successfully!`)
+            if (editingRequisition?.id) {
+                const result = updateMaterialRequisition(
+                    editingRequisition.id,
+                    {
+                        department: reqFormData.department,
+                        urgency: reqFormData.urgency,
+                        requiredByDate: reqFormData.requiredByDate,
+                        purpose: reqFormData.purpose || 'Classroom / Lab instructional supplies',
+                        requestedItems: reqFormData.selectedItems,
+                    },
+                    authName || 'Requester'
+                )
+                notify(`Requisition ${result.id} updated successfully!`)
+            } else {
+                const result = submitMaterialRequisition({
+                    requestingEmployeeId: 'EMP-SEC-012',
+                    requestingEmployeeName: authName || 'Sunita Verma',
+                    requestingEmployeeEmail: authEmail || 'sunita.verma@school.edu',
+                    department: reqFormData.department,
+                    reportingManager: 'Dr. Kavita Sharma',
+                    urgency: reqFormData.urgency,
+                    requiredByDate: reqFormData.requiredByDate,
+                    purpose: reqFormData.purpose || 'Classroom / Lab instructional supplies',
+                    requestedItems: reqFormData.selectedItems
+                })
+                notify(`Requisition ${result.id} submitted successfully!`)
+            }
             setIsRequisitionModalOpen(false)
+            setEditingRequisition(null)
             setReqFormData({
                 department: 'Academic - Secondary',
                 requiredByDate: '2026-11-10',
@@ -952,6 +1018,10 @@ function StoresProcurementWorkspaceInner({ defaultTab = 'overview', roleOverride
 
     return (
         <div className='space-y-6 p-4 md:p-6 bg-slate-50/50 min-h-screen'>
+            <DataSourceIndicator
+                status='LOCAL ONLY'
+                detail='Stores & Procurement uses browser/local demo data. Dedicated purchase APIs are not the authoritative SoT for this workspace.'
+            />
             {/* Feedback Alert Toast */}
             {actionMessage && (
                 <div className='flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-xs font-semibold text-emerald-800 shadow-2xs'>
@@ -1001,22 +1071,23 @@ function StoresProcurementWorkspaceInner({ defaultTab = 'overview', roleOverride
 
             {/* Navigation Tabs Bar */}
             <div className='border-b border-slate-200/80 pb-px'>
-                <div className='flex items-center gap-2 overflow-x-auto scrollbar-none'>
+                <div className='flex flex-wrap items-center gap-1 sm:gap-2'>
                     {availableTabs.map((tab) => {
                         const Icon = tab.icon
                         const isActive = activeTab === tab.id
                         return (
                             <button
                                 key={tab.id}
-                                onClick={() => setActiveTab(tab.id)}
-                                className={`inline-flex items-center gap-2 border-b-2 px-4 py-2.5 text-xs font-semibold transition whitespace-nowrap ${
+                                type='button'
+                                onClick={() => handleTabChange(tab.id)}
+                                className={`inline-flex items-center gap-1.5 border-b-2 px-2.5 sm:px-3.5 py-2.5 text-[11px] sm:text-xs font-semibold transition max-w-full ${
                                     isActive
                                         ? 'border-blue-600 text-blue-600'
                                         : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300'
                                 }`}
                             >
-                                <Icon size={14} className={isActive ? 'text-blue-600' : 'text-slate-400'} />
-                                <span>{tab.label}</span>
+                                <Icon size={14} className={`shrink-0 ${isActive ? 'text-blue-600' : 'text-slate-400'}`} />
+                                <span className='whitespace-normal text-left leading-snug'>{tab.label}</span>
                                 {tab.id === 'requisitions' && kpis.pendingRequisitionsCount > 0 && (
                                     <span className='rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold px-1.5 py-0.2'>
                                         {kpis.pendingRequisitionsCount}
@@ -1116,8 +1187,8 @@ function StoresProcurementWorkspaceInner({ defaultTab = 'overview', roleOverride
                                     <p className='text-xs text-slate-500'>Items where current stock is equal to or below minimum threshold</p>
                                 </div>
                                 <button
-                                    onClick={() => setActiveTab('requirements')}
-                                    className='text-xs font-semibold text-blue-600 hover:text-blue-700'
+                                    onClick={() => handleTabChange('requirements')}
+                                    className='text-xs font-semibold text-blue-600 hover:text-blue-700 cursor-pointer'
                                 >
                                     View Restock RFQ →
                                 </button>
@@ -1188,7 +1259,7 @@ function StoresProcurementWorkspaceInner({ defaultTab = 'overview', roleOverride
                                     <p className='text-xs text-slate-500'>Department requests awaiting dispatch</p>
                                 </div>
                                 <button
-                                    onClick={() => setActiveTab('requisitions')}
+                                    onClick={() => handleTabChange('requisitions')}
                                     className='text-xs font-semibold text-blue-600 hover:text-blue-700'
                                 >
                                     All ({requisitions.length})
@@ -1701,7 +1772,22 @@ function StoresProcurementWorkspaceInner({ defaultTab = 'overview', roleOverride
                                                 )}
                                             </td>
                                             <td className='py-3 px-4 text-right'>
-                                                <div className='flex items-center justify-end gap-1.5'>
+                                                <div className='flex items-center justify-end gap-1.5 flex-wrap'>
+                                                    {canEditMaterialRequisition(req) && (
+                                                        <button
+                                                            type='button'
+                                                            onClick={() => openEditRequisition(req)}
+                                                            className='rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-200 inline-flex items-center gap-1 cursor-pointer'
+                                                            title='Edit request before HOD approval'
+                                                        >
+                                                            <Pencil size={11} /> Edit
+                                                        </button>
+                                                    )}
+                                                    {!canEditMaterialRequisition(req) && (req.status === 'HOD Approved' || req.status === 'Approved by HOD' || req.status === 'Issued' || req.status === 'Collected / Closed' || req.status === 'Rejected' || req.status === 'Rejected by HOD') && (
+                                                        <span className='text-[10px] text-slate-400 max-w-[9rem] text-right leading-snug' title={`Locked: ${req.status}`}>
+                                                            Edit locked ({req.status})
+                                                        </span>
+                                                    )}
                                                     {(req.status === 'Pending HOD Approval' || req.status === 'Submitted') && (isDepartmentHead || isExecutiveOrAdmin) && (
                                                         <>
                                                             <button
@@ -2525,17 +2611,26 @@ function StoresProcurementWorkspaceInner({ defaultTab = 'overview', roleOverride
             {/* MODAL: SUBMIT REQUISITION                                                 */}
             {/* ========================================================================= */}
             {isRequisitionModalOpen && (
-                <div className='fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-xs'>
-                    <div className='w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto'>
-                        <div className='flex items-center justify-between border-b border-slate-100 pb-3'>
-                            <h3 className='text-base font-bold text-slate-900'>Raise Material Requisition</h3>
-                            <button onClick={() => setIsRequisitionModalOpen(false)} className='text-slate-400 hover:text-slate-600'>
+                <div className='fixed inset-0 z-[400] flex items-start sm:items-center justify-center bg-slate-900/40 p-3 sm:p-4 backdrop-blur-xs overflow-y-auto'>
+                    <div className='w-full max-w-xl my-4 sm:my-0 rounded-2xl bg-white shadow-xl border border-slate-200 max-h-[min(92vh,900px)] flex flex-col overflow-hidden'>
+                        <div className='flex items-center justify-between border-b border-slate-100 px-4 sm:px-6 py-3 shrink-0'>
+                            <h3 className='text-base font-bold text-slate-900'>
+                                {editingRequisition ? `Edit Request ${editingRequisition.id}` : 'Raise Material Requisition'}
+                            </h3>
+                            <button
+                                type='button'
+                                onClick={() => {
+                                    setIsRequisitionModalOpen(false)
+                                    setEditingRequisition(null)
+                                }}
+                                className='text-slate-400 hover:text-slate-600'
+                            >
                                 <X size={18} />
                             </button>
                         </div>
 
-                        <form onSubmit={handleRequisitionSubmit} className='space-y-4 text-xs'>
-                            <div className='grid grid-cols-2 gap-3'>
+                        <form onSubmit={handleRequisitionSubmit} className='space-y-4 text-xs px-4 sm:px-6 py-4 overflow-y-auto flex-1 min-h-0'>
+                            <div className='grid grid-cols-1 sm:grid-cols-2 gap-3'>
                                 <div>
                                     <label className='font-semibold text-slate-700 mb-1 block'>Department</label>
                                     <select
@@ -2915,10 +3010,13 @@ function StoresProcurementWorkspaceInner({ defaultTab = 'overview', roleOverride
                                 )}
                             </div>
 
-                            <div className='flex justify-end gap-2 pt-2 border-t border-slate-100'>
+                            <div className='flex justify-end gap-2 pt-2 border-t border-slate-100 sticky bottom-0 bg-white'>
                                 <button
                                     type='button'
-                                    onClick={() => setIsRequisitionModalOpen(false)}
+                                    onClick={() => {
+                                        setIsRequisitionModalOpen(false)
+                                        setEditingRequisition(null)
+                                    }}
                                     className='rounded-xl border border-slate-200 px-4 py-2 font-semibold text-slate-600 hover:bg-slate-50'
                                 >
                                     Cancel
@@ -2927,7 +3025,7 @@ function StoresProcurementWorkspaceInner({ defaultTab = 'overview', roleOverride
                                     type='submit'
                                     className='rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700'
                                 >
-                                    Submit Requisition
+                                    {editingRequisition ? 'Save Changes' : 'Submit Requisition'}
                                 </button>
                             </div>
                         </form>

@@ -15,6 +15,8 @@ import {
     defaultExamTimetableForm,
     generateExamId,
 } from './examinationTimetableData'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { createExam, submitExam } from '../../../services/api/examsApiService'
 
 const inputClass =
     'text-sm font-normal text-[#1E1E1E] border border-[#D9D9D9] rounded-md px-2 py-3 w-full'
@@ -46,11 +48,61 @@ const CreateExaminationTimetable = () => {
         return nextErrors.length === 0
     }
 
-    const handleSubmit = () => {
+    const toIsoDate = (value) => {
+        if (!value) return null
+        if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value
+        const date = value instanceof Date ? value : new Date(value)
+        if (Number.isNaN(date.getTime())) return null
+        const yyyy = date.getFullYear()
+        const mm = String(date.getMonth() + 1).padStart(2, '0')
+        const dd = String(date.getDate()).padStart(2, '0')
+        return `${yyyy}-${mm}-${dd}`
+    }
+
+    const handleSubmit = async () => {
         if (!validate()) return
         try {
-            addExamTimetable(form)
-            toast.success('Examination timetable created successfully!')
+            let approvalId = null
+            let examId = form.examId
+
+            if (isLiveApiEnabled() && form.status === 'Published') {
+                const created = await createExam({
+                    examName: form.examName,
+                    className: `${form.className} - ${form.section}`,
+                    startDateIso: toIsoDate(form.startDate) || toIsoDate(new Date()),
+                    endDateIso: toIsoDate(form.endDate) || toIsoDate(form.startDate) || toIsoDate(new Date()),
+                    examType: 'MIDTERM',
+                })
+                if (!created.success) {
+                    toast.error(created.error || 'Live exam create failed.')
+                    return
+                }
+                examId = created.data?.id || examId
+                const submitted = await submitExam(examId)
+                if (!submitted.success) {
+                    toast.error(submitted.error || 'Live exam submit for Director approval failed.')
+                    return
+                }
+                approvalId = submitted.data?.approvalId || created.data?.approvalId || null
+                if (!approvalId) {
+                    toast.warn(
+                        'Exam submitted locally but backend did not return approvalId; Director approve may not persist after re-login.',
+                    )
+                }
+            }
+
+            addExamTimetable({
+                ...form,
+                id: examId,
+                examId,
+                approvalId,
+                status: form.status || 'Published',
+            })
+            toast.success(
+                form.status === 'Published'
+                    ? 'Examination timetable submitted for Director approval.'
+                    : 'Examination timetable saved as draft.'
+            )
             navigate(ROUTE_BASE)
         } catch (err) {
             toast.error('Failed to create examination timetable: ' + err.message)

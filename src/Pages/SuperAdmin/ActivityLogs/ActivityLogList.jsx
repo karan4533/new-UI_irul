@@ -4,6 +4,7 @@ import { NavLink, useSearchParams } from 'react-router-dom'
 import {
     DataTable,
     DataToolbar,
+    DataSourceIndicator,
     FeedbackState,
     PageHeader,
     Pagination,
@@ -188,7 +189,11 @@ const ActivityLogList = ({ logType }) => {
                     emptyTitle='No audit records found'
                     emptyDescription='No records match the selected query, status and date range.'
                     renderActions={(record) => (
-                        <NavLink to={`${ROUTE_BASE}/view/${record.id}`} className='inline-flex min-h-9 items-center gap-1 rounded-lg border border-[var(--erp-line-strong)] px-3 text-xs font-semibold text-[var(--erp-ink)]'>
+                        <NavLink
+                            to={`${ROUTE_BASE}/${encodeURIComponent(logType)}/view/${encodeURIComponent(record.id)}`}
+                            state={{ fromLogType: logType }}
+                            className='inline-flex min-h-9 items-center gap-1 rounded-lg border border-[var(--erp-line-strong)] px-3 text-xs font-semibold text-[var(--erp-ink)]'
+                        >
                             Inspect <ArrowUpRight aria-hidden='true' size={14} />
                         </NavLink>
                     )}

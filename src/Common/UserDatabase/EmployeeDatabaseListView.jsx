@@ -246,6 +246,7 @@ const EmployeeDatabaseListView = ({
                                 <th scope='col' className='px-4 py-3'>Unique ID</th>
                                 <th scope='col' className='px-4 py-3'>Department</th>
                                 <th scope='col' className='px-4 py-3'>Designation</th>
+                                <th scope='col' className='px-4 py-3'>{academicYear} Assignment</th>
                                 <th scope='col' className='px-4 py-3 text-center'>Current Status</th>
                                 <th scope='col' className='px-4 py-3 text-center'>Attendance</th>
                                 <th scope='col' className='px-4 py-3 text-right'>Action</th>
@@ -254,7 +255,7 @@ const EmployeeDatabaseListView = ({
                         <tbody className='divide-y divide-slate-100'>
                             {paginatedTeachers.length === 0 ? (
                                 <tr>
-                                    <td colSpan={8} className='px-4 py-12 text-center text-slate-500'>
+                                    <td colSpan={9} className='px-4 py-12 text-center text-slate-500'>
                                         <Users size={32} className='mx-auto text-slate-300 mb-2' />
                                         No teachers or employees found matching your search criteria.
                                     </td>
@@ -297,6 +298,16 @@ const EmployeeDatabaseListView = ({
                                         {/* Designation */}
                                         <td className='px-4 py-3 text-xs text-slate-600'>
                                             {teacher.designation}
+                                        </td>
+
+                                        {/* Year-dependent assignment */}
+                                        <td className='px-4 py-3 text-xs text-slate-700 max-w-[220px]'>
+                                            <div className={teacher.hasYearAssignment ? 'font-medium text-slate-800' : 'text-amber-700'}>
+                                                {teacher.assignedClassesLabel}
+                                            </div>
+                                            {teacher.hasYearAssignment && (
+                                                <div className='text-[11px] text-slate-500 mt-0.5'>{teacher.subjectsLabel}</div>
+                                            )}
                                         </td>
 
                                         {/* Current Status */}

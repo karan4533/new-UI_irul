@@ -169,9 +169,14 @@ export const markedStatusBadgeColor = {
 }
 
 const parseAttendanceDate = (value) => {
-    const [day, month, year] = value.split('-').map(Number)
-    if (!day || !month || !year) return null
-    return new Date(year, month - 1, day)
+    if (!value) return null
+    const parts = String(value).split('-').map(Number)
+    if (parts.length !== 3 || parts.some((n) => !n)) return null
+    // Support YYYY-MM-DD (API) and DD-MM-YYYY (legacy demo).
+    if (String(parts[0]).length === 4) {
+        return new Date(parts[0], parts[1] - 1, parts[2])
+    }
+    return new Date(parts[2], parts[1] - 1, parts[0])
 }
 
 export const filterAttendanceHistory = ({
@@ -190,7 +195,7 @@ export const filterAttendanceHistory = ({
         record.classSection,
         record.busStop,
         record.location,
-    ].some((field) => field.toLowerCase().includes(query))
+    ].some((field) => String(field || '').toLowerCase().includes(query))
 
     const matchesPeriod = !period || record.period === period
     const matchesPhase = !phase || record.phase === phase

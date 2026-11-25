@@ -110,6 +110,8 @@ const EscalationForm = ({ form, onChange, roleConfig, readOnly = false, recipien
                     options={recipientOptions}
                     value={form.recipientUserId || ''}
                     onChange={(recipientUserId) => onChange?.({ ...form, recipientUserId })}
+                    options={recipientOptions}
+                    disabled={recipientsLoading}
                 />
             ) : (
                 <div className='flex flex-col gap-y-2 sm:col-span-2'>

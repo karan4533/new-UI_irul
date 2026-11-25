@@ -1,15 +1,23 @@
-import React, { useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import DatePicker from 'react-datepicker'
 import 'react-datepicker/dist/react-datepicker.css'
 import { Calendar, ChevronLeft, ChevronRight, Download, Eye } from 'lucide-react'
+import { toast } from 'react-toastify'
 import ExportModal from '../../../Common/CommonComponents/ExportModal'
 import TimeTableModal from './Components/TimeTableModal'
 import DenyTimetableModal from '../Components/DenyTimetableModal'
 import {
     APPROVAL_STATUSES,
-    EXAM_TIMETABLE_APPROVALS,
+    EXAM_TIMETABLE_UPDATED_EVENT,
     approvalStatusColor,
+    getDirectorExamApprovals,
+    getExamTimetableById,
+    syncSharedExamsFromLiveRows,
+    updateExamApprovalStatus,
 } from '../timetableApprovalsData'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { decideExamApproval, listExams } from '../../../services/api/examsApiService'
+import { buildExamGridFromTimelines } from '../../../Common/ExaminationTimetable/examinationTimetableShared'
 
 const ExamApprovals = () => {
     const [fromDate, setFromDate] = useState(new Date())
@@ -20,28 +28,99 @@ const ExamApprovals = () => {
     const [selectedEntry, setSelectedEntry] = useState(null)
     const [search, setSearch] = useState('')
     const [statusFilter, setStatusFilter] = useState('')
-    const [approvals, setApprovals] = useState(() => [...EXAM_TIMETABLE_APPROVALS])
+    const [approvals, setApprovals] = useState([])
+    const [loading, setLoading] = useState(true)
+    const [sourceLabel, setSourceLabel] = useState('Shared timetable register')
+    const [busyId, setBusyId] = useState(null)
+
+    const loadApprovals = useCallback(async () => {
+        setLoading(true)
+        try {
+            const shared = getDirectorExamApprovals()
+            if (isLiveApiEnabled()) {
+                const res = await listExams()
+                if (res.success) {
+                    const liveRows = (res.data || []).filter((row) => row.approvalStatus !== 'Draft')
+                    syncSharedExamsFromLiveRows(liveRows)
+                    if (liveRows.length === 0) {
+                        setApprovals(shared)
+                        setSourceLabel('Shared Principal↔Director register (live exams empty)')
+                        return
+                    }
+                    // Merge: live wins on id collision; keep Principal shared rows missing from live.
+                    const liveIds = new Set(liveRows.map((row) => String(row.id)))
+                    const extras = shared.filter((row) => !liveIds.has(String(row.id)))
+                    setApprovals([...liveRows, ...extras])
+                    setSourceLabel(
+                        extras.length > 0
+                            ? 'Live /api/v1/exams + shared Principal submissions'
+                            : 'Live /api/v1/exams',
+                    )
+                    return
+                }
+                toast.error(res.error || 'Unable to load live exam approvals; showing shared register.')
+            }
+            setApprovals(shared)
+            setSourceLabel('Shared Principal↔Director register')
+        } finally {
+            setLoading(false)
+        }
+    }, [])
+
+    useEffect(() => {
+        loadApprovals()
+        const onUpdate = () => {
+            if (!isLiveApiEnabled()) {
+                setApprovals(getDirectorExamApprovals())
+            }
+        }
+        window.addEventListener(EXAM_TIMETABLE_UPDATED_EVENT, onUpdate)
+        window.addEventListener('focus', loadApprovals)
+        return () => {
+            window.removeEventListener(EXAM_TIMETABLE_UPDATED_EVENT, onUpdate)
+            window.removeEventListener('focus', loadApprovals)
+        }
+    }, [loadApprovals])
 
     const filteredApprovals = useMemo(() => {
         const query = search.trim().toLowerCase()
         return approvals.filter((item) => {
             const matchesStatus = !statusFilter || item.approvalStatus === statusFilter
+            const classLabel = item.classSection || `${item.className || ''} ${item.section || ''}`
             const matchesSearch = !query
-                || item.id.toLowerCase().includes(query)
-                || item.examName.toLowerCase().includes(query)
-                || item.classSection.toLowerCase().includes(query)
+                || String(item.id || '').toLowerCase().includes(query)
+                || String(item.examName || '').toLowerCase().includes(query)
+                || classLabel.toLowerCase().includes(query)
             return matchesStatus && matchesSearch
         })
     }, [approvals, search, statusFilter])
 
-    const handleApprove = (id) => {
-        setApprovals((prev) =>
-            prev.map((item) =>
-                item.id === id
-                    ? { ...item, approvalStatus: 'Approved', rejectionReason: '' }
-                    : item,
-            ),
-        )
+    const handleApprove = async (entry) => {
+        setBusyId(entry.id)
+        try {
+            if (isLiveApiEnabled() && entry.approvalId) {
+                const res = await decideExamApproval(entry.approvalId, { decision: 'approve' })
+                if (!res.success) {
+                    toast.error(res.error || 'Approval failed.')
+                    return
+                }
+                toast.success(`${entry.examName} approved.`)
+                await loadApprovals()
+                return
+            }
+            if (isLiveApiEnabled() && !entry.approvalId) {
+                toast.warn(
+                    'No backend approvalId on this row (seed/shared-only). Saved to browser storage; re-login will not restore from DB.',
+                )
+            }
+            const saved = updateExamApprovalStatus(entry.id, 'Approved')
+            setApprovals(getDirectorExamApprovals())
+            toast.success(`${saved.examName} marked Approved and persisted.`)
+        } catch (err) {
+            toast.error(err.message || 'Failed to approve timetable.')
+        } finally {
+            setBusyId(null)
+        }
     }
 
     const openDenyModal = (entry) => {
@@ -49,23 +128,56 @@ const ExamApprovals = () => {
         setDenyModal(true)
     }
 
-    const handleDenyConfirm = (reason) => {
+    const handleDenyConfirm = async (reason) => {
         if (!selectedEntry) return
-        setApprovals((prev) =>
-            prev.map((item) =>
-                item.id === selectedEntry.id
-                    ? { ...item, approvalStatus: 'Denied', rejectionReason: reason }
-                    : item,
-            ),
-        )
-        setDenyModal(false)
-        setSelectedEntry(null)
+        setBusyId(selectedEntry.id)
+        try {
+            if (isLiveApiEnabled() && selectedEntry.approvalId) {
+                const res = await decideExamApproval(selectedEntry.approvalId, {
+                    decision: 'deny',
+                    comment: reason,
+                })
+                if (!res.success) {
+                    toast.error(res.error || 'Denial failed.')
+                    return
+                }
+                toast.success(`${selectedEntry.examName} denied.`)
+                setDenyModal(false)
+                setSelectedEntry(null)
+                await loadApprovals()
+                return
+            }
+            if (isLiveApiEnabled() && !selectedEntry.approvalId) {
+                toast.warn(
+                    'No backend approvalId on this row (seed/shared-only). Denial saved locally only.',
+                )
+            }
+            updateExamApprovalStatus(selectedEntry.id, 'Denied', reason)
+            setApprovals(getDirectorExamApprovals())
+            toast.success(`${selectedEntry.examName} denial persisted.`)
+            setDenyModal(false)
+            setSelectedEntry(null)
+        } catch (err) {
+            toast.error(err.message || 'Failed to deny timetable.')
+        } finally {
+            setBusyId(null)
+        }
+    }
+
+    const openTimetable = (entry) => {
+        const full = getExamTimetableById(entry.id) || entry
+        setSelectedEntry(full)
+        setTimeTableModal(true)
     }
 
     const clearFilters = () => {
         setSearch('')
         setStatusFilter('')
     }
+
+    const grid = selectedEntry
+        ? buildExamGridFromTimelines(selectedEntry.timelines || [])
+        : null
 
     return (
         <section>
@@ -79,7 +191,7 @@ const ExamApprovals = () => {
                         Clear Filters
                     </button>
                     <p className='text-sm text-[#667085]'>
-                        Examination timetables submitted by the Principal for Director approval.
+                        Examination timetables submitted by the Principal for Director approval. Source: {sourceLabel}.
                     </p>
                 </div>
                 <div className='grid grid-cols-1 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 lg:mt-6 mt-2'>
@@ -169,7 +281,13 @@ const ExamApprovals = () => {
                             </tr>
                         </thead>
                         <tbody>
-                            {filteredApprovals.length === 0 ? (
+                            {loading ? (
+                                <tr>
+                                    <td colSpan={10} className='px-2 py-8 text-center text-[#667085]'>
+                                        Loading exam timetable approvals…
+                                    </td>
+                                </tr>
+                            ) : filteredApprovals.length === 0 ? (
                                 <tr>
                                     <td colSpan={10} className='px-2 py-8 text-center text-[#667085]'>
                                         No exam timetable approvals found.
@@ -180,11 +298,11 @@ const ExamApprovals = () => {
                                     <tr key={entry.id} className='border-b text-[#667085] border-[#f2f4f7] hover:bg-[#f2f4f7] rounded-lg'>
                                         <td className='px-2 py-4 rounded-s-lg font-medium text-[#1E1E1E]'>{entry.id}</td>
                                         <td className='px-2 py-4'>{entry.examName}</td>
-                                        <td className='px-2 py-4'>{entry.classSection}</td>
+                                        <td className='px-2 py-4'>{entry.classSection || `${entry.className || ''} - ${entry.section || ''}`}</td>
                                         <td className='px-2 py-4'>{entry.startDate}</td>
                                         <td className='px-2 py-4'>{entry.endDate}</td>
-                                        <td className='px-2 py-4'>{entry.submittedBy}</td>
-                                        <td className='px-2 py-4'>{entry.submittedDate}</td>
+                                        <td className='px-2 py-4'>{entry.submittedBy || 'Principal'}</td>
+                                        <td className='px-2 py-4'>{entry.submittedDate || entry.createdDate}</td>
                                         <td className='px-2 py-4'>
                                             <span className={`inline-block text-sm font-medium border rounded-md px-2 py-1 whitespace-nowrap ${approvalStatusColor[entry.approvalStatus]}`}>
                                                 {entry.approvalStatus}
@@ -198,7 +316,7 @@ const ExamApprovals = () => {
                                         <td className='px-2 py-4'>
                                             <button
                                                 type='button'
-                                                onClick={() => setTimeTableModal(true)}
+                                                onClick={() => openTimetable(entry)}
                                                 className='bg-[#515DEF] text-white text-sm px-2 py-1.5 rounded-md hover:opacity-90 transition-all duration-200 cursor-pointer flex items-center gap-x-2'
                                             >
                                                 <Eye size={16} />
@@ -210,15 +328,17 @@ const ExamApprovals = () => {
                                                 <div className='flex flex-wrap gap-2'>
                                                     <button
                                                         type='button'
-                                                        onClick={() => handleApprove(entry.id)}
-                                                        className='bg-[#4CAF50] text-white text-xs px-3 py-1.5 rounded-md hover:opacity-90 transition-all duration-200 cursor-pointer'
+                                                        disabled={busyId === entry.id}
+                                                        onClick={() => handleApprove(entry)}
+                                                        className='bg-[#4CAF50] text-white text-xs px-3 py-1.5 rounded-md hover:opacity-90 transition-all duration-200 cursor-pointer disabled:opacity-60'
                                                     >
                                                         Approve
                                                     </button>
                                                     <button
                                                         type='button'
+                                                        disabled={busyId === entry.id}
                                                         onClick={() => openDenyModal(entry)}
-                                                        className='bg-[#980E0F] text-white text-xs px-3 py-1.5 rounded-md hover:opacity-90 transition-all duration-200 cursor-pointer'
+                                                        className='bg-[#980E0F] text-white text-xs px-3 py-1.5 rounded-md hover:opacity-90 transition-all duration-200 cursor-pointer disabled:opacity-60'
                                                     >
                                                         Deny
                                                     </button>
@@ -253,7 +373,14 @@ const ExamApprovals = () => {
             </div>
 
             <ExportModal exportModal={exportModal} setExportModal={setExportModal} />
-            <TimeTableModal timeTableModal={timeTableModal} setTimeTableModal={setTimeTableModal} />
+            <TimeTableModal
+                timeTableModal={timeTableModal}
+                setTimeTableModal={setTimeTableModal}
+                title={selectedEntry?.modalTitle || selectedEntry?.examName}
+                days={grid?.days}
+                timeSlots={grid?.timeSlots}
+                schedule={grid?.schedule}
+            />
             <DenyTimetableModal
                 open={denyModal}
                 onClose={() => {

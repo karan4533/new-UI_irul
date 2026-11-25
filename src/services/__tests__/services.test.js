@@ -612,6 +612,7 @@ test('11. Institutional Awards Service (Separate SOM & SOY Workflows with MD Sig
   });
   assert.equal(eligibleCheck.success, true);
   assert.equal(eligibleCheck.data.isEligible, true);
+  assert.equal(eligibleCheck.data.overallResult, 'PASSED');
   assert.equal(eligibleCheck.data.somWinsCount >= 2, true);
 
   // Student with < 2 wins should fail eligibility
@@ -623,14 +624,49 @@ test('11. Institutional Awards Service (Separate SOM & SOY Workflows with MD Sig
     infractions: 0,
   });
   assert.equal(ineligibleCheck.data.isEligible, false);
+  assert.equal(ineligibleCheck.data.overallResult, 'FAILED');
 
-  // 3. Nominate SOY
+  // Missing GPA must fail (never coerce to a passing default / NaN)
+  const missingGpaCheck = await awardsService.verifySoyEligibility({
+    nomineeId: 'STU-001',
+    academicYear: '2025-2026',
+    cumulativeGpa: undefined,
+    attendancePercentage: 96.5,
+    infractions: 0,
+  });
+  assert.equal(missingGpaCheck.data.isEligible, false);
+  assert.equal(missingGpaCheck.data.gpaMet, false);
+
+  const invalidGpaCheck = await awardsService.verifySoyEligibility({
+    nomineeId: 'STU-001',
+    academicYear: '2025-2026',
+    cumulativeGpa: 'not-a-number',
+    attendancePercentage: 96.5,
+    infractions: 0,
+  });
+  assert.equal(invalidGpaCheck.data.isEligible, false);
+  assert.ok((invalidGpaCheck.data.failedCriteria || []).some((f) => /GPA/i.test(f)));
+
+  // 3. Nominate SOY (must supply real GPA — silent defaults removed)
   const soyNomRes = await awardsService.nominateSoy({
     academicYear: '2025-2026',
     nomineeId: 'STU-001',
     nomineeName: 'Aarav Sharma',
+    cumulativeGpa: 9.6,
+    attendancePercentage: 96.5,
+    infractions: 0,
   });
   assert.equal(soyNomRes.success, true);
+
+  // Nominate without GPA must be rejected
+  const soyMissingGpa = await awardsService.nominateSoy({
+    academicYear: '2025-2026',
+    nomineeId: 'STU-001',
+    nomineeName: 'Aarav Sharma',
+    attendancePercentage: 96.5,
+    infractions: 0,
+  });
+  assert.equal(soyMissingGpa.success, false);
 
   // 3b. Committee Evaluation
   const evalRes = await awardsService.evaluateSoyCommittee(soyNomRes.data.id, {

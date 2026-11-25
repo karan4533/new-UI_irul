@@ -43,6 +43,13 @@ export const LOG_TYPES = {
         listTitle: 'Failed Logins',
         searchPlaceholder: 'Email, username, IP, reason...',
     },
+    'demo-activity': {
+        key: 'demo-activity',
+        label: 'Demo Activity',
+        route: `${ROUTE_BASE}/demo-activity`,
+        listTitle: 'Demo Activity',
+        searchPlaceholder: 'Actor, action, module...',
+    },
 }
 
 export const statusBadgeColor = {
@@ -880,8 +887,45 @@ const ACTIVITY_LOGS = [
 export const getLogsByType = (logType) =>
     ACTIVITY_LOGS.filter((record) => record.logType === logType)
 
-export const getActivityLogById = (id) =>
-    ACTIVITY_LOGS.find((record) => record.id === id) ?? null
+/** Display helper — never render the literal string "undefined". */
+export const formatLogValue = (value) => {
+    if (value === null || value === undefined || value === '') return '—'
+    if (typeof value === 'object') {
+        try {
+            return JSON.stringify(value)
+        } catch {
+            return String(value)
+        }
+    }
+    return String(value)
+}
+
+export const resolvePreviousValue = (record) =>
+    record?.oldValue ?? record?.previousValue ?? record?.before ?? record?.previous ?? null
+
+export const resolveUpdatedValue = (record) =>
+    record?.newValue ?? record?.updatedValue ?? record?.after ?? record?.new ?? null
+
+export const getActivityLogById = (id, { demoLogs = [] } = {}) => {
+    if (id == null || id === '') return null
+    const key = String(id)
+    const fromStatic = ACTIVITY_LOGS.find((record) => String(record.id) === key)
+    if (fromStatic) return fromStatic
+
+    const fromDemo = (demoLogs || []).find((record) => String(record.id) === key)
+    if (fromDemo) {
+        return {
+            ...fromDemo,
+            logType: 'demo-activity',
+            timestamp: fromDemo.timestamp?.replace?.('T', ' ')?.slice?.(0, 19) || fromDemo.timestamp,
+            user: fromDemo.actor || fromDemo.user,
+        }
+    }
+    return null
+}
+
+export const resolveActivityBackRoute = (logType) =>
+    (logType && LOG_TYPES[logType]?.route) || `${ROUTE_BASE}/login-history`
 
 export const getLogSummary = (logType, records = null) => {
     const items = records ?? getLogsByType(logType)
@@ -1067,7 +1111,7 @@ export const getListColumns = (logType) => {
 export const getCellValue = (record, column) => {
     if (column.computed) {
         if (column.key === 'changeSummary') {
-            return `${record.oldValue} → ${record.newValue}`
+            return `${formatLogValue(resolvePreviousValue(record))} → ${formatLogValue(resolveUpdatedValue(record))}`
         }
         if (column.key === 'canRestore') {
             return record.canRestore ? 'Yes' : 'No'
@@ -1077,7 +1121,7 @@ export const getCellValue = (record, column) => {
     const value = record[column.key]
     if (value === true) return 'Yes'
     if (value === false) return 'No'
-    return value ?? '—'
+    return formatLogValue(value)
 }
 
 export const getViewFields = (record) => {
@@ -1112,10 +1156,23 @@ export const getViewFields = (record) => {
                 { label: 'Record ID', value: record.recordId },
                 { label: 'Record name', value: record.recordName },
                 { label: 'Change type', value: record.changeType },
-                { label: 'Field changed', value: record.fieldChanged },
-                { label: 'Old value', value: record.oldValue },
-                { label: 'New value', value: record.newValue },
+                { label: 'Field changed', value: record.fieldChanged || record.fieldModified },
+                { label: 'Previous value', value: formatLogValue(resolvePreviousValue(record)) },
+                { label: 'Updated value', value: formatLogValue(resolveUpdatedValue(record)) },
                 { label: 'IP address', value: record.ipAddress },
+            ]
+        case 'demo-activity':
+            return [
+                ...common,
+                { label: 'Actor', value: record.actor || record.user },
+                { label: 'Role', value: record.role },
+                { label: 'Action', value: record.action },
+                { label: 'Module', value: record.module },
+                { label: 'Record ID', value: record.recordId },
+                { label: 'Details', value: record.details },
+                { label: 'Previous value', value: formatLogValue(resolvePreviousValue(record)) },
+                { label: 'Updated value', value: formatLogValue(resolveUpdatedValue(record)) },
+                { label: 'Reason', value: record.reason },
             ]
         case 'deleted-records':
             return [

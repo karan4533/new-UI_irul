@@ -116,3 +116,21 @@ export async function createGatewayIntentApi(body, options = {}) {
   if (blocked) return blocked
   return apiClient.post('/api/v1/finance/actions/gateway-intent', body || {}, { skipMock: true, ...options })
 }
+
+/** GET /api/v1/finance/my-fees — parent/student scoped ledger */
+export async function getMyFees(options = {}) {
+  const blocked = requireLive()
+  if (blocked) return blocked
+  const res = await apiClient.get('/api/v1/finance/my-fees', { skipMock: true, ...options })
+  if (!res.success) return res
+  const body = res.data && typeof res.data === 'object' ? res.data : {}
+  const data = body.data && typeof body.data === 'object' ? body.data : body
+  return { ...res, data }
+}
+
+/** POST /api/v1/finance/actions/pay-my-fees — parent/student online pay */
+export async function payMyFeesApi(body, options = {}) {
+  const blocked = requireLive()
+  if (blocked) return blocked
+  return apiClient.post('/api/v1/finance/actions/pay-my-fees', body || {}, { skipMock: true, ...options })
+}

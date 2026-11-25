@@ -112,7 +112,7 @@ export const filterStudents = (records, search = '') => {
         record.studentName,
         record.classSection,
         record.busStop,
-    ].some((field) => field.toLowerCase().includes(query)))
+    ].some((field) => String(field || '').toLowerCase().includes(query)))
 }
 
 export const getPhaseStats = (records, period, phase) => {

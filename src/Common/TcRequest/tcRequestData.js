@@ -1,10 +1,33 @@
 const STORAGE_KEY = 'schoolerp-tc-requests'
 
+/**
+ * Client Academics TC overflow:
+ * Student → Class Teacher → Coordinator → Principal → DA → dept NOCs → MD → TC
+ * Product still stores PRM intake + MD/Admin decide for live API compatibility.
+ */
 export const TC_STATUSES = [
     'Pending PRM Review',
     'Pending Super Admin Approval',
     'Approved',
     'Rejected',
+]
+
+/** Display labels that mirror the client document chain. */
+export const TC_STATUS_LABELS = {
+    'Pending PRM Review': 'Pending Class Teacher / PRM intake',
+    'Pending Super Admin Approval': 'Pending MD final (after NOCs)',
+    Approved: 'TC issued (MD final)',
+    Rejected: 'Rejected',
+}
+
+export const CLIENT_TC_WORKFLOW_STEPS = [
+    { key: 'student', label: 'Student / Guardian files TC' },
+    { key: 'class_teacher', label: 'Class Teacher review' },
+    { key: 'coordinator', label: 'Coordinator review' },
+    { key: 'principal', label: 'Principal review' },
+    { key: 'da', label: 'Director of Academics review' },
+    { key: 'noc', label: 'Dept NOCs (Finance, Library, Transport, Stores, Academics)' },
+    { key: 'md', label: 'MD final approval → TC issued' },
 ]
 
 export const statusBadgeColor = {
@@ -103,6 +126,13 @@ export const DEFAULT_NOC_CLEARANCES = [
         date: '12-06-2026',
     },
 ]
+
+export const allNocsCleared = (request) => {
+    const clearances = request?.nocClearances || DEFAULT_NOC_CLEARANCES
+    return clearances.every((c) => String(c.status || '').toLowerCase() === 'cleared')
+}
+
+export const displayTcStatus = (status) => TC_STATUS_LABELS[status] || status || '—'
 
 const loadRequests = () => {
     try {
@@ -252,13 +282,16 @@ export const approveTcRequest = (id, superAdminRemarks = '') => {
     if (index === -1) return null
 
     const request = requests[index]
+    if (!allNocsCleared(request)) {
+        throw new Error('Client workflow: clear all department NOCs before MD final approval.')
+    }
     const issuedDate = formatToday()
     const tcNumber = `TC/2026/${request.studentId.replace(/\D/g, '').slice(-4) || '0001'}`
 
     requests[index] = {
         ...request,
         status: 'Approved',
-        superAdminRemarks: superAdminRemarks || request.superAdminRemarks,
+        superAdminRemarks: superAdminRemarks || request.superAdminRemarks || 'MD final approval — TC issued.',
         approvedOn: issuedDate,
         tcNumber,
         tcIssuedDate: issuedDate,

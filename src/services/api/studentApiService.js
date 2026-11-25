@@ -62,6 +62,28 @@ export async function getStudent(studentId, options = {}) {
   return { ...res, data: mapStudentToUi(res.data || {}) }
 }
 
+/** GET /api/v1/students/me — linked student profile for student portal login. */
+export async function getMyStudent(options = {}) {
+  const blocked = requireLive()
+  if (blocked) return blocked
+  const res = await apiClient.get('/api/v1/students/me', { skipMock: true, ...options })
+  if (!res.success) return res
+  return { ...res, data: mapStudentToUi(res.data || {}) }
+}
+
+/**
+ * GET /api/v1/parents/me/children — enrolled children for signed-in parent.
+ * API SoT for Select Child (replaces FE seed mapping when live).
+ */
+export async function listMyChildren(options = {}) {
+  const blocked = requireLive()
+  if (blocked) return { ...blocked, data: [] }
+  const res = await apiClient.get('/api/v1/parents/me/children', { skipMock: true, ...options })
+  if (!res.success) return { ...res, data: [] }
+  const rows = Array.isArray(res.data) ? res.data.map(mapStudentToUi) : []
+  return { ...res, data: rows }
+}
+
 /** GET /api/v1/students/pending-placement — students.place */
 export async function listPendingPlacement(options = {}) {
   const blocked = requireLive()

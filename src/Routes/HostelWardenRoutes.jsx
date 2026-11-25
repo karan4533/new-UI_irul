@@ -9,6 +9,7 @@ import ViewMyLeaveRequestPage from '../Common/LeaveRequest/ViewMyLeaveRequestPag
 import Dashboard from '../Pages/HostelWarden/Dashboard/Dashboard'
 import AssignmentsPage from '../Pages/HostelWarden/Assignments/AssignmentsPage'
 import PaymentsPage from '../Pages/HostelWarden/Payments/PaymentsPage'
+import HostelUnsupportedPage from '../Pages/HostelWarden/HostelUnsupportedPage'
 
 const HostelWardenRoutes = () => (
     <ReactRoutes>
@@ -21,6 +22,10 @@ const HostelWardenRoutes = () => (
         <Route path='/hostel-warden/leave-request/my-requests' element={<MyLeaveRequestsList roleKey='hostelwarden' />} />
         <Route path='/hostel-warden/leave-request/my-requests/add' element={<AddLeaveRequestForm roleKey='hostelwarden' />} />
         <Route path='/hostel-warden/leave-request/my-requests/view/:id' element={<ViewMyLeaveRequestPage roleKey='hostelwarden' />} />
+        {/* Room matrix / outpass / mess have no FastAPI domain — honest MOCK/BLOCKED page before enterprise stubs */}
+        <Route path='/hostel-warden/hostel' element={<HostelUnsupportedPage />} />
+        <Route path='/hostel-warden/hostel-management' element={<HostelUnsupportedPage />} />
+        <Route path='/hostel-warden/hostel-management/:tab' element={<HostelUnsupportedPage />} />
         {EnterpriseOperationsRoutes({ basePath: '/hostel-warden', role: 'hostelwarden' })}
         <Route path='*' element={<Navigate to='/hostel-warden/dashboard' replace />} />
     </ReactRoutes>

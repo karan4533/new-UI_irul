@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react'
+import React, { useState, useMemo, useEffect, useCallback } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import {
     Award,
     Trophy,
@@ -29,12 +30,18 @@ import {
     Edit3
 } from 'lucide-react'
 import { toast } from 'react-toastify'
+import { DataSourceIndicator } from '../ui'
 import { useAuth } from '../../context/AuthContext'
 import { getProfileLabel } from '../../Pages/Authentication/profileOptions'
 import BulkClassSectionSelector from './Components/BulkClassSectionSelector'
 import DepartmentEmployeeSelector from './Components/DepartmentEmployeeSelector'
+import RecognitionModalOverlay from './Components/RecognitionModalOverlay'
 import { openPrintDocument } from '../printDocument'
 import { awardsService } from '../../services/modules/awardsService'
+import {
+    deriveCumulativeGpa10,
+    evaluateMandatorySoyGates,
+} from '../../services/modules/soyEligibility'
 import {
     ACADEMIC_YEARS,
     CURRENT_ACADEMIC_YEAR,
@@ -50,9 +57,22 @@ import {
     NON_ACADEMIC_DEPARTMENTS
 } from './recognitionData'
 
+const resolveRecognitionPath = (pathname, type) => {
+    if (!pathname) return null
+    if (type === 'soy') {
+        if (pathname.includes('star-of-month')) return pathname.replace('star-of-month', 'star-of-year')
+        if (pathname.includes('star-of-the-month')) return pathname.replace('star-of-the-month', 'star-of-year')
+        return null
+    }
+    if (pathname.includes('star-of-year')) return pathname.replace('star-of-year', 'star-of-month')
+    return null
+}
+
 const EnterpriseRecognitionPage = ({ view = 'som', defaultDomain }) => {
     const { role: userRole, email: userEmail, name: authName } = useAuth()
     const roleLabel = getProfileLabel(userRole)
+    const navigate = useNavigate()
+    const location = useLocation()
 
     const isNonAcademicRole = [
         'hr', 'stationery-store-manager', 'transport-manager', 'canteen-manager',
@@ -70,15 +90,27 @@ const EnterpriseRecognitionPage = ({ view = 'som', defaultDomain }) => {
 
     // Domain state
     const [domain, setDomain] = useState(initialDomain) // 'academic' | 'non_academic'
-    const [recognitionType, setRecognitionType] = useState(view === 'soy' ? 'soy' : 'som') // 'som' | 'soy'
+    // Local fallback only when the current route cannot express SOM/SOY (e.g. maintenance SOM-only path)
+    const [localRecognitionType, setLocalRecognitionType] = useState(view === 'soy' ? 'soy' : 'som')
+    const routeCanToggleRecognition = /star-of-(month|year)|star-of-the-month/.test(location.pathname || '')
+    const recognitionType = routeCanToggleRecognition
+        ? (view === 'soy' ? 'soy' : 'som')
+        : localRecognitionType
+
+    const handleRecognitionTypeChange = useCallback((type) => {
+        const nextPath = resolveRecognitionPath(location.pathname, type)
+        if (nextPath && nextPath !== location.pathname) {
+            navigate(nextPath)
+            return
+        }
+        setLocalRecognitionType(type)
+    }, [location.pathname, navigate])
 
     // Strict department scoping: lock domain when defaultDomain is provided OR role is department-specific
     const isDomainLocked = Boolean(defaultDomain) || (!['superadmin', 'admin', 'director'].includes(userRole))
 
     useEffect(() => {
-        if (view) {
-            setRecognitionType(view === 'soy' ? 'soy' : 'som')
-        }
+        setLocalRecognitionType(view === 'soy' ? 'soy' : 'som')
     }, [view])
 
     useEffect(() => {
@@ -394,22 +426,40 @@ const EnterpriseRecognitionPage = ({ view = 'som', defaultDomain }) => {
         }
     }
 
-    // Nominate Candidate for Star of the Year
+    // Nominate Candidate for Star of the Year — same mandatory gates as leaderboard / Audit Gates
     const handleNominateForSoy = async (candidate) => {
         try {
+            const gpaParsed = deriveCumulativeGpa10(candidate)
+            const attendanceRaw = candidate.attendance
+            const infractionsRaw = candidate.infractions ?? 0
+            const localCheck = evaluateMandatorySoyGates({
+                somWinsCount: candidate.somCount,
+                cumulativeGpa: gpaParsed.ok ? gpaParsed.value : null,
+                attendancePercentage: attendanceRaw,
+                infractions: infractionsRaw,
+            })
+            if (!localCheck.isEligible) {
+                const detail = localCheck.failedCriteria.map((g) => g.reason).join('; ')
+                toast.warning(`Cannot nominate — ${detail}`)
+                return
+            }
+
             const payload = {
                 academicYear: selectedAcademicYear,
-                nomineeId: candidate.studentId || candidate.employeeId || 'STU-001',
+                nomineeId: candidate.studentId || candidate.employeeId,
                 nomineeName: candidate.studentName || candidate.employeeName,
                 grade: candidate.classSection || candidate.department || 'Grade 10-A',
-                cumulativeGpa: candidate.avgScore ? (candidate.avgScore / 10).toFixed(1) : 9.6,
-                attendancePercentage: candidate.attendance || 96.5,
-                infractions: 0
+                cumulativeGpa: gpaParsed.value,
+                attendancePercentage: attendanceRaw,
+                infractions: infractionsRaw,
+                somWinsCount: candidate.somCount,
             }
 
             const res = await awardsService.nominateSoy(payload)
             if (res.success) {
                 toast.success(`✓ ${payload.nomineeName} nominated for Star of the Year Committee Review!`)
+                setSoyAuditModalOpen(false)
+                setSelectedCandForAudit(null)
                 setServiceRefreshKey((k) => k + 1)
             } else {
                 toast.warning(res.error || 'Nominee did not meet criteria.')
@@ -522,6 +572,10 @@ const EnterpriseRecognitionPage = ({ view = 'som', defaultDomain }) => {
 
     return (
         <section className="space-y-6 pb-10 font-sans max-w-7xl mx-auto p-4 sm:p-6">
+            <DataSourceIndicator
+                status='MOCK'
+                detail='Star Ratings / SOM / SOY use awardsService and local recognition data. There is no dedicated FastAPI awards domain.'
+            />
             {/* Top Workspace Header */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
@@ -564,7 +618,7 @@ const EnterpriseRecognitionPage = ({ view = 'som', defaultDomain }) => {
                 <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
                     <button
                         type="button"
-                        onClick={() => setRecognitionType('som')}
+                        onClick={() => handleRecognitionTypeChange('som')}
                         className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                             recognitionType === 'som'
                                 ? 'bg-white text-blue-900 shadow-xs'
@@ -576,7 +630,7 @@ const EnterpriseRecognitionPage = ({ view = 'som', defaultDomain }) => {
                     </button>
                     <button
                         type="button"
-                        onClick={() => setRecognitionType('soy')}
+                        onClick={() => handleRecognitionTypeChange('soy')}
                         className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                             recognitionType === 'soy'
                                 ? 'bg-white text-amber-900 shadow-xs'
@@ -824,30 +878,34 @@ const EnterpriseRecognitionPage = ({ view = 'som', defaultDomain }) => {
                         </div>
 
                         <div className="overflow-x-auto">
-                            <table className="w-full text-left text-xs">
+                            <table className="min-w-[1100px] w-full text-left text-xs table-fixed">
                                 <thead className="bg-slate-50/75 border-b border-slate-100 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
                                     <tr>
-                                        <th className="py-3 px-4 w-14">Rank</th>
-                                        <th className="py-3 px-4">Candidate & Profile</th>
-                                        <th className="py-3 px-4">{domain === 'academic' ? 'Class & Section' : 'Department'}</th>
-                                        <th className="py-3 px-4 text-center">Monthly Recognitions</th>
-                                        <th className="py-3 px-4 text-center">Avg Monthly Score</th>
-                                        <th className="py-3 px-4 text-center">Attendance</th>
-                                        <th className="py-3 px-4 text-center">Cumulative Score</th>
-                                        <th className="py-3 px-4 text-center">Eligibility Status</th>
-                                        <th className="py-3 px-4 text-right">Committee Nomination</th>
+                                        <th className="py-3 px-4 w-16">Rank</th>
+                                        <th className="py-3 px-4 w-[180px]">Candidate & Profile</th>
+                                        <th className="py-3 px-4 w-[140px]">{domain === 'academic' ? 'Class & Section' : 'Department'}</th>
+                                        <th className="py-3 px-4 w-[120px] text-center">Monthly Recognitions</th>
+                                        <th className="py-3 px-4 w-[110px] text-center">Avg Monthly Score</th>
+                                        <th className="py-3 px-4 w-[100px] text-center">Attendance</th>
+                                        <th className="py-3 px-4 w-[110px] text-center">Cumulative Score</th>
+                                        <th className="py-3 px-4 w-[220px] text-center">Eligibility Status</th>
+                                        <th className="py-3 px-4 w-[260px] text-right">Committee Nomination</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100 text-slate-700">
                                     {(domain === 'academic' ? academicSoyRankings : nonAcademicSoyRankings).map((cand) => {
                                         const alreadyNominated = serviceSoyList.some(s => s.nomineeId === (cand.studentId || cand.employeeId))
+                                        const failedLabel = (cand.failedCriteria || [])
+                                            .map((g) => g.name.replace(/^Gate \d+:\s*/i, ''))
+                                            .slice(0, 2)
+                                            .join(', ')
 
                                         return (
                                             <tr
                                                 key={cand.studentId || cand.employeeId}
                                                 className={`hover:bg-slate-50/60 transition-colors ${cand.rank === 1 ? 'bg-amber-50/30' : ''}`}
                                             >
-                                                <td className="py-3.5 px-4 font-bold">
+                                                <td className="py-3.5 px-4 font-bold align-top">
                                                     {cand.rank === 1 ? (
                                                         <span className="size-7 rounded-full bg-amber-500 text-white flex items-center justify-center font-extrabold text-xs shadow-xs">
                                                             🏆 1
@@ -857,55 +915,58 @@ const EnterpriseRecognitionPage = ({ view = 'som', defaultDomain }) => {
                                                     )}
                                                 </td>
 
-                                                <td className="py-3.5 px-4">
-                                                    <div className="font-bold text-slate-900">{cand.studentName || cand.employeeName}</div>
-                                                    <div className="text-[11px] text-slate-400 font-mono">{cand.studentId || cand.employeeId}</div>
+                                                <td className="py-3.5 px-4 align-top">
+                                                    <div className="font-bold text-slate-900 break-words">{cand.studentName || cand.employeeName}</div>
+                                                    <div className="text-[11px] text-slate-400 font-mono break-all">{cand.studentId || cand.employeeId}</div>
                                                 </td>
 
-                                                <td className="py-3.5 px-4 font-semibold text-slate-800">
+                                                <td className="py-3.5 px-4 font-semibold text-slate-800 align-top break-words">
                                                     {cand.classSection || cand.department}
                                                 </td>
 
-                                                <td className="py-3.5 px-4 text-center">
-                                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-50 text-blue-800 font-bold text-xs">
-                                                        <Star size={12} className="fill-blue-600 text-blue-600" />
+                                                <td className="py-3.5 px-4 text-center align-top">
+                                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-50 text-blue-800 font-bold text-xs whitespace-nowrap">
+                                                        <Star size={12} className="fill-blue-600 text-blue-600 shrink-0" />
                                                         <span>{cand.somCount}x Wins</span>
                                                     </span>
                                                 </td>
 
-                                                <td className="py-3.5 px-4 text-center font-semibold text-slate-800">
-                                                    {cand.avgScore || cand.avgKpi}%
+                                                <td className="py-3.5 px-4 text-center font-semibold text-slate-800 align-top whitespace-nowrap">
+                                                    {cand.avgScore ?? cand.avgKpi ?? '—'}%
                                                 </td>
 
-                                                <td className="py-3.5 px-4 text-center text-emerald-700 font-semibold">
-                                                    {cand.attendance}%
+                                                <td className="py-3.5 px-4 text-center text-emerald-700 font-semibold align-top whitespace-nowrap">
+                                                    {Number.isFinite(Number(cand.attendance)) ? `${cand.attendance}%` : '—'}
                                                 </td>
 
-                                                <td className="py-3.5 px-4 text-center font-extrabold text-slate-900">
+                                                <td className="py-3.5 px-4 text-center font-extrabold text-slate-900 align-top whitespace-nowrap">
                                                     {cand.cumulativeScore} / 100
                                                 </td>
 
-                                                <td className="py-3.5 px-4 text-center">
+                                                <td className="py-3.5 px-4 text-center align-top">
                                                     {cand.isEligible ? (
-                                                        <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 font-semibold text-[10px] border border-emerald-200">
-                                                            ✓ Meets Criteria (≥2 Wins)
+                                                        <span className="inline-flex max-w-full px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 font-semibold text-[10px] border border-emerald-200 whitespace-normal text-left leading-snug">
+                                                            ✓ Eligible (all 4 gates)
                                                         </span>
                                                     ) : (
-                                                        <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-500 font-medium text-[10px]">
-                                                            Pending ({cand.somCount}/2 Wins)
+                                                        <span
+                                                            className="inline-flex max-w-full px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 font-medium text-[10px] border border-rose-200 whitespace-normal text-left leading-snug"
+                                                            title={cand.eligibilityReason || 'Ineligible'}
+                                                        >
+                                                            Ineligible{failedLabel ? `: ${failedLabel}` : ''}
                                                         </span>
                                                     )}
                                                 </td>
 
-                                                <td className="py-3.5 px-4 text-right">
-                                                    <div className="flex items-center justify-end gap-1.5">
+                                                <td className="py-3.5 px-4 text-right align-top">
+                                                    <div className="flex flex-wrap items-center justify-end gap-1.5">
                                                         <button
                                                             type="button"
                                                             onClick={() => {
                                                                 setSelectedCandForAudit(cand)
                                                                 setSoyAuditModalOpen(true)
                                                             }}
-                                                            className="px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer flex items-center gap-1"
+                                                            className="px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer flex items-center gap-1 whitespace-nowrap"
                                                         >
                                                             <ShieldCheck size={13} className="text-indigo-600" />
                                                             <span>Audit Gates</span>
@@ -914,13 +975,13 @@ const EnterpriseRecognitionPage = ({ view = 'som', defaultDomain }) => {
                                                             <button
                                                                 type="button"
                                                                 onClick={() => handleNominateForSoy(cand)}
-                                                                className="px-3 py-1.5 text-xs font-bold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-colors cursor-pointer"
+                                                                className="px-3 py-1.5 text-xs font-bold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-colors cursor-pointer whitespace-nowrap"
                                                             >
                                                                 Nominate for Annual Trophy
                                                             </button>
                                                         )}
                                                         {alreadyNominated && (
-                                                            <span className="text-xs font-semibold text-indigo-700">
+                                                            <span className="text-xs font-semibold text-indigo-700 whitespace-nowrap">
                                                                 In Governance Queue →
                                                             </span>
                                                         )}
@@ -1048,15 +1109,20 @@ const EnterpriseRecognitionPage = ({ view = 'som', defaultDomain }) => {
             )}
 
             {/* MODAL: Review & Endorse SOM */}
-            {reviewModalOpen && selectedSomForReview && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-                    <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4">
-                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                            <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                                <Award size={18} className="text-indigo-600" />
-                                Review & Endorse Nomination
+            {reviewModalOpen && selectedSomForReview ? (
+                <RecognitionModalOverlay
+                    open
+                    onClose={() => setReviewModalOpen(false)}
+                    panelClassName="max-w-md"
+                    labelledBy="som-review-modal-title"
+                >
+                    <div className="p-6 space-y-4 overflow-y-auto min-h-0">
+                        <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
+                            <h3 id="som-review-modal-title" className="text-base font-bold text-slate-900 flex items-start gap-2 min-w-0 leading-snug">
+                                <Award size={18} className="text-indigo-600 shrink-0 mt-0.5" />
+                                <span className="break-words">Review & Endorse Nomination</span>
                             </h3>
-                            <button type="button" onClick={() => setReviewModalOpen(false)} className="text-slate-400">
+                            <button type="button" onClick={() => setReviewModalOpen(false)} className="text-slate-400 shrink-0" aria-label="Close review popup">
                                 <X size={20} />
                             </button>
                         </div>
@@ -1086,186 +1152,181 @@ const EnterpriseRecognitionPage = ({ view = 'som', defaultDomain }) => {
                             </button>
                         </div>
                     </div>
-                </div>
-            )}
+                </RecognitionModalOverlay>
+            ) : null}
 
-            {/* MODAL: SOY 4-Tier Candidate Audit & Evaluation */}
-            {soyAuditModalOpen && selectedCandForAudit && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-                    <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full p-6 space-y-5 animate-in zoom-in-95 duration-150">
-                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                            <div className="flex items-center gap-2.5">
-                                <div className="p-2 rounded-xl bg-amber-50 text-amber-600">
-                                    <ShieldCheck size={20} />
-                                </div>
-                                <div>
-                                    <h3 className="text-base font-bold text-slate-900">
-                                        Candidate 4-Tier Eligibility Audit
-                                    </h3>
-                                    <p className="text-xs text-slate-500">
-                                        Star of the Year annual governance gates verification
-                                    </p>
-                                </div>
-                            </div>
-                            <button type="button" onClick={() => setSoyAuditModalOpen(false)} className="text-slate-400 hover:text-slate-600">
-                                <X size={20} />
-                            </button>
-                        </div>
+            {/* MODAL: SOY 4-Tier Candidate Audit & Evaluation (portaled above AppShell) */}
+            {soyAuditModalOpen && selectedCandForAudit ? (
+                <RecognitionModalOverlay
+                    open={soyAuditModalOpen}
+                    onClose={() => {
+                        setSoyAuditModalOpen(false)
+                        setSelectedCandForAudit(null)
+                    }}
+                    panelClassName="max-w-2xl"
+                    labelledBy="soy-audit-gates-title"
+                >
+                    {(() => {
+                        const gpaParsed = deriveCumulativeGpa10(selectedCandForAudit)
+                        const auditEval = selectedCandForAudit.eligibilityGates?.length
+                            ? {
+                                gates: selectedCandForAudit.eligibilityGates,
+                                isEligible: selectedCandForAudit.isEligible,
+                            }
+                            : evaluateMandatorySoyGates({
+                                somWinsCount: selectedCandForAudit.somCount,
+                                cumulativeGpa: gpaParsed.ok ? gpaParsed.value : null,
+                                attendancePercentage: selectedCandForAudit.attendance,
+                                infractions: selectedCandForAudit.infractions ?? 0,
+                            })
+                        const auditGates = auditEval.gates
+                        const auditPassed = auditGates.every((g) => g.passed)
+                        const scorePct = selectedCandForAudit.avgScore ?? selectedCandForAudit.avgKpi
+                        const gpaDisplay = Number.isFinite(Number(selectedCandForAudit.cumulativeGpa))
+                            ? selectedCandForAudit.cumulativeGpa
+                            : (gpaParsed.ok ? gpaParsed.value : null)
 
-                        {/* Candidate Information Card */}
-                        <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                            <div>
-                                <span className="font-bold text-slate-900 text-sm block">
-                                    {selectedCandForAudit.studentName || selectedCandForAudit.employeeName}
-                                </span>
-                                <span className="text-slate-500 font-mono">
-                                    ID: {selectedCandForAudit.studentId || selectedCandForAudit.employeeId} · {selectedCandForAudit.classSection || selectedCandForAudit.department}
-                                </span>
-                            </div>
-                            <div className="text-right">
-                                <span className="text-slate-500 block">Academic Session</span>
-                                <span className="font-bold text-slate-800">{selectedAcademicYear}</span>
-                            </div>
-                        </div>
-
-                        {/* 4 Eligibility Gates */}
-                        <div className="space-y-3">
-                            <h4 className="text-xs font-bold text-slate-600 uppercase tracking-wider">
-                                Mandatory Governance Gates Audit:
-                            </h4>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                {/* Gate 1 */}
-                                <div className={`p-3 rounded-xl border text-xs ${
-                                    selectedCandForAudit.somCount >= 2 ? 'bg-emerald-50/70 border-emerald-200' : 'bg-rose-50/70 border-rose-200'
-                                }`}>
-                                    <div className="flex items-center justify-between mb-1">
-                                        <span className="font-bold text-slate-800">Gate 1: Monthly SOM Wins</span>
-                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                            selectedCandForAudit.somCount >= 2 ? 'bg-emerald-200 text-emerald-900' : 'bg-rose-200 text-rose-900'
-                                        }`}>
-                                            {selectedCandForAudit.somCount >= 2 ? 'PASSED' : 'FAILED'}
-                                        </span>
+                        return (
+                            <>
+                                <div className="p-4 sm:p-5 border-b border-slate-100 flex items-start justify-between gap-3 shrink-0">
+                                    <div className="flex items-start gap-2.5 min-w-0">
+                                        <div className="p-2 rounded-xl bg-amber-50 text-amber-600 shrink-0">
+                                            <ShieldCheck size={20} />
+                                        </div>
+                                        <div className="min-w-0">
+                                            <h3 id="soy-audit-gates-title" className="text-base font-bold text-slate-900 leading-snug break-words">
+                                                Candidate 4-Tier Eligibility Audit
+                                            </h3>
+                                            <p className="text-xs text-slate-500">
+                                                Star of the Year annual governance gates verification
+                                            </p>
+                                        </div>
                                     </div>
-                                    <p className="text-slate-600">
-                                        Requirement: <b>≥ 2 SOM Wins</b> in session
-                                    </p>
-                                    <p className="font-semibold text-slate-900 mt-0.5">
-                                        Candidate Achieved: {selectedCandForAudit.somCount} Wins
-                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setSoyAuditModalOpen(false)
+                                            setSelectedCandForAudit(null)
+                                        }}
+                                        className="text-slate-400 hover:text-slate-600 shrink-0 p-1"
+                                    >
+                                        <X size={20} />
+                                    </button>
                                 </div>
 
-                                {/* Gate 2 */}
-                                <div className={`p-3 rounded-xl border text-xs ${
-                                    (Number(selectedCandForAudit.gpa || selectedCandForAudit.avgScore / 10) >= 8.5 || Number(selectedCandForAudit.avgScore) >= 85)
-                                        ? 'bg-emerald-50/70 border-emerald-200'
-                                        : 'bg-rose-50/70 border-rose-200'
-                                }`}>
-                                    <div className="flex items-center justify-between mb-1">
-                                        <span className="font-bold text-slate-800">Gate 2: Cumulative GPA</span>
-                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                            (Number(selectedCandForAudit.gpa || selectedCandForAudit.avgScore / 10) >= 8.5 || Number(selectedCandForAudit.avgScore) >= 85)
-                                                ? 'bg-emerald-200 text-emerald-900'
-                                                : 'bg-rose-200 text-rose-900'
-                                        }`}>
-                                            {(Number(selectedCandForAudit.gpa || selectedCandForAudit.avgScore / 10) >= 8.5 || Number(selectedCandForAudit.avgScore) >= 85) ? 'PASSED' : 'FAILED'}
-                                        </span>
+                                <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-5">
+                                    <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                                        <div>
+                                            <span className="font-bold text-slate-900 text-sm block">
+                                                {selectedCandForAudit.studentName || selectedCandForAudit.employeeName}
+                                            </span>
+                                            <span className="text-slate-500 font-mono">
+                                                ID: {selectedCandForAudit.studentId || selectedCandForAudit.employeeId} · {selectedCandForAudit.classSection || selectedCandForAudit.department}
+                                            </span>
+                                        </div>
+                                        <div className="text-right">
+                                            <span className="text-slate-500 block">Academic Session</span>
+                                            <span className="font-bold text-slate-800">{selectedAcademicYear}</span>
+                                        </div>
                                     </div>
-                                    <p className="text-slate-600">
-                                        Requirement: <b>GPA ≥ 8.5 / 85%</b>
-                                    </p>
-                                    <p className="font-semibold text-slate-900 mt-0.5">
-                                        Candidate Achieved: {selectedCandForAudit.gpa || (selectedCandForAudit.avgScore / 10).toFixed(1)} GPA ({selectedCandForAudit.avgScore}%)
-                                    </p>
-                                </div>
 
-                                {/* Gate 3 */}
-                                <div className={`p-3 rounded-xl border text-xs ${
-                                    Number(selectedCandForAudit.attendance) >= 95 ? 'bg-emerald-50/70 border-emerald-200' : 'bg-rose-50/70 border-rose-200'
-                                }`}>
-                                    <div className="flex items-center justify-between mb-1">
-                                        <span className="font-bold text-slate-800">Gate 3: Session Attendance</span>
-                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                            Number(selectedCandForAudit.attendance) >= 95 ? 'bg-emerald-200 text-emerald-900' : 'bg-rose-200 text-rose-900'
-                                        }`}>
-                                            {Number(selectedCandForAudit.attendance) >= 95 ? 'PASSED' : 'FAILED'}
-                                        </span>
+                                    <div className="space-y-3">
+                                        <h4 className="text-xs font-bold text-slate-600 uppercase tracking-wider">
+                                            Mandatory Governance Gates Audit:
+                                        </h4>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                            {auditGates.map((gate, idx) => (
+                                                <div
+                                                    key={gate.id}
+                                                    className={`p-3 rounded-xl border text-xs ${
+                                                        gate.passed
+                                                            ? 'bg-emerald-50/70 border-emerald-200'
+                                                            : 'bg-rose-50/70 border-rose-200'
+                                                    }`}
+                                                >
+                                                    <div className="flex items-center justify-between mb-1 gap-2">
+                                                        <span className="font-bold text-slate-800">
+                                                            Gate {idx + 1}: {gate.name}
+                                                        </span>
+                                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                                                            gate.passed
+                                                                ? 'bg-emerald-200 text-emerald-900'
+                                                                : 'bg-rose-200 text-rose-900'
+                                                        }`}>
+                                                            {gate.passed ? 'PASSED' : 'FAILED'}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-slate-600">
+                                                        Requirement: <b>{gate.requirement}</b>
+                                                    </p>
+                                                    <p className="font-semibold text-slate-900 mt-0.5">
+                                                        Candidate Achieved: {gate.id === 'gpa' && gpaDisplay != null
+                                                            ? `${gpaDisplay} GPA${Number.isFinite(Number(scorePct)) ? ` (${scorePct}%)` : ''}`
+                                                            : gate.achieved}
+                                                    </p>
+                                                    {!gate.passed && gate.reason ? (
+                                                        <p className="text-rose-700 mt-1 text-[11px]">{gate.reason}</p>
+                                                    ) : null}
+                                                </div>
+                                            ))}
+                                        </div>
                                     </div>
-                                    <p className="text-slate-600">
-                                        Requirement: <b>≥ 95% Attendance</b>
-                                    </p>
-                                    <p className="font-semibold text-slate-900 mt-0.5">
-                                        Candidate Achieved: {selectedCandForAudit.attendance}%
-                                    </p>
-                                </div>
 
-                                {/* Gate 4 */}
-                                <div className="p-3 rounded-xl border border-emerald-200 bg-emerald-50/70 text-xs">
-                                    <div className="flex items-center justify-between mb-1">
-                                        <span className="font-bold text-slate-800">Gate 4: Disciplinary Record</span>
-                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-200 text-emerald-900">
-                                            PASSED
-                                        </span>
+                                    <div className={`p-3.5 rounded-xl text-xs flex items-start gap-2 ${
+                                        auditPassed
+                                            ? 'bg-emerald-100/70 border border-emerald-300 text-emerald-950'
+                                            : 'bg-rose-100/70 border border-rose-300 text-rose-950'
+                                    }`}>
+                                        {auditPassed ? (
+                                            <>
+                                                <CheckCircle2 size={16} className="text-emerald-700 shrink-0 mt-0.5" />
+                                                <span>Overall result: <b>PASSED</b>. Candidate successfully passed all 4 institutional governance gates. Authorized for Star of the Year committee evaluation.</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <AlertCircle size={16} className="text-rose-700 shrink-0 mt-0.5" />
+                                                <span>
+                                                    Overall result: <b>FAILED</b>. Failed gate(s):{' '}
+                                                    {auditGates.filter((g) => !g.passed).map((g) => g.name).join(', ')}.
+                                                    {' '}Annual nomination remains restricted until mandatory requirements are met.
+                                                </span>
+                                            </>
+                                        )}
                                     </div>
-                                    <p className="text-slate-600">
-                                        Requirement: <b>0 Disciplinary Infractions</b>
-                                    </p>
-                                    <p className="font-semibold text-slate-900 mt-0.5">
-                                        Candidate Record: 0 Infractions (Clear Standing)
-                                    </p>
                                 </div>
-                            </div>
-                        </div>
 
-                        {/* Audit Verification Summary */}
-                        <div className={`p-3.5 rounded-xl text-xs flex items-center gap-2 ${
-                            selectedCandForAudit.isEligible
-                                ? 'bg-emerald-100/70 border border-emerald-300 text-emerald-950'
-                                : 'bg-amber-100/70 border border-amber-300 text-amber-950'
-                        }`}>
-                            {selectedCandForAudit.isEligible ? (
-                                <>
-                                    <CheckCircle2 size={16} className="text-emerald-700 shrink-0" />
-                                    <span>Candidate successfully passed all 4 institutional governance gates. Authorized for Star of the Year committee evaluation.</span>
-                                </>
-                            ) : (
-                                <>
-                                    <AlertCircle size={16} className="text-amber-700 shrink-0" />
-                                    <span>Candidate has not satisfied all 4 gates. Annual nomination remains restricted until minimum requirements are met.</span>
-                                </>
-                            )}
-                        </div>
-
-                        <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-                            <button
-                                type="button"
-                                onClick={() => setSoyAuditModalOpen(false)}
-                                className="px-3.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
-                            >
-                                Close
-                            </button>
-                            {selectedCandForAudit.isEligible && isSupervisor && (
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setSoyAuditModalOpen(false)
-                                        handleNominateForSoy(selectedCandForAudit)
-                                    }}
-                                    className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-xs cursor-pointer flex items-center gap-1.5"
-                                >
-                                    <Trophy size={14} />
-                                    Submit Formal SOY Nomination
-                                </button>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            )}
+                                <div className="flex items-center justify-end gap-2 p-4 sm:p-5 border-t border-slate-100 shrink-0">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setSoyAuditModalOpen(false)
+                                            setSelectedCandForAudit(null)
+                                        }}
+                                        className="px-3.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                                    >
+                                        Close
+                                    </button>
+                                    {auditPassed && isSupervisor && (
+                                        <button
+                                            type="button"
+                                            onClick={() => handleNominateForSoy(selectedCandForAudit)}
+                                            className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-xs cursor-pointer flex items-center gap-1.5"
+                                        >
+                                            <Trophy size={14} />
+                                            Submit Formal SOY Nomination
+                                        </button>
+                                    )}
+                                </div>
+                            </>
+                        )
+                    })()}
+                </RecognitionModalOverlay>
+            ) : null}
 
             {/* MODAL: SOY Dedicated Marks Entry & Calculation Form */}
             {soyScoreModalOpen && selectedSoyForScore && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
-                    <div className="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-150">
+                <div className="fixed inset-0 z-[400] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
+                    <div className="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-2xl w-full max-h-[min(92vh,900px)] flex flex-col overflow-hidden animate-in zoom-in-95 duration-150">
                         <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between">
                             <div className="flex items-center gap-2.5">
                                 <div className="p-2 rounded-xl bg-amber-50 text-amber-600">
@@ -1467,14 +1528,14 @@ const EnterpriseRecognitionPage = ({ view = 'som', defaultDomain }) => {
 
             {/* MODAL: MD Final Sign-Off for SOY */}
             {mdSignOffModalOpen && selectedSoyForMd && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-                    <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6 space-y-4">
-                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                            <h3 className="text-base font-bold text-purple-900 flex items-center gap-2">
-                                <Trophy size={20} className="text-amber-500" />
-                                Managing Director Executive Final Sign-Off
+                <div className="fixed inset-0 z-[400] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+                    <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[min(92vh,900px)] overflow-y-auto p-6 space-y-4">
+                        <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
+                            <h3 className="text-base font-bold text-purple-900 flex items-start gap-2 min-w-0 leading-snug">
+                                <Trophy size={20} className="text-amber-500 shrink-0 mt-0.5" />
+                                <span className="break-words">Managing Director Executive Final Sign-Off</span>
                             </h3>
-                            <button type="button" onClick={() => setMdSignOffModalOpen(false)} className="text-slate-400">
+                            <button type="button" onClick={() => setMdSignOffModalOpen(false)} className="text-slate-400 shrink-0" aria-label="Close sign-off popup">
                                 <X size={20} />
                             </button>
                         </div>
@@ -1531,20 +1592,23 @@ const EnterpriseRecognitionPage = ({ view = 'som', defaultDomain }) => {
                 </div>
             )}
 
-            {/* MODAL: Nominate SOM */}
-            {isNominateModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
-                    <div className="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-150">
-                        <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between">
-                            <div className="flex items-center gap-2.5">
-                                <div className="p-2 rounded-xl bg-blue-50 text-blue-600">
+            {/* MODAL: Nominate SOM — portaled above AppShell sidebar (z-300) / header (z-200) */}
+            <RecognitionModalOverlay
+                open={isNominateModalOpen}
+                onClose={() => setIsNominateModalOpen(false)}
+                panelClassName="max-w-4xl"
+                labelledBy="som-nominate-modal-title"
+            >
+                        <div className="p-4 sm:p-5 border-b border-slate-100 flex items-start justify-between gap-3 shrink-0">
+                            <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                                <div className="p-2 rounded-xl bg-blue-50 text-blue-600 shrink-0">
                                     <Award size={18} />
                                 </div>
-                                <div>
-                                    <h3 className="text-base font-bold text-slate-900">
+                                <div className="min-w-0">
+                                    <h3 id="som-nominate-modal-title" className="text-base font-bold text-slate-900 leading-snug break-words">
                                         Nominate Star of the Month ({domain === 'academic' ? 'Academic Student' : 'Non-Academic Staff'})
                                     </h3>
-                                    <p className="text-xs text-slate-500">
+                                    <p className="text-xs text-slate-500 mt-1 break-words">
                                         Recognition Month: <strong className="text-slate-700">{selectedMonth}</strong> • Academic Year: <strong className="text-slate-700">{selectedAcademicYear}</strong>
                                     </p>
                                 </div>
@@ -1553,13 +1617,14 @@ const EnterpriseRecognitionPage = ({ view = 'som', defaultDomain }) => {
                             <button
                                 type="button"
                                 onClick={() => setIsNominateModalOpen(false)}
-                                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg transition-colors cursor-pointer"
+                                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg transition-colors cursor-pointer shrink-0"
+                                aria-label="Close nomination popup"
                             >
                                 <X size={20} />
                             </button>
                         </div>
 
-                        <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-6">
+                        <div className="p-4 sm:p-6 overflow-y-auto overscroll-contain flex-1 min-h-0 space-y-6">
                             {domain === 'academic' ? (
                                 <div>
                                     <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 mb-3">
@@ -1597,12 +1662,12 @@ const EnterpriseRecognitionPage = ({ view = 'som', defaultDomain }) => {
 
                             {selectedCandidate && (
                                 <div className="p-4 rounded-2xl bg-blue-50/70 border border-blue-200 animate-in fade-in space-y-4">
-                                    <div className="flex items-center justify-between">
-                                        <h4 className="text-xs font-bold text-blue-900 uppercase tracking-wider flex items-center gap-2">
-                                            <Sparkles size={14} className="text-blue-600" />
-                                            <span>Step 2: 5-Criteria Rubric Evaluation & Award Citation</span>
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                        <h4 className="text-xs font-bold text-blue-900 uppercase tracking-wider flex items-start gap-2 min-w-0">
+                                            <Sparkles size={14} className="text-blue-600 shrink-0 mt-0.5" />
+                                            <span className="break-words">Step 2: 5-Criteria Rubric Evaluation & Award Citation</span>
                                         </h4>
-                                        <span className="text-xs font-semibold text-blue-700">
+                                        <span className="text-xs font-semibold text-blue-700 shrink-0 break-words">
                                             Candidate: {selectedCandidate.name} ({selectedCandidate.id})
                                         </span>
                                     </div>
@@ -1750,14 +1815,14 @@ const EnterpriseRecognitionPage = ({ view = 'som', defaultDomain }) => {
                             )}
                         </div>
 
-                        <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
-                            <span className="text-xs text-slate-500">
+                        <div className="p-4 border-t border-slate-100 bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+                            <span className="text-xs text-slate-500 min-w-0 break-words">
                                 {selectedCandidate
                                     ? `Ready to submit nomination for ${selectedCandidate.name}`
                                     : 'Please choose a nominee from the list above'}
                             </span>
 
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 shrink-0">
                                 <button
                                     type="button"
                                     onClick={() => setIsNominateModalOpen(false)}
@@ -1775,9 +1840,7 @@ const EnterpriseRecognitionPage = ({ view = 'som', defaultDomain }) => {
                                 </button>
                             </div>
                         </div>
-                    </div>
-                </div>
-            )}
+            </RecognitionModalOverlay>
         </section>
     )
 }

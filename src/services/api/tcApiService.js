@@ -32,6 +32,10 @@ export function mapTcRequestToUi(row = {}) {
     requestedBy: row.requestedBy || '',
     requestedOn: row.requestedOn || '',
     status: row.status || '',
+    statusLabel: row.statusLabel || row.status || '',
+    workflowStage: row.workflowStage || '',
+    workflowStages: row.workflowStages || [],
+    allNocsCleared: Boolean(row.allNocsCleared),
     prmRemarks: row.prmRemarks || '',
     superAdminRemarks: row.superAdminRemarks || '',
     forwardedOn: row.forwardedOn || '',
@@ -52,6 +56,22 @@ export async function listTcRequests(options = {}) {
   const res = await apiClient.get('/api/v1/tc-requests', { skipMock: true, ...options })
   if (!res.success) return res
   return { ...res, data: Array.isArray(res.data) ? res.data.map(mapTcRequestToUi) : [] }
+}
+
+/** POST /api/v1/tc-requests — parent/student create */
+export async function createTcRequest(body = {}, options = {}) {
+  const blocked = requireLive()
+  if (blocked) return blocked
+  const payload = {
+    studentRef: body.studentRef || body.studentId || body.admissionNumber,
+    reason: body.reason,
+    transferTo: body.transferTo,
+  }
+  if (body.lastDateOfAttendance) payload.lastDateOfAttendance = body.lastDateOfAttendance
+  if (body.requestedBy) payload.requestedBy = body.requestedBy
+  const res = await apiClient.post('/api/v1/tc-requests', payload, { skipMock: true, ...options })
+  if (!res.success) return res
+  return { ...res, data: mapTcRequestToUi(res.data || {}) }
 }
 
 export async function getTcRequest(ref, options = {}) {
