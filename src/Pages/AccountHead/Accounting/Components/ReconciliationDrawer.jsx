@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Check } from 'lucide-react'
 import { ConfirmAction, Drawer, StatusBadge } from '../../../../Common/ui'
 
@@ -42,17 +42,36 @@ const ReconciliationDrawer = ({
     onReconcile,
     selectedSuggestionId,
     onSelectSuggestion,
+    live = false,
+    busy = false,
 }) => {
     const [confirmOpen, setConfirmOpen] = useState(false)
+    const [bankAmountInput, setBankAmountInput] = useState('')
+    const [statementRef, setStatementRef] = useState('')
+    const [note, setNote] = useState('')
+    useEffect(() => {
+        setBankAmountInput('')
+        setStatementRef('')
+        setNote('')
+    }, [entry?.id])
     if (!entry) return null
 
     const { detail } = entry
     const canReconcile = entry.status !== 'Matched'
     const suggestions = detail.suggestions ?? []
     const selectionRequired = suggestions.length > 0 && !selectedSuggestionId
+    const liveInvalid = live && (!(Number(bankAmountInput) > 0) || !statementRef.trim())
 
     const confirmReconciliation = () => {
-        onReconcile(entry.id, selectedSuggestionId)
+        if (live) {
+            onReconcile(entry.id, null, {
+                bankAmount: Number(bankAmountInput),
+                statementRef: statementRef.trim(),
+                note: note.trim(),
+            })
+        } else {
+            onReconcile(entry.id, selectedSuggestionId)
+        }
         setConfirmOpen(false)
     }
 
@@ -69,7 +88,7 @@ const ReconciliationDrawer = ({
                 title='Reconciliation review'
                 description={`${entry.voucher !== '—' ? entry.voucher : entry.date} · ${entry.bank}`}
                 footer={canReconcile ? (
-                    <button type='button' onClick={() => setConfirmOpen(true)} disabled={selectionRequired} className='inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-[var(--erp-indigo)] px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50'>
+                    <button type='button' onClick={() => setConfirmOpen(true)} disabled={selectionRequired || liveInvalid || busy} className='inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-[var(--erp-indigo)] px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50'>
                         <Check aria-hidden='true' size={16} /> Review and confirm match
                     </button>
                 ) : <span className='text-sm font-semibold text-[var(--erp-green)]'>This entry is already matched.</span>}
@@ -91,6 +110,24 @@ const ReconciliationDrawer = ({
 
                     <EntryPanel title='ERP entry' entry={detail.erpEntry} emptyMessage='No matching ERP entry is recorded. Select an available suggestion before confirming a match.' />
                     <EntryPanel title='Bank entry' entry={detail.bankEntry} emptyMessage='No bank statement line is available. Statement import remains unavailable until a bank feed or approved parser is connected.' />
+
+                    {live && canReconcile ? (
+                        <div>
+                            <SectionLabel>Bank statement evidence</SectionLabel>
+                            <div className='grid gap-3'>
+                                <label className='grid gap-1 text-xs font-semibold text-[var(--erp-slate)]'>Bank statement amount (₹)
+                                    <input type='number' min='0' step='0.01' value={bankAmountInput} onChange={(event) => setBankAmountInput(event.target.value)} className='min-h-10 rounded-lg border border-[var(--erp-line-strong)] bg-white px-3 text-sm font-normal' placeholder={String(entry.erpAmountValue ?? '')} />
+                                </label>
+                                <label className='grid gap-1 text-xs font-semibold text-[var(--erp-slate)]'>Statement reference (UTR / cheque no.)
+                                    <input type='text' value={statementRef} onChange={(event) => setStatementRef(event.target.value)} className='min-h-10 rounded-lg border border-[var(--erp-line-strong)] bg-white px-3 text-sm font-normal' />
+                                </label>
+                                <label className='grid gap-1 text-xs font-semibold text-[var(--erp-slate)]'>Note (optional)
+                                    <input type='text' value={note} onChange={(event) => setNote(event.target.value)} className='min-h-10 rounded-lg border border-[var(--erp-line-strong)] bg-white px-3 text-sm font-normal' />
+                                </label>
+                                <p className='text-xs text-[var(--erp-muted)]'>If the statement amount differs from the ERP amount the entry stays as Pending Reconciliation with the difference recorded.</p>
+                            </div>
+                        </div>
+                    ) : null}
 
                     <div>
                         <SectionLabel>Matching suggestions</SectionLabel>
@@ -124,9 +161,11 @@ const ReconciliationDrawer = ({
                 onClose={() => setConfirmOpen(false)}
                 onConfirm={confirmReconciliation}
                 title='Confirm reconciliation match?'
-                description='This marks the browser-stored entry as matched. Production must validate the accounting period, bank evidence, permissions and immutable audit trail.'
+                description={live
+                    ? 'This records the bank statement evidence against the ERP entry on the server with an audit event.'
+                    : 'This marks the browser-stored entry as matched. Production must validate the accounting period, bank evidence, permissions and immutable audit trail.'}
                 confirmLabel='Confirm match'
-                confirmDisabled={!canReconcile || selectionRequired}
+                confirmDisabled={!canReconcile || selectionRequired || liveInvalid || busy}
             />
         </>
     )

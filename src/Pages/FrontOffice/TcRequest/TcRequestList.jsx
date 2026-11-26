@@ -6,8 +6,10 @@ import ExportModal from '../../../Common/CommonComponents/ExportModal'
 import { FeedbackState } from '../../../Common/ui'
 import {
     TC_STATUSES,
+    displayTcStatus,
     getAllTcRequests,
-    statusBadgeColor,
+    resolveTcWorkflowStage,
+    tcStatusBadgeClass,
 } from '../../../Common/TcRequest/tcRequestData'
 import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 import { listTcRequests } from '../../../services/api/tcApiService'
@@ -49,7 +51,10 @@ const TcRequestList = () => {
     }, [loadLive, location.key])
 
     const pendingCount = useMemo(
-        () => requests.filter((row) => row.status === 'Pending PRM Review').length,
+        () => requests.filter((row) => (
+            resolveTcWorkflowStage(row) === 'prm'
+            && !['Approved', 'Rejected'].includes(row.status)
+        )).length,
         [requests],
     )
 
@@ -164,8 +169,8 @@ const TcRequestList = () => {
                                             <td className='px-2 py-4'>{request.requestedBy}</td>
                                             <td className='px-2 py-4'>{request.requestedOn}</td>
                                             <td className='px-2 py-4'>
-                                                <span className={`px-2 py-1 rounded-lg text-xs font-semibold whitespace-nowrap ${statusBadgeColor[request.status] || 'bg-slate-100 text-slate-700'}`}>
-                                                    {request.status}
+                                                <span className={`px-2 py-1 rounded-lg text-xs font-semibold whitespace-nowrap ${tcStatusBadgeClass(request)}`}>
+                                                    {displayTcStatus(request)}
                                                 </span>
                                             </td>
                                             <td className='px-2 py-4 text-center rounded-e-lg'>

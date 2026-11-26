@@ -1,5 +1,6 @@
 import AttendanceAndLeaveWorkspace from '../Common/AttendanceAndLeave/AttendanceAndLeaveWorkspace'
 import { EnterpriseOperationsRoutes } from './EnterpriseOperationsRoutes'
+import { TcRequestRoleRoutes } from './tcRequestRoleRoutes'
 import React from 'react'
 import CentralActivitiesWorkspace from '../Common/Activities/CentralActivitiesWorkspace'
 import { Route, Routes as ReactRoutes, Navigate } from 'react-router-dom'
@@ -132,6 +133,7 @@ const CoordinatorRoutes = () => {
             <Route path="/coordinator/my-profile" element={<MyProfilePage roleLabel="Coordinator" />} />
             {/* Enterprise Functional Operations (Stores, Gate Pass, File Room, Ticketing, Monitoring, Lost & Found) */}
             {EnterpriseOperationsRoutes({ basePath: '/coordinator', role: 'coordinator' })}
+            {TcRequestRoleRoutes({ basePath: '/coordinator' })}
 
             <Route path="*" element={<Navigate to="/coordinator/dashboard" replace />} />
         </ReactRoutes>

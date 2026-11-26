@@ -11,14 +11,14 @@ const TILE_ICONS = {
     receipt: Receipt,
 }
 
-const ExpenditureReportsTab = () => (
+const ExpenditureReportsTab = ({ pack }) => (
     <div className='space-y-6'>
         <div>
             <h3 className='text-base font-semibold text-[#1E1E1E]'>Expenditure reports</h3>
-            <p className='text-sm text-[#667085] mt-1'>Reference report designs for outgoing money. Export remains unavailable until the reporting API is connected.</p>
+            <p className='text-sm text-[#667085] mt-1'>{pack ? `Posted expense ledger accounts for FY ${pack.financialYear}.` : 'Reference report designs for outgoing money. Export remains unavailable until the reporting API is connected.'}</p>
         </div>
 
-        <div className='grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4'>
+        {!pack && <div className='grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4'>
             {EXPENDITURE_REPORT_TILES.map((tile) => (
                 <ReportTile
                     key={tile.title}
@@ -27,12 +27,12 @@ const ExpenditureReportsTab = () => (
                     icon={TILE_ICONS[tile.icon]}
                 />
             ))}
-        </div>
+        </div>}
 
         <TableCard
-            title='Expenditure breakdown — by category'
+            title={pack ? 'Expenditure breakdown — by ledger account' : 'Expenditure breakdown — by category'}
             filters={(
-                <span className='text-xs font-medium text-[var(--erp-muted)]'>Reference period · This term</span>
+                <span className='text-xs font-medium text-[var(--erp-muted)]'>{pack ? `FY ${pack.financialYear} · posted GL` : 'Reference period · This term'}</span>
             )}
         >
             <table className='w-full text-sm text-left mt-4'>
@@ -45,13 +45,16 @@ const ExpenditureReportsTab = () => (
                     </tr>
                 </thead>
                 <tbody>
-                    {EXPENDITURE_BREAKDOWN.map((row) => (
+                    {pack && pack.expenditure.breakdown.length === 0 ? (
+                        <tr><td colSpan={4} className={tdClass}>No expenses posted in this financial year.</td></tr>
+                    ) : null}
+                    {(pack ? pack.expenditure.breakdown : EXPENDITURE_BREAKDOWN).map((row) => (
                         <tr key={row.category} className='border-b border-[#f2f4f7] hover:bg-[#f2f4f7]'>
                             <td className={`${tdClass} rounded-s-lg font-medium text-[#1E1E1E]`}>{row.category}</td>
                             <td className={tdClass}>{row.amount}</td>
                             <td className={tdClass}>{row.percent}</td>
                             <td className={`${tdClass} rounded-e-lg font-medium ${row.trend === 'down' ? 'text-[#4CAF50]' : 'text-[#FF5722]'}`}>
-                                {row.vsLastTerm}
+                                {row.vsLastTerm ?? '—'}
                             </td>
                         </tr>
                     ))}

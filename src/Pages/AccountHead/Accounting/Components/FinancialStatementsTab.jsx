@@ -159,10 +159,14 @@ const FinancialStatementsTab = ({
     appliedFilters,
     lastGeneratedAt,
     isGenerating,
+    liveStatements = null,
+    liveMode = false,
 }) => {
     const trialBalanceRows = useMemo(
-        () => filterTrialBalance(TRIAL_BALANCE_REGISTER, appliedFilters),
-        [appliedFilters],
+        () => (liveMode
+            ? (liveStatements?.trialBalance?.rows ?? [])
+            : filterTrialBalance(TRIAL_BALANCE_REGISTER, appliedFilters)),
+        [appliedFilters, liveMode, liveStatements],
     )
 
     const trialBalanceTotals = useMemo(
@@ -171,11 +175,25 @@ const FinancialStatementsTab = ({
     )
 
     const sectionRows = useMemo(() => {
+        if (liveMode) {
+            if (statementType === 'profit-loss') return liveStatements?.profitLoss?.rows ?? []
+            if (statementType === 'balance-sheet') return liveStatements?.balanceSheet?.rows ?? []
+            if (statementType === 'cash-flow') return liveStatements?.cashFlow?.rows ?? []
+            return []
+        }
         if (statementType === 'profit-loss') return PROFIT_LOSS_STATEMENT
         if (statementType === 'balance-sheet') return BALANCE_SHEET_STATEMENT
         if (statementType === 'cash-flow') return CASH_FLOW_STATEMENT
         return []
-    }, [statementType])
+    }, [statementType, liveMode, liveStatements])
+
+    const balanceNote = liveMode && liveStatements
+        ? (statementType === 'trial-balance' && liveStatements.trialBalance && !liveStatements.trialBalance.balanced
+            ? 'Trial balance is out of balance — check opening balances and journal postings.'
+            : statementType === 'balance-sheet' && liveStatements.balanceSheet && !liveStatements.balanceSheet.balanced
+                ? 'Balance sheet does not balance — opening balances in the chart of accounts are not offset by equity.'
+                : '')
+        : ''
 
     const reportTitle = `${STATEMENT_LABELS[statementType]} — FY ${appliedFilters.financialYear}`
     const filterSummary = formatFilterSummary(appliedFilters)
@@ -259,6 +277,7 @@ const FinancialStatementsTab = ({
                 ) : (
                     <SectionReportTable rows={sectionRows} />
                 )}
+                {balanceNote ? <p role='alert' className='mt-3 text-sm font-semibold text-[#B54708]'>{balanceNote}</p> : null}
             </Panel>
         </div>
     )

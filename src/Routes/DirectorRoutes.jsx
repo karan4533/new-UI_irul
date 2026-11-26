@@ -1,5 +1,6 @@
 import AttendanceAndLeaveWorkspace from '../Common/AttendanceAndLeave/AttendanceAndLeaveWorkspace'
 import { EnterpriseOperationsRoutes } from './EnterpriseOperationsRoutes'
+import { TcRequestRoleRoutes } from './tcRequestRoleRoutes'
 import React from 'react'
 import { Route, Routes as ReactRoutes, Navigate } from 'react-router-dom'
 import Dashboard from '../Pages/Director/Dashboard/Dashboard'
@@ -120,6 +121,7 @@ const DirectorRoutes = () => {
             <Route path="/director/student-allocation/allocate/:id" element={<UnavailableWorkflowPage title="Allocate student" />} />
             {/* Enterprise Functional Operations (Stores, Gate Pass, File Room, Ticketing, Monitoring, Lost & Found) */}
             {EnterpriseOperationsRoutes({ basePath: '/director', role: 'director' })}
+            {TcRequestRoleRoutes({ basePath: '/director' })}
 
             <Route path="*" element={<Navigate to="/director/dashboard" replace />} />
         </ReactRoutes>

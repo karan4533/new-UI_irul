@@ -4,10 +4,14 @@ import { ArrowLeft, CheckCircle2 } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { FeedbackState } from '../../../Common/ui'
 import {
+    CLIENT_TC_WORKFLOW_STEPS,
+    displayTcStatus,
     forwardTcRequestToSuperAdmin,
     getTcRequestById,
+    isTcWorkflowStepCurrent,
     rejectTcRequest,
-    statusBadgeColor,
+    resolveTcWorkflowStage,
+    tcStatusBadgeClass,
 } from '../../../Common/TcRequest/tcRequestData'
 import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 import {
@@ -16,7 +20,6 @@ import {
     getTcRequest,
     rejectTcRequestAtPrm,
 } from '../../../services/api/tcApiService'
-import { CLIENT_TC_WORKFLOW_STEPS } from '../../../Common/TcRequest/tcRequestData'
 
 const Section = ({ title, children }) => (
     <div className='bg-white rounded-2xl shadow-md p-4'>
@@ -128,8 +131,8 @@ const ViewTcRequest = () => {
                     <div className='bg-white rounded-2xl shadow-md p-4'>
                         <div className='flex flex-wrap items-center gap-3'>
                             <h1 className='text-2xl font-semibold text-black'>{request.requestId}</h1>
-                            <span className={`px-3 py-1.5 rounded-lg text-sm font-semibold whitespace-nowrap ${statusBadgeColor[request.status] || 'bg-slate-100 text-slate-700'}`}>
-                                {request.status}
+                            <span className={`px-3 py-1.5 rounded-lg text-sm font-semibold whitespace-nowrap ${tcStatusBadgeClass(request)}`}>
+                                {displayTcStatus(request)}
                             </span>
                         </div>
                         <p className='text-sm text-[#667085] mt-2'>
@@ -140,9 +143,7 @@ const ViewTcRequest = () => {
                     <Section title='Client TC workflow'>
                         <ol className='grid gap-2 text-sm text-slate-700'>
                             {CLIENT_TC_WORKFLOW_STEPS.map((step, index) => {
-                                const stage = String(request.workflowStage || '').toLowerCase()
-                                const active = stage === step.key
-                                  || (step.key === 'class_teacher' && stage === 'prm')
+                                const active = isTcWorkflowStepCurrent(step.key, request)
                                 return (
                                     <li key={step.key} className={`flex gap-2 rounded-lg px-2 py-1 ${active ? 'bg-indigo-50 font-semibold text-indigo-900' : ''}`}>
                                         <span className='font-semibold text-slate-500'>{index + 1}.</span>
@@ -151,7 +152,7 @@ const ViewTcRequest = () => {
                                 )
                             })}
                         </ol>
-                        {live && !['Approved', 'Rejected'].includes(request.status) && request.workflowStage && request.workflowStage !== 'prm' && request.workflowStage !== 'md' ? (
+                        {live && !['Approved', 'Rejected'].includes(request.status) && resolveTcWorkflowStage(request) !== 'prm' && resolveTcWorkflowStage(request) !== 'md' ? (
                             <button
                                 type='button'
                                 disabled={busy}
@@ -223,7 +224,7 @@ const ViewTcRequest = () => {
                         </Section>
                     ) : null}
 
-                    {request.status === 'Pending PRM Review' ? (
+                    {resolveTcWorkflowStage(request) === 'prm' && !['Approved', 'Rejected'].includes(request.status) ? (
                         <Section title='PRM Action'>
                             <div className='space-y-4'>
                                 <div className='flex flex-col gap-y-2'>
@@ -233,7 +234,7 @@ const ViewTcRequest = () => {
                                         rows={3}
                                         value={prmRemarks}
                                         onChange={(e) => setPrmRemarks(e.target.value)}
-                                        placeholder='Verification notes before forwarding to Super Admin'
+                                        placeholder='Verification notes before forwarding to Class Teacher'
                                         className='text-sm text-[#808080] border border-[#D9D9D9] rounded-md px-2 py-2 w-full'
                                     />
                                 </div>
@@ -242,14 +243,14 @@ const ViewTcRequest = () => {
                                         Reject
                                     </button>
                                     <button type='button' disabled={busy} onClick={handleForward} className='bg-[#515DEF] text-white text-sm px-8 py-2 rounded-md border border-[#515DEF] hover:opacity-90 transition-all duration-200 cursor-pointer md:w-auto w-full disabled:opacity-60'>
-                                        Forward to Super Admin
+                                        Forward to Class Teacher
                                     </button>
                                 </div>
                             </div>
                         </Section>
                     ) : null}
 
-                    {request.status !== 'Pending PRM Review' && request.prmRemarks ? (
+                    {resolveTcWorkflowStage(request) !== 'prm' && request.prmRemarks ? (
                         <Section title='PRM Remarks'>
                             <Field label='Remarks' value={request.prmRemarks} />
                             {request.forwardedOn ? <Field label='Forwarded On' value={request.forwardedOn} /> : null}

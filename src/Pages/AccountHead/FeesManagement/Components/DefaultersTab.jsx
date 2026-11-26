@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import ReactECharts from 'echarts-for-react'
 import {
     AlertTriangle,
@@ -27,6 +27,8 @@ import {
 } from '../feesManagementData'
 import { useFinance } from '../../financeDomain/FinanceContext'
 import { formatCurrency } from '../../financeDomain/financeHelpers'
+import { listUnpaidInstallmentsApi } from '../../../../services/api/defaulterApiService.js'
+import { isLiveApiEnabled } from '../../../../services/api/tokenStore.js'
 
 const thClass = 'px-2 py-3.5 text-[#0C1E5B] font-medium uppercase'
 const tdClass = 'px-2 py-4 text-[#667085]'
@@ -56,7 +58,37 @@ const Panel = ({ title, children, action }) => (
 
 const DefaultersTab = () => {
     const { installments, students } = useFinance()
-    const liveDefaulters = students.map((student) => {
+    const live = isLiveApiEnabled()
+    const [apiDefaulters, setApiDefaulters] = useState([])
+    const [apiSummary, setApiSummary] = useState({ defaulterCount: 0, totalOutstanding: 0, criticalCount: 0 })
+    const [loading, setLoading] = useState(false)
+    const [error, setError] = useState('')
+
+    const refresh = useCallback(async () => {
+        if (!live) return
+        setLoading(true)
+        setError('')
+        const res = await listUnpaidInstallmentsApi()
+        if (!res.success) {
+            setError(res.error || 'Could not load unpaid installments.')
+            setApiDefaulters([])
+            setLoading(false)
+            return
+        }
+        setApiDefaulters(res.data.defaulters || [])
+        setApiSummary({
+            defaulterCount: res.data.defaulterCount || 0,
+            totalOutstanding: res.data.totalOutstanding || 0,
+            criticalCount: res.data.criticalCount || 0,
+        })
+        setLoading(false)
+    }, [live])
+
+    useEffect(() => {
+        refresh()
+    }, [refresh])
+
+    const contextDefaulters = students.map((student) => {
         const overdue = installments.filter((row) => row.studentId === student.id && (row.status === 'OVERDUE' || row.status === 'UNPAID' || row.status === 'PARTIALLY_PAID') && row.balanceAmount > 0)
         if (!overdue.length) return null
         const amount = overdue.reduce((sum, row) => sum + row.balanceAmount, 0)
@@ -76,7 +108,36 @@ const DefaultersTab = () => {
             status: worst === 'OVERDUE' ? 'FOLLOW-UP PENDING' : 'PARTIAL PAYMENT',
         }
     }).filter(Boolean)
-    const maxOutstanding = Math.max(...OUTSTANDING_BY_GRADE.map((item) => item.value))
+
+    const mappedApiDefaulters = apiDefaulters.map((row) => {
+        const worst = row.worstStatus === 'OVERDUE' ? 'OVERDUE' : row.worstStatus === 'PARTIALLY_PAID' ? 'Partially Paid' : 'Pending'
+        return {
+            id: `API-${row.studentId}`,
+            student: row.studentName || row.studentId,
+            studentId: row.admissionNo || row.studentId,
+            initials: String(row.studentName || 'ST').slice(0, 2).toUpperCase(),
+            avatarColor: 'bg-[#515DEF]',
+            className: `${row.className || ''}${row.section ? `-${row.section}` : ''}`,
+            dueSince: row.oldestDueDate || '—',
+            daysOverdue: worst,
+            amount: formatCurrency(row.outstanding || 0),
+            feeType: (row.feeHeads || []).join(', ') || 'Fee',
+            severity: worst === 'OVERDUE' ? 'CRITICAL' : worst === 'Partially Paid' ? 'MODERATE' : 'HIGH',
+            status: worst === 'OVERDUE' ? 'FOLLOW-UP PENDING' : 'PARTIAL PAYMENT',
+        }
+    })
+
+    const liveDefaulters = live ? mappedApiDefaulters : contextDefaulters
+    const defaulterRows = live ? liveDefaulters : [...liveDefaulters, ...DEFAULTERS_REGISTER]
+    const liveSummaryCards = live
+        ? [
+            { label: 'Total Defaulters', value: String(apiSummary.defaulterCount), iconTone: 'info' },
+            { label: 'Total Outstanding', value: formatCurrency(apiSummary.totalOutstanding), iconTone: 'danger' },
+            { label: 'Critical Cases', value: String(apiSummary.criticalCount), iconTone: 'danger' },
+            { label: 'Reminders Sent', value: 'Unavailable', iconTone: 'success', sub: 'WhatsApp not connected' },
+        ]
+        : DEFAULTERS_SUMMARY
+    const maxOutstanding = Math.max(1, ...OUTSTANDING_BY_GRADE.map((item) => item.value))
 
     const overdueAgingOption = useMemo(() => ({
         tooltip: { trigger: 'item', formatter: '{b}: {c}' },
@@ -149,8 +210,21 @@ const DefaultersTab = () => {
 
     return (
         <div className='space-y-6'>
+            {error ? (
+                <div className='rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 flex items-center justify-between gap-3'>
+                    <span>{error}</span>
+                    <button type='button' onClick={refresh} className='underline cursor-pointer'>Retry</button>
+                </div>
+            ) : null}
+            {loading ? <p className='text-sm text-[#667085]'>Loading unpaid installments from campus finance…</p> : null}
+            {live ? (
+                <p className='text-xs text-[#667085]'>
+                    Live unpaid ledger · reminders delivery is unavailable until WhatsApp/email is connected.
+                    <button type='button' onClick={refresh} className='ml-2 text-[#515DEF] cursor-pointer'>Refresh</button>
+                </p>
+            ) : null}
             <div className='grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4'>
-                {DEFAULTERS_SUMMARY.map((card) => {
+                {liveSummaryCards.map((card) => {
                     const Icon = SUMMARY_ICONS[card.label] ?? UserRound
                     return (
                         <div key={card.label} className='bg-white rounded-2xl shadow-md p-4'>
@@ -277,7 +351,7 @@ const DefaultersTab = () => {
                             </tr>
                         </thead>
                         <tbody>
-                            {[...liveDefaulters, ...DEFAULTERS_REGISTER].map((row) => (
+                            {defaulterRows.map((row) => (
                                 <tr key={row.id} className='border-b border-[#f2f4f7] hover:bg-[#f2f4f7]'>
                                     <td className={`${tdClass} rounded-s-lg`}>
                                         <div className='flex items-center gap-3'>

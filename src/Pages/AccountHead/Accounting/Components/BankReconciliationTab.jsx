@@ -20,7 +20,13 @@ const BankReconciliationTab = ({
     onReconcile,
     selectedSuggestionId,
     onSelectSuggestion,
+    live = false,
+    busy = false,
 }) => {
+    const bankOptions = useMemo(
+        () => (live ? ['All Banks', ...Array.from(new Set(entries.map((row) => row.bank).filter(Boolean)))] : BANK_RECONCILIATION_BANKS),
+        [entries, live],
+    )
     const [query, setQuery] = useState('')
     const [dateFilter, setDateFilter] = useState('')
     const [bankFilter, setBankFilter] = useState(BANK_RECONCILIATION_BANKS[0])
@@ -96,7 +102,7 @@ const BankReconciliationTab = ({
                             </label>
                             <label className='grid gap-1 text-xs font-semibold text-[var(--erp-slate)]'>Bank account
                                 <select value={bankFilter} onChange={(event) => setBankFilter(event.target.value)} className='min-h-10 rounded-lg border border-[var(--erp-line-strong)] bg-white px-3 text-sm'>
-                                    {BANK_RECONCILIATION_BANKS.map((bank) => <option key={bank} value={bank}>{bank}</option>)}
+                                    {bankOptions.map((bank) => <option key={bank} value={bank}>{bank}</option>)}
                                 </select>
                             </label>
                             <label className='grid gap-1 text-xs font-semibold text-[var(--erp-slate)]'>Match status
@@ -150,6 +156,8 @@ const BankReconciliationTab = ({
                 onReconcile={onReconcile}
                 selectedSuggestionId={selectedSuggestionId}
                 onSelectSuggestion={onSelectSuggestion}
+                live={live}
+                busy={busy}
             />
 
             <ConfirmAction

@@ -11,13 +11,24 @@ import NotificationsTab from './Components/NotificationsTab'
 import IntegrationsTab from './Components/IntegrationsTab'
 import ApprovalLimitsSettings from './ApprovalLimitsSettings'
 import { SETTINGS_TABS } from './settingsData'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore.js'
 
 const Settings = () => {
     const [activeTab, setActiveTab] = useState('general')
+    const live = isLiveApiEnabled()
     return (
         <section className='space-y-5'>
-            <PageHeader title='Finance settings' description='Review local frontend preferences and the authoritative configuration surfaces that require connected finance, identity and integration services.' context='Browser-local preview · production save disconnected' actions={<button type='button' disabled title='Saving authoritative settings requires the finance configuration API.' className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] bg-white px-4 text-sm font-semibold text-[var(--erp-muted)] opacity-60'><Save aria-hidden='true' size={16} /> Save unavailable</button>} />
-            <IntegrationNotice state='demo' title='Settings are not authoritative' description='Controls on these tabs are local UI previews unless explicitly described as browser-stored finance data. Production changes require server validation, RBAC, versioning and audit history.' />
+            {live ? (
+                <>
+                    <PageHeader title='Finance settings' description='General (financial year and tax identifiers) and Approval limits save to the server. Other tabs are still previews.' context='Live API · General and Approval limits authoritative' />
+                    <IntegrationNotice state='demo' title='Some tabs are still previews' description='Payment configuration, bank accounts, POS terminals, roles, notifications and integrations on this page are local UI previews until their configuration APIs exist.' />
+                </>
+            ) : (
+                <>
+                    <PageHeader title='Finance settings' description='Review local frontend preferences and the authoritative configuration surfaces that require connected finance, identity and integration services.' context='Browser-local preview · production save disconnected' actions={<button type='button' disabled title='Saving authoritative settings requires the finance configuration API.' className='inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-line-strong)] bg-white px-4 text-sm font-semibold text-[var(--erp-muted)] opacity-60'><Save aria-hidden='true' size={16} /> Save unavailable</button>} />
+                    <IntegrationNotice state='demo' title='Settings are not authoritative' description='Controls on these tabs are local UI previews unless explicitly described as browser-stored finance data. Production changes require server validation, RBAC, versioning and audit history.' />
+                </>
+            )}
             <div className='flex gap-2 overflow-x-auto border-b border-[var(--erp-line)]' role='tablist' aria-label='Finance settings views'>
                 {SETTINGS_TABS.map((tab) => <button key={tab.id} type='button' role='tab' aria-selected={activeTab === tab.id} onClick={() => setActiveTab(tab.id)} className={`min-h-11 whitespace-nowrap border-b-2 px-3 text-sm font-semibold ${activeTab === tab.id ? 'border-[var(--erp-indigo)] text-[var(--erp-indigo)]' : 'border-transparent text-[var(--erp-slate)]'}`}>{tab.label}</button>)}
             </div>

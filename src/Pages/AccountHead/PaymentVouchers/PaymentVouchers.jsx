@@ -1,11 +1,12 @@
-import { useState, useEffect, useMemo } from 'react'
-import { Download, Printer, X, FileText, ShoppingCart, UserCheck, Layers } from 'lucide-react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
+import { Download, Printer, X, FileText, ShoppingCart, UserCheck, Layers, Undo2 } from 'lucide-react'
 import { DataTable, IntegrationNotice, PageHeader, StatusBadge } from '../../../Common/ui'
 import { openPrintDocument } from '../../../Common/printDocument'
 import { useFinance } from '../financeDomain/FinanceContext'
 import { formatCurrency } from '../financeDomain/financeHelpers'
 import { purchaseService } from '../../../services/modules/purchaseService'
-import { isLiveApiEnabled } from '../../../services/api/tokenStore'
+import { listPaymentVouchersApi, payVendorLiabilityApi } from '../../../services/api/paymentVoucherApiService.js'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore.js'
 
 const escapeHtml = (value) => String(value ?? '—')
     .replaceAll('&', '&amp;')
@@ -14,11 +15,45 @@ const escapeHtml = (value) => String(value ?? '—')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;')
 
+const isPayrollTxn = (transaction) => String(transaction?.sourceModule || '').toUpperCase() === 'PAYROLL'
+
+const isPayrollReversal = (transaction) => {
+    if (!isPayrollTxn(transaction)) return false
+    if (String(transaction?.voucherType || '').toLowerCase() === 'reversal') return true
+    if (String(transaction?.entryType || '').toLowerCase() === 'reversal') return true
+    if (transaction?.reversesTransactionId) return true
+    const id = String(transaction?.id || '')
+    const voucherNo = String(transaction?.voucherNo || '')
+    return id.startsWith('REV-') || voucherNo.startsWith('RV-')
+}
+
+const isPayrollPayment = (transaction) => isPayrollTxn(transaction) && !isPayrollReversal(transaction)
+
+const payeeLabel = (transaction) => {
+    if (isPayrollTxn(transaction)) return 'Payee / Staff'
+    if (transaction?.isVendorLiability || transaction?.voucherKind === 'vendor_payment') return 'Payee / Vendor'
+    return 'Payee / Student'
+}
+
+const detailSubtitle = (transaction) => {
+    if (transaction?.isVendorLiability) return 'Generated from Director approved Purchase Order'
+    if (isPayrollReversal(transaction)) return 'Payroll payment reversal voucher'
+    if (isPayrollPayment(transaction)) return 'HR payroll payment voucher'
+    return 'Transaction-backed fee receipt'
+}
+
+const printTitle = (transaction) => {
+    if (transaction?.isVendorLiability) return 'Accounts Payable Liability Voucher'
+    if (isPayrollReversal(transaction)) return 'Payroll Payment Reversal Voucher'
+    if (isPayrollPayment(transaction)) return 'Payroll Payment Voucher'
+    return 'Payment & Fee Receipt Voucher'
+}
+
 const voucherFields = (transaction, payee) => [
     ['Voucher no.', transaction.voucherNo || '—'],
     ['Transaction reference / PO', transaction.transactionNo || transaction.id],
     ['Date', transaction.transactionDate || '—'],
-    [transaction.isVendorLiability ? 'Payee / Vendor' : 'Payee / Student', payee],
+    [payeeLabel(transaction), payee],
     ['Category', transaction.category || transaction.sourceModule || '—'],
     ['Payment mode', transaction.paymentMode || 'Bank Transfer / AP'],
     ['Amount', formatCurrency(transaction.amount)],
@@ -26,12 +61,13 @@ const voucherFields = (transaction, payee) => [
     ['Prepared by', transaction.preparedBy || transaction.createdBy || 'Finance Head'],
     ['Status', transaction.voucherStatus || transaction.status || 'Issued'],
     ...(transaction.dueDate ? [['Payment due date', transaction.dueDate]] : []),
+    ...(transaction.reversesTransactionId ? [['Reverses', transaction.reversesTransactionId]] : []),
 ]
 
 const voucherPrintBody = (transaction, payee) => `
     <header style="margin-bottom:20px;border-bottom:2px solid #1E293B;padding-bottom:12px;">
         <p style="font-size:12px;color:#667085;margin:0;">Queen Mira International School • Central Accounts & Treasury</p>
-        <h1 style="font-size:22px;margin-top:6px;margin-bottom:2px;">${transaction.isVendorLiability ? 'Accounts Payable Liability Voucher' : 'Payment & Fee Receipt Voucher'}</h1>
+        <h1 style="font-size:22px;margin-top:6px;margin-bottom:2px;">${printTitle(transaction)}</h1>
         <p style="font-size:11px;color:#475569;margin:0;">Voucher Reference: ${escapeHtml(transaction.voucherNo || transaction.id)}</p>
     </header>
     <table style="width:100%;border-collapse:collapse;">
@@ -46,14 +82,35 @@ const voucherPrintBody = (transaction, payee) => `
 `
 
 export default function PaymentVouchers() {
+    const { transactions: ctxTransactions = [], students = [], recordVoucherAction, rehydrateFromApi } = useFinance()
     const live = isLiveApiEnabled()
-    const { transactions = [], students = [], recordVoucherAction } = useFinance()
     const [selectedId, setSelectedId] = useState(null)
     const [liabilities, setLiabilities] = useState([])
-    const [voucherTab, setVoucherTab] = useState('all') // 'all' | 'students' | 'vendors'
+    const [apiData, setApiData] = useState(null)
+    const [loading, setLoading] = useState(false)
+    const [error, setError] = useState('')
+    const [notice, setNotice] = useState('')
+    const [payingId, setPayingId] = useState(null)
+    const [voucherTab, setVoucherTab] = useState('all') // 'all' | 'students' | 'vendors' | 'payroll' | 'payroll-reversals'
 
-    // Load vendor liability vouchers from purchase service
+    const refresh = useCallback(async () => {
+        if (!live) return
+        setLoading(true)
+        setError('')
+        const res = await listPaymentVouchersApi()
+        if (!res.success) {
+            setError(res.error || 'Could not load payment vouchers.')
+        } else {
+            setApiData(res.data)
+        }
+        setLoading(false)
+    }, [live])
+
     useEffect(() => {
+        if (live) {
+            refresh()
+            return undefined
+        }
         const loadLiabilities = async () => {
             try {
                 const res = await purchaseService.getFinanceLiabilities()
@@ -65,9 +122,38 @@ export default function PaymentVouchers() {
             }
         }
         loadLiabilities()
-    }, [])
+        return undefined
+    }, [live, refresh])
+
+    const payVendor = async (row) => {
+        setPayingId(row.id)
+        setError('')
+        setNotice('')
+        const res = await payVendorLiabilityApi({ liabilityId: row.id, paymentMode: 'BANK_TRANSFER' })
+        setPayingId(null)
+        if (!res.success) {
+            setError(res.error || 'Vendor payment failed.')
+            return
+        }
+        setNotice(
+            res.data?.skipped
+                ? 'Liability was already paid — no duplicate voucher created.'
+                : `Vendor payment posted as voucher ${res.data?.voucherNo || ''}.`,
+        )
+        await refresh()
+        if (typeof rehydrateFromApi === 'function') rehydrateFromApi()
+    }
+
+    // In live mode the voucher register comes from the API; otherwise from the browser finance snapshot.
+    const transactions = useMemo(
+        () => (live
+            ? [...(apiData?.fees || []), ...(apiData?.vendorPayments || []), ...(apiData?.payroll || []), ...(apiData?.payrollReversals || [])]
+            : ctxTransactions),
+        [live, apiData, ctxTransactions],
+    )
 
     const mappedLiabilities = useMemo(() => {
+        if (live) return apiData?.vendorLiabilities || []
         return liabilities.map((l) => ({
             id: l.id,
             voucherNo: l.voucherNumber,
@@ -85,17 +171,34 @@ export default function PaymentVouchers() {
             dueDate: l.dueDate,
             poId: l.poId,
         }))
-    }, [liabilities])
+    }, [live, apiData, liabilities])
+
+    const payrollPayments = useMemo(
+        () => (transactions || []).filter((t) => isPayrollPayment(t)),
+        [transactions],
+    )
+
+    const payrollReversals = useMemo(
+        () => (transactions || []).filter((t) => isPayrollReversal(t)),
+        [transactions],
+    )
 
     const allVouchers = useMemo(() => {
-        if (voucherTab === 'students') return transactions
+        if (voucherTab === 'students') {
+            return (transactions || []).filter((t) => !isPayrollTxn(t))
+        }
         if (voucherTab === 'vendors') return mappedLiabilities
+        if (voucherTab === 'payroll') return payrollPayments
+        if (voucherTab === 'payroll-reversals') return payrollReversals
         return [...mappedLiabilities, ...transactions]
-    }, [voucherTab, transactions, mappedLiabilities])
+    }, [voucherTab, transactions, mappedLiabilities, payrollPayments, payrollReversals])
 
     const selected = allVouchers.find((item) => item.id === selectedId) || null
 
     const payeeFor = (transaction) => {
+        if (isPayrollTxn(transaction)) {
+            return transaction.employeeName || transaction.employeeId || 'Staff payroll'
+        }
         if (transaction?.isVendorLiability || transaction?.payee) {
             return transaction.payee || transaction.payeeName || 'Vendor / Stores Supplier'
         }
@@ -127,7 +230,7 @@ export default function PaymentVouchers() {
     const print = (transaction) => {
         safeRecordVoucherAction(transaction.id, 'Print')
         openPrintDocument({
-            title: transaction.isVendorLiability ? 'Accounts Payable Voucher' : 'Payment voucher',
+            title: transaction.isVendorLiability ? 'Accounts Payable Voucher' : printTitle(transaction),
             body: voucherPrintBody(transaction, payeeFor(transaction))
         })
     }
@@ -143,6 +246,16 @@ export default function PaymentVouchers() {
                     {row.isVendorLiability && (
                         <span className='px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700 uppercase'>
                             Vendor AP
+                        </span>
+                    )}
+                    {isPayrollPayment(row) && (
+                        <span className='px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700 uppercase'>
+                            Payroll
+                        </span>
+                    )}
+                    {isPayrollReversal(row) && (
+                        <span className='px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 uppercase'>
+                            Reversal
                         </span>
                     )}
                 </div>
@@ -167,10 +280,9 @@ export default function PaymentVouchers() {
                 description={live
                     ? 'Inspect, print or download vouchers from the live finance ledger and approved purchase liabilities.'
                     : 'Inspect, print or download vouchers generated from finance collections and approved purchase orders.'}
-                context={`${allVouchers.length} total voucher${allVouchers.length === 1 ? '' : 's'} (${mappedLiabilities.length} Vendor AP liabilities, ${transactions.length} Student fee vouchers)${live ? ' · live finance API' : ''}`}
+                context={`${mappedLiabilities.length} vendor AP · ${payrollPayments.length} payroll · ${payrollReversals.length} reversals · ${transactions.length} finance txns${live ? ' · live finance API' : ''}`}
             />
 
-            {/* Voucher Segment Filter Pills */}
             <div className='flex flex-wrap items-center gap-2 p-1.5 bg-slate-100 rounded-xl max-w-fit border border-slate-200'>
                 <button
                     type='button'
@@ -178,7 +290,7 @@ export default function PaymentVouchers() {
                     className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${voucherTab === 'all' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
                 >
                     <Layers size={14} />
-                    All Vouchers ({allVouchers.length})
+                    All
                 </button>
                 <button
                     type='button'
@@ -186,7 +298,23 @@ export default function PaymentVouchers() {
                     className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${voucherTab === 'vendors' ? 'bg-white text-purple-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
                 >
                     <ShoppingCart size={14} className='text-purple-600' />
-                    Vendor AP Liabilities ({mappedLiabilities.length})
+                    Vendor AP ({mappedLiabilities.length})
+                </button>
+                <button
+                    type='button'
+                    onClick={() => setVoucherTab('payroll')}
+                    className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${voucherTab === 'payroll' ? 'bg-white text-emerald-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                >
+                    <FileText size={14} className='text-emerald-600' />
+                    Payroll ({payrollPayments.length})
+                </button>
+                <button
+                    type='button'
+                    onClick={() => setVoucherTab('payroll-reversals')}
+                    className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${voucherTab === 'payroll-reversals' ? 'bg-white text-amber-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                >
+                    <Undo2 size={14} className='text-amber-700' />
+                    Payroll reversals ({payrollReversals.length})
                 </button>
                 <button
                     type='button'
@@ -194,17 +322,25 @@ export default function PaymentVouchers() {
                     className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${voucherTab === 'students' ? 'bg-white text-blue-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
                 >
                     <UserCheck size={14} className='text-blue-600' />
-                    Student Fee Receipts ({transactions.length})
+                    Fees / other
                 </button>
             </div>
 
-            {!live ? (
-                <IntegrationNotice
-                    state='demo'
-                    title='Integrated Institutional Voucher Register'
-                    description='Displays unified Accounts Payable liability vouchers emitted by approved Stores Purchase Orders alongside student fee receipt transactions.'
-                />
+            <IntegrationNotice
+                state='connected'
+                title={live ? 'Live voucher register (PostgreSQL)' : 'Integrated institutional voucher register'}
+                description='HR paid payroll months post Finance OUT vouchers with ledger lines. Reversal vouchers are listed separately. Vendor AP comes from approved purchase orders and can be paid here (posts a balanced GL voucher, once). Fee receipts come from campus finance transactions.'
+            />
+            {error ? (
+                <div role='alert' className='flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700'>
+                    <span>{error}</span>
+                    {live ? <button type='button' onClick={refresh} className='underline cursor-pointer'>Retry</button> : null}
+                </div>
             ) : null}
+            {notice ? (
+                <div role='status' className='rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800'>{notice}</div>
+            ) : null}
+            {loading ? <p className='text-sm text-[#667085]'>Loading payment vouchers from campus finance…</p> : null}
 
             <section className='overflow-hidden rounded-[var(--erp-radius-surface)] border border-[var(--erp-line)] bg-white'>
                 <DataTable
@@ -242,9 +378,19 @@ export default function PaymentVouchers() {
                                         Procurement AP Liability
                                     </span>
                                 )}
+                                {isPayrollPayment(selected) && (
+                                    <span className='px-2 py-0.5 rounded text-xs font-bold bg-emerald-100 text-emerald-700'>
+                                        Payroll payment
+                                    </span>
+                                )}
+                                {isPayrollReversal(selected) && (
+                                    <span className='px-2 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-800'>
+                                        Payroll reversal
+                                    </span>
+                                )}
                             </div>
                             <p className='mt-1 text-xs text-[var(--erp-muted)]'>
-                                {selected.isVendorLiability ? 'Generated from Director approved Purchase Order' : 'Transaction-backed fee receipt'} · Read only
+                                {detailSubtitle(selected)} · Read only
                             </p>
                         </div>
                         <button
@@ -272,6 +418,16 @@ export default function PaymentVouchers() {
                         >
                             <Printer aria-hidden='true' size={16} /> Print voucher
                         </button>
+                        {live && selected.isVendorLiability && selected.voucherStatus !== 'Paid' ? (
+                            <button
+                                type='button'
+                                disabled={payingId === selected.id}
+                                onClick={() => payVendor(selected)}
+                                className='inline-flex min-h-10 items-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60 cursor-pointer'
+                            >
+                                {payingId === selected.id ? 'Posting payment…' : 'Pay vendor & post voucher'}
+                            </button>
+                        ) : null}
                         <button
                             type='button'
                             onClick={() => download(selected)}

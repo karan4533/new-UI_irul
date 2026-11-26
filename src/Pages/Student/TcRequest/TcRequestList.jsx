@@ -6,8 +6,9 @@ import ExportModal from '../../../Common/CommonComponents/ExportModal'
 import IntegrationNotice from '../../../Common/ui/IntegrationNotice'
 import { useActiveStudent } from '../../../context/ActiveStudentContext'
 import {
+    displayTcStatus,
     getTcRequestsByStudentId,
-    statusBadgeColor,
+    tcStatusBadgeClass,
 } from '../../../Common/TcRequest/tcRequestData'
 import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 import { listTcRequests } from '../../../services/api/tcApiService'
@@ -166,8 +167,8 @@ const TcRequestList = () => {
                                         <td className='px-2 py-4'>{request.transferTo}</td>
                                         <td className='px-2 py-4'>{request.requestedOn}</td>
                                         <td className='px-2 py-4'>
-                                            <span className={`px-2 py-1 rounded-lg text-xs font-semibold whitespace-nowrap ${statusBadgeColor[request.status]}`}>
-                                                {request.status}
+                                            <span className={`px-2 py-1 rounded-lg text-xs font-semibold whitespace-nowrap ${tcStatusBadgeClass(request)}`}>
+                                                {displayTcStatus(request)}
                                             </span>
                                         </td>
                                         <td className='px-2 py-4'>{request.tcNumber || '—'}</td>

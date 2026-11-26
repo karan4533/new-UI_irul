@@ -4,6 +4,7 @@ import AddLeaveRequestForm from '../Common/LeaveRequest/AddLeaveRequestForm'
 import ViewMyLeaveRequestPage from '../Common/LeaveRequest/ViewMyLeaveRequestPage'
 import { isLiveApiEnabled } from '../services/api/tokenStore'
 import { EnterpriseOperationsRoutes } from './EnterpriseOperationsRoutes'
+import { TcRequestRoleRoutes } from './tcRequestRoleRoutes'
 import React from 'react'
 import { Navigate, Route, Routes as ReactRoutes } from 'react-router-dom'
 // Unified Library Workspace replaces separate legacy list views
@@ -88,6 +89,7 @@ const LibrarianRoutes = () => {
 
             {/* Enterprise Functional Operations (Stores, Gate Pass, File Room, Ticketing, Monitoring, Lost & Found) */}
             {EnterpriseOperationsRoutes({ basePath: '/librarian', role: 'librarian' })}
+            {TcRequestRoleRoutes({ basePath: '/librarian' })}
 
             <Route path="*" element={<Navigate to="/librarian/dashboard" replace />} />
         </ReactRoutes>

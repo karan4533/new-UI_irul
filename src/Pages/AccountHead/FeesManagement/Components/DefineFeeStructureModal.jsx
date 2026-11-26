@@ -241,7 +241,7 @@ const DefineFeeStructureModal = ({ isOpen, onClose, onSave, onAddCategory }) => 
                                 toast.error('Grade, fee head and amount are required.')
                                 return
                             }
-                            onSave?.({
+                            Promise.resolve(onSave?.({
                                 academicYear: form.academicYear,
                                 className: form.grade,
                                 feeCategoryId: form.feeCategoryId,
@@ -253,9 +253,7 @@ const DefineFeeStructureModal = ({ isOpen, onClose, onSave, onAddCategory }) => 
                                 concessionApplicable: form.concessionApplicable,
                                 mandatory: form.mandatory,
                                 status: form.status,
-                            })
-                            toast.success('Fee structure saved.')
-                            onClose()
+                            })).finally(() => onClose())
                         }}
                         className='sm:min-w-[160px] bg-[#515DEF] text-white text-sm font-medium px-5 py-2.5 rounded-md hover:opacity-90 transition-all cursor-pointer'
                     >

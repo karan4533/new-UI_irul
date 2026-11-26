@@ -122,6 +122,7 @@ function snapshotFromContext({
         onlineBookEntries,
         reconciliationItems,
         activityFees: [],
+        transportFees: [],
         wallets: [],
         walletRecharges: [],
         transportFleet: [],
@@ -237,6 +238,14 @@ export const FinanceProvider = ({ children }) => {
     const [wallets, setWallets] = useState(() => EMPTY_LIST)
     const [walletRecharges, setWalletRecharges] = useState(() => EMPTY_LIST)
     const [transportFleet, setTransportFleet] = useState(() => EMPTY_LIST)
+    const [activityFees, setActivityFees] = useState(() => EMPTY_LIST)
+    const [transportFees, setTransportFees] = useState(() => EMPTY_LIST)
+    // Accounting registries owned by /finance/actions/* — carried so the debounced state PUT never wipes them.
+    const [chartOfAccounts, setChartOfAccounts] = useState(() => EMPTY_LIST)
+    const [journalVouchers, setJournalVouchers] = useState(() => EMPTY_LIST)
+    const [bookFeeBreakup, setBookFeeBreakup] = useState(() => EMPTY_LIST)
+    const [walletSpends, setWalletSpends] = useState(() => EMPTY_LIST)
+    const [financeSettings, setFinanceSettings] = useState(() => EMPTY_LIST)
 
     const applyRemoteState = useCallback((payload) => {
         const data = payload?.data && typeof payload.data === 'object' ? payload.data : {}
@@ -266,6 +275,13 @@ export const FinanceProvider = ({ children }) => {
         setWallets(Array.isArray(data.wallets) ? data.wallets : [])
         setWalletRecharges(Array.isArray(data.walletRecharges) ? data.walletRecharges : [])
         setTransportFleet(Array.isArray(data.transportFleet) ? data.transportFleet : [])
+        setActivityFees(Array.isArray(data.activityFees) ? data.activityFees : [])
+        setTransportFees(Array.isArray(data.transportFees) ? data.transportFees : [])
+        setChartOfAccounts(Array.isArray(data.chartOfAccounts) ? data.chartOfAccounts : [])
+        setJournalVouchers(Array.isArray(data.journalVouchers) ? data.journalVouchers : [])
+        setBookFeeBreakup(Array.isArray(data.bookFeeBreakup) ? data.bookFeeBreakup : [])
+        setWalletSpends(Array.isArray(data.walletSpends) ? data.walletSpends : [])
+        setFinanceSettings(Array.isArray(data.financeSettings) ? data.financeSettings : [])
         setLastSavedAt(payload?.savedAt || null)
         liveReadyRef.current = true
     }, [])
@@ -1170,6 +1186,13 @@ export const FinanceProvider = ({ children }) => {
                 snapshot.wallets = wallets
                 snapshot.walletRecharges = walletRecharges
                 snapshot.transportFleet = transportFleet
+                snapshot.activityFees = activityFees
+                snapshot.transportFees = transportFees
+                snapshot.chartOfAccounts = chartOfAccounts
+                snapshot.journalVouchers = journalVouchers
+                snapshot.bookFeeBreakup = bookFeeBreakup
+                snapshot.walletSpends = walletSpends
+                snapshot.financeSettings = financeSettings
                 const res = await saveFinanceStateApi(snapshot)
                 if (res.success) {
                     setLastSavedAt(res.data?.savedAt || new Date().toISOString())
@@ -1232,6 +1255,13 @@ export const FinanceProvider = ({ children }) => {
         reconciliationItems,
         students,
         transactions,
+        activityFees,
+        transportFees,
+        chartOfAccounts,
+        journalVouchers,
+        bookFeeBreakup,
+        walletSpends,
+        financeSettings,
         transportFleet,
         walletRecharges,
         wallets,
