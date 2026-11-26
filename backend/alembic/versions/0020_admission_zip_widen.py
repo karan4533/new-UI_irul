@@ -1,15 +1,15 @@
 """Widen admissions zip_code fields beyond VARCHAR(20).
 
-Revision ID: 0019_admission_zip_widen
-Revises: 0018_exam_academic_year
+Revision ID: 0020_admission_zip_widen
+Revises: 0019_calendar_event_times
 Create Date: 2026-10-27
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0019_admission_zip_widen"
-down_revision = "0018_exam_academic_year"
+revision = "0020_admission_zip_widen"
+down_revision = "0019_calendar_event_times"
 branch_labels = None
 depends_on = None
 

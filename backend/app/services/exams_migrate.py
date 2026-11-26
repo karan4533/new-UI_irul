@@ -10,7 +10,7 @@ from app.core.database import engine
 def ensure_exams_schema() -> None:
     """Add exams columns introduced after baseline when create_all cannot alter existing tables.
 
-    Matches Alembic ``0018`` (academic_year) and ``0022_exam_schedule_json`` (schedule JSON).
+    Matches Alembic ``0018`` (academic_year) and ``0023_exam_schedule_json`` (schedule JSON).
     Safe to run repeatedly; never drops data. Does not stamp alembic_version — operators
     should still run ``alembic upgrade head`` (or stamp after a verified manual ADD COLUMN).
     """

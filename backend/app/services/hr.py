@@ -346,17 +346,35 @@ def replace_items(db: Session, actor: User, collection: str, items: list[dict]) 
     if collection == "payroll-revisions":
         _apply_increments(db, actor, saved)
     _audit_collection(db, actor, "HR_COLLECTION_SAVED", collection, str(len(saved)))
-    db.commit()
     if collection == "payroll-months":
-        try:
-            from app.services.finance_actions import post_payroll_voucher
+        from app.services.finance_actions import post_payroll_voucher
+        from fastapi import HTTPException
 
-            for month_row in saved:
-                if str(month_row.get("paymentStatus") or "").lower() in {"paid", "finalized"}:
-                    post_payroll_voucher(db, actor, month_row)
-        except Exception:
-            # Finance snapshot may be empty; payroll save must still succeed.
-            pass
+        for month_row in saved:
+            if str(month_row.get("paymentStatus") or "").lower() in {"paid", "finalized"}:
+                try:
+                    # Same DB transaction as HR payroll save — commit once below.
+                    post_payroll_voucher(db, actor, month_row, commit=False)
+                except HTTPException:
+                    # Uncommitted HR + finance changes roll back when the request session closes.
+                    raise
+                except Exception as exc:
+                    details = str(exc)[:500]
+                    db.rollback()
+                    write_audit(
+                        db,
+                        action="finance.payroll_voucher.failed",
+                        entity_type="payroll_month",
+                        entity_id=str(month_row.get("id") or ""),
+                        actor_id=actor.id,
+                        campus_id=actor.campus_id,
+                        details=details,
+                    )
+                    db.commit()
+                    fail(500, "payroll_voucher_failed", f"Payroll voucher failed; payroll not saved: {exc}")
+        db.commit()
+    else:
+        db.commit()
     return saved
 
 
@@ -374,6 +392,31 @@ def patch_item(db: Session, actor: User, collection: str, public_id: str, body: 
         _sync_leave_attendance(db, actor, [merged])
     if collection == "exits":
         _apply_exits(db, actor, [merged])
+    if collection == "payroll-months" and str(merged.get("paymentStatus") or "").lower() in {
+        "paid",
+        "finalized",
+    }:
+        from fastapi import HTTPException
+        from app.services.finance_actions import post_payroll_voucher
+
+        try:
+            post_payroll_voucher(db, actor, merged, commit=False)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            details = str(exc)[:500]
+            db.rollback()
+            write_audit(
+                db,
+                action="finance.payroll_voucher.failed",
+                entity_type="payroll_month",
+                entity_id=public_id,
+                actor_id=actor.id,
+                campus_id=actor.campus_id,
+                details=details,
+            )
+            db.commit()
+            fail(500, "payroll_voucher_failed", f"Payroll voucher failed; payroll not saved: {exc}")
     _audit_collection(db, actor, "HR_RECORD_UPDATED", collection, public_id)
     db.commit()
     return merged

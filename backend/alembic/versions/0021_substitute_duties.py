@@ -1,7 +1,7 @@
-"""Admission referrals (record only) and per-user read receipts for role-wide notifications.
+"""Administrator-assigned substitute duties (attendance access for one section, date and period).
 
-Revision ID: 0021_referrals_notif_reads
-Revises: 0020_substitute_duties
+Revision ID: 0021_substitute_duties
+Revises: 0020_admission_zip_widen
 Create Date: 2026-10-27
 """
 
@@ -9,12 +9,12 @@ from alembic import op
 
 from app.services.schema_helpers import create_missing_tables, drop_tables_if_empty
 
-revision = "0021_referrals_notif_reads"
-down_revision = "0020_substitute_duties"
+revision = "0021_substitute_duties"
+down_revision = "0020_admission_zip_widen"
 branch_labels = None
 depends_on = None
 
-TABLES = ["admission_referrals", "notification_reads"]
+TABLES = ["substitute_duties"]
 
 
 def upgrade_connection(conn) -> dict:

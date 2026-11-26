@@ -1,4 +1,4 @@
-"""Migration 0020 (substitute_duties) on a real PostgreSQL server.
+"""Migration 0021 (substitute_duties) on a real PostgreSQL server.
 
 Opt-in only: set TEST_PG_URL to a role that may CREATE DATABASE, e.g.
     TEST_PG_URL=postgresql+psycopg://<user>:<password>@localhost:5432/postgres
@@ -19,11 +19,11 @@ from sqlalchemy.engine import make_url
 from app.models import Base
 from app.services.schema_helpers import MigrationAborted
 
-REVISION = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0020_substitute_duties.py"
+REVISION = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0021_substitute_duties.py"
 
 
 def _revision():
-    spec = importlib.util.spec_from_file_location("rev_0020", REVISION)
+    spec = importlib.util.spec_from_file_location("rev_0021", REVISION)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -45,7 +45,7 @@ def pg():
         pytest.skip(f"Cannot create a scratch database with TEST_PG_URL: {type(error).__name__}")
     engine = create_engine(base.set(database=name))
     try:
-        # The 0019 schema: every model table except the one 0020 adds.
+        # The 0020 schema: every model table except the one 0021 adds.
         Base.metadata.create_all(engine, tables=[t for n, t in Base.metadata.tables.items() if n != "substitute_duties"])
         yield engine
     finally:

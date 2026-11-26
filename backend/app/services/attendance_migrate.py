@@ -10,7 +10,7 @@ from app.core.database import engine
 def ensure_attendance_schema() -> None:
     """Best-effort add ``session`` / check-in/out columns when create_all cannot alter.
 
-    Matches Alembic ``0023_attendance_dual_session``. Never raises — a missing column
+    Matches Alembic ``0024_attendance_dual_session``. Never raises — a missing column
     otherwise makes every Manual Attendance list/upsert return HTTP 500.
     """
     try:

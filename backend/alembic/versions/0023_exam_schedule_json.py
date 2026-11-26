@@ -1,15 +1,15 @@
 """Persist exam subject timelines on exams.schedule JSON.
 
-Revision ID: 0022_exam_schedule_json
-Revises: 0021_referrals_notif_reads
+Revision ID: 0023_exam_schedule_json
+Revises: 0022_referrals_notif_reads
 Create Date: 2026-10-27
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0022_exam_schedule_json"
-down_revision = "0021_referrals_notif_reads"
+revision = "0023_exam_schedule_json"
+down_revision = "0022_referrals_notif_reads"
 branch_labels = None
 depends_on = None
 

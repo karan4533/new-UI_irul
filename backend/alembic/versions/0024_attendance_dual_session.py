@@ -1,15 +1,15 @@
 """Dual-session student attendance (FN morning / AN afternoon).
 
-Revision ID: 0023_attendance_dual_session
-Revises: 0022_exam_schedule_json
+Revision ID: 0024_attendance_dual_session
+Revises: 0023_exam_schedule_json
 Create Date: 2026-10-28
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0023_attendance_dual_session"
-down_revision = "0022_exam_schedule_json"
+revision = "0024_attendance_dual_session"
+down_revision = "0023_exam_schedule_json"
 branch_labels = None
 depends_on = None
 

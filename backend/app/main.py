@@ -23,6 +23,7 @@ from app.api.v1.endpoints.webhooks import router as webhooks_router
 from app.api.v1.endpoints.tc_requests import router as tc_requests_router
 from app.api.v1.endpoints.files import router as files_router
 from app.api.v1.endpoints.finance import router as finance_router
+from app.api.v1.endpoints.purchase import router as purchase_router
 from app.api.v1.endpoints.hr import router as hr_router
 from app.api.v1.endpoints.masters import router as masters_router
 from app.api.v1.endpoints.parents import router as parents_router
@@ -98,6 +99,7 @@ app.include_router(exams_router)
 app.include_router(leave_router)
 app.include_router(escalations_router)
 app.include_router(finance_router)
+app.include_router(purchase_router)
 app.include_router(hr_router)
 app.include_router(files_router)
 app.include_router(documents_router)

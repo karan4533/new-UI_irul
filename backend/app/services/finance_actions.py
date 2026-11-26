@@ -28,6 +28,18 @@ _TRANSPORT_FEE_ROLES = {
     "managing_director",
 }
 
+_ACTIVITY_FEE_ROLES = {
+    "prm",
+    "programmemanager",
+    "coordinator",
+    "principal",
+    "accounthead",
+    "finance_assistant",
+    "admin",
+    "superadmin",
+    "managing_director",
+}
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -1435,22 +1447,105 @@ def apply_hr_concessions(db: Session, actor: User) -> dict:
     return {"success": True, "applied": applied, "skipped": skipped, "state": saved}
 
 
-def post_payroll_voucher(db: Session, actor: User, month_row: dict) -> dict:
-    """Post an HR paid payroll month as a Finance OUT transaction/voucher."""
-    if str(month_row.get("paymentStatus") or "").lower() not in {"paid", "finalized"}:
+def _payroll_voucher_id(month_row: dict) -> str:
+    return (
+        f"PAYROLL-{month_row.get('id') or month_row.get('employeeId')}"
+        f"-{month_row.get('month')}-{month_row.get('year')}"
+    )
+
+
+def _gl_amounts_balanced(data: dict, txn_id: str) -> tuple[bool, float, float]:
+    debit_total = 0.0
+    credit_total = 0.0
+    for row in data.get("glEntries") or []:
+        if str((row or {}).get("sourceTransactionId") or "") != str(txn_id):
+            continue
+        debit_total += _parse_money(row.get("debit"))
+        credit_total += _parse_money(row.get("credit"))
+    return abs(debit_total - credit_total) < 0.01, debit_total, credit_total
+
+
+def _is_payroll_reversal(row: dict | None) -> bool:
+    if not isinstance(row, dict):
+        return False
+    if str(row.get("voucherType") or "").lower() == "reversal":
+        return True
+    if str(row.get("entryType") or "").lower() == "reversal":
+        return True
+    if row.get("reversesTransactionId"):
+        return True
+    txn_id = str(row.get("id") or "")
+    voucher_no = str(row.get("voucherNo") or "")
+    return txn_id.upper().startswith("REV-") or voucher_no.upper().startswith("RV-")
+
+
+def list_payroll_vouchers(db: Session, actor: User) -> dict:
+    state = fin.get_state(db, actor)
+    data = state["data"]
+    txns = [
+        row
+        for row in (data.get("transactions") or [])
+        if str((row or {}).get("sourceModule") or "").upper() == "PAYROLL"
+    ]
+    payments = [row for row in txns if not _is_payroll_reversal(row)]
+    reversals = [row for row in txns if _is_payroll_reversal(row)]
+    return {
+        "success": True,
+        "vouchers": payments,
+        "payments": payments,
+        "reversals": reversals,
+        "count": len(payments),
+        "paymentCount": len(payments),
+        "reversalCount": len(reversals),
+    }
+
+
+def post_payroll_voucher(
+    db: Session,
+    actor: User,
+    month_row: dict,
+    *,
+    commit: bool = True,
+) -> dict:
+    """Post an HR paid payroll month as a Finance OUT transaction/voucher + balanced GL."""
+    if not actor.campus_id:
+        fail(400, "validation_error", "Campus context required for payroll voucher.")
+    if not isinstance(month_row, dict):
+        fail(400, "validation_error", "Payroll month payload must be an object.")
+
+    status = str(month_row.get("paymentStatus") or "").lower()
+    if status not in {"paid", "finalized"}:
         return {"success": False, "skipped": True, "reason": "not_paid"}
 
+    try:
+        amount = float(month_row.get("netSalary") or month_row.get("amount") or 0)
+    except (TypeError, ValueError):
+        fail(400, "validation_error", "netSalary must be a number.")
+    if amount <= 0:
+        fail(400, "validation_error", "Payroll voucher amount must be greater than zero.")
+    if not month_row.get("employeeId") and not month_row.get("id"):
+        fail(400, "validation_error", "employeeId or payroll month id is required.")
+
+    public_id = _payroll_voucher_id(month_row)
     state = fin.get_state(db, actor)
     data = dict(state["data"])
     transactions = list(data.get("transactions") or [])
-    public_id = f"PAYROLL-{month_row.get('id') or month_row.get('employeeId')}-{month_row.get('month')}-{month_row.get('year')}"
-    if any(t.get("id") == public_id for t in transactions):
-        return {"success": True, "skipped": True, "reason": "already_posted"}
+    existing = next((t for t in transactions if t.get("id") == public_id), None)
+    if existing is not None:
+        if str(existing.get("status") or "").upper() == "REVERSED":
+            fail(409, "conflict", "Payroll voucher was reversed; post a new paid month row to re-issue.")
+        return {
+            "success": True,
+            "skipped": True,
+            "reason": "already_posted",
+            "transactionId": public_id,
+            "transaction": existing,
+            "voucherNo": existing.get("voucherNo"),
+        }
 
     seq = _seq(data)
     seq["txn"] += 1
     seq["voucher"] += 1
-    amount = float(month_row.get("netSalary") or month_row.get("amount") or 0)
     txn = {
         "id": public_id,
         "transactionNo": f"TXN-{seq['txn']:04d}",
@@ -1458,21 +1553,238 @@ def post_payroll_voucher(db: Session, actor: User, month_row: dict) -> dict:
         "direction": "OUT",
         "sourceModule": "PAYROLL",
         "category": "Staff Salary",
-        "paymentMode": "BANK_TRANSFER",
+        "paymentMode": str(month_row.get("paymentMode") or "BANK_TRANSFER").upper(),
         "amount": amount,
         "employeeId": month_row.get("employeeId"),
+        "employeeName": month_row.get("employeeName") or month_row.get("name") or "",
         "status": "POSTED",
-        "voucherNo": f"JV-{seq['voucher']:04d}",
+        "voucherNo": f"PV-{seq['voucher']:04d}",
+        "voucherType": "Payment",
         "voucherStatus": "Issued",
         "preparedBy": actor.email,
-        "narration": f"Payroll {month_row.get('month')} {month_row.get('year')} — {month_row.get('employeeId')}",
+        "narration": (
+            f"Payroll {month_row.get('month')} {month_row.get('year')}"
+            f" — {month_row.get('employeeId') or month_row.get('id')}"
+        ),
         "createdBy": actor.email,
         "createdAt": _now(),
+        "entryType": "Expense",
+        "linkedPayrollMonthId": month_row.get("id"),
+        "campusId": str(actor.campus_id),
     }
     transactions.insert(0, txn)
     data["transactions"] = transactions
-    saved = _save(db, actor, data)
-    return {"success": True, "transaction": txn, "state": saved}
+    _append_accounting_posting(data, txn, None)
+
+    balanced, debit_total, credit_total = _gl_amounts_balanced(data, public_id)
+    if not balanced:
+        fail(
+            500,
+            "accounting_imbalance",
+            f"Payroll GL not balanced (debit={debit_total}, credit={credit_total}).",
+        )
+
+    saved = fin.persist_state(
+        db,
+        actor,
+        {"data": data},
+        commit=False,
+        audit_action="FINANCE_PAYROLL_VOUCHER_STATE",
+    )
+    write_audit(
+        db,
+        action="finance.payroll_voucher.post",
+        entity_type="finance_transaction",
+        entity_id=public_id,
+        actor_id=actor.id,
+        campus_id=actor.campus_id,
+        details=f"amount={amount};voucher={txn['voucherNo']};debit={debit_total};credit={credit_total}",
+    )
+    if commit:
+        db.commit()
+    else:
+        db.flush()
+    return {
+        "success": True,
+        "skipped": False,
+        "transaction": txn,
+        "voucherNo": txn["voucherNo"],
+        "glBalanced": True,
+        "debitTotal": debit_total,
+        "creditTotal": credit_total,
+        "state": saved,
+    }
+
+
+def reverse_payroll_voucher(db: Session, actor: User, payload: dict) -> dict:
+    """Reverse a posted payroll voucher with balancing contra GL lines (same campus)."""
+    if not actor.campus_id:
+        fail(400, "validation_error", "Campus context required.")
+    txn_id = str(
+        (payload or {}).get("transactionId")
+        or (payload or {}).get("voucherId")
+        or _payroll_voucher_id(payload or {})
+    ).strip()
+    if not txn_id:
+        fail(400, "validation_error", "transactionId is required.")
+    remarks = str((payload or {}).get("remarks") or "Payroll voucher reversed").strip()
+
+    state = fin.get_state(db, actor)
+    data = dict(state["data"])
+    transactions = list(data.get("transactions") or [])
+    txn = next((t for t in transactions if t.get("id") == txn_id), None)
+    if txn is None:
+        fail(404, "not_found", "Payroll voucher not found on this campus.")
+    if str(txn.get("sourceModule") or "").upper() != "PAYROLL":
+        fail(400, "validation_error", "Only PAYROLL vouchers can be reversed on this endpoint.")
+    if _is_payroll_reversal(txn):
+        fail(400, "validation_error", "Cannot reverse a payroll reversal voucher.")
+    if str(txn.get("campusId") or "") and str(txn.get("campusId")) != str(actor.campus_id):
+        fail(403, "forbidden", "Cannot reverse a voucher from another campus.")
+
+    amount = float(txn.get("amount") or 0)
+    rev_id = f"REV-{txn_id}"
+    existing_rev = next(
+        (
+            t
+            for t in transactions
+            if t.get("id") == rev_id or t.get("reversesTransactionId") == txn_id
+        ),
+        None,
+    )
+    if str(txn.get("status") or "").upper() == "REVERSED" or existing_rev is not None:
+        # Heal inconsistent snapshot if REV exists but original is still POSTED.
+        if existing_rev is not None and str(txn.get("status") or "").upper() != "REVERSED":
+            txn["status"] = "REVERSED"
+            txn["voucherStatus"] = "Reversed"
+            txn["reversalTransactionId"] = existing_rev.get("id") or rev_id
+            fin.persist_state(
+                db,
+                actor,
+                {"data": data},
+                commit=True,
+                audit_action="FINANCE_PAYROLL_VOUCHER_REVERSAL_HEAL",
+            )
+        return {
+            "success": True,
+            "skipped": True,
+            "reason": "already_reversed",
+            "transaction": txn,
+            "reversal": existing_rev,
+            "transactionId": txn_id,
+        }
+
+    seq = _seq(data)
+    seq["txn"] += 1
+    seq["voucher"] += 1
+    reverse_txn = {
+        "id": rev_id,
+        "transactionNo": f"TXN-{seq['txn']:04d}",
+        "transactionDate": _now()[:10],
+        "direction": "IN",
+        "sourceModule": "PAYROLL",
+        "category": "Staff Salary Reversal",
+        "paymentMode": str(txn.get("paymentMode") or "BANK_TRANSFER").upper(),
+        "amount": amount,
+        "employeeId": txn.get("employeeId"),
+        "employeeName": txn.get("employeeName") or "",
+        "status": "POSTED",
+        "voucherNo": f"RV-{seq['voucher']:04d}",
+        "voucherType": "Reversal",
+        "voucherStatus": "Issued",
+        "preparedBy": actor.email,
+        "narration": f"Reversal of {txn.get('voucherNo') or txn_id}: {remarks}",
+        "createdBy": actor.email,
+        "createdAt": _now(),
+        "entryType": "Reversal",
+        "reversesTransactionId": txn_id,
+        "campusId": str(actor.campus_id),
+    }
+    # Contra OUT books: reverse as OUT with negative is messy; post IN receipt-style bank deposit
+    # then mark original REVERSED. Use OUT category override with opposite GL via append on IN.
+    transactions.insert(0, reverse_txn)
+    txn["status"] = "REVERSED"
+    txn["voucherStatus"] = "Reversed"
+    txn["reversedAt"] = _now()
+    txn["reversedBy"] = actor.email
+    txn["reversalTransactionId"] = rev_id
+    txn["reversalRemarks"] = remarks
+    data["transactions"] = transactions
+
+    # Explicit balanced contra GL (credit salary expense, debit bank)
+    amount_label = _inr_label(amount)
+    iso = reverse_txn["transactionDate"]
+    display = _display_date(iso)
+    gl_lines = [
+        {
+            "id": f"GL-{rev_id}-DR",
+            "date": display,
+            "dateIso": iso,
+            "voucherNo": reverse_txn["voucherNo"],
+            "ledgerAccount": "Bank — SBI Current A/c",
+            "description": reverse_txn["narration"],
+            "debit": amount_label,
+            "credit": "—",
+            "balance": amount_label,
+            "referenceModule": "Accounting",
+            "sourceModule": "PAYROLL",
+            "sourceTransactionId": rev_id,
+            "referenceNo": reverse_txn["transactionNo"],
+            "voucherType": "Reversal",
+            "department": "HR",
+            "financialYear": "2026–27",
+            "status": "Posted",
+        },
+        {
+            "id": f"GL-{rev_id}-CR",
+            "date": display,
+            "dateIso": iso,
+            "voucherNo": reverse_txn["voucherNo"],
+            "ledgerAccount": "Staff Salary",
+            "description": reverse_txn["narration"],
+            "debit": "—",
+            "credit": amount_label,
+            "balance": amount_label,
+            "referenceModule": "Accounting",
+            "sourceModule": "PAYROLL",
+            "sourceTransactionId": rev_id,
+            "referenceNo": reverse_txn["transactionNo"],
+            "voucherType": "Reversal",
+            "department": "HR",
+            "financialYear": "2026–27",
+            "status": "Posted",
+        },
+    ]
+    data["glEntries"] = [*gl_lines, *(data.get("glEntries") or [])]
+
+    balanced, debit_total, credit_total = _gl_amounts_balanced(data, rev_id)
+    if not balanced:
+        fail(500, "accounting_imbalance", "Reversal GL not balanced.")
+
+    saved = fin.persist_state(
+        db,
+        actor,
+        {"data": data},
+        commit=False,
+        audit_action="FINANCE_PAYROLL_VOUCHER_REVERSED_STATE",
+    )
+    write_audit(
+        db,
+        action="finance.payroll_voucher.reverse",
+        entity_type="finance_transaction",
+        entity_id=txn_id,
+        actor_id=actor.id,
+        campus_id=actor.campus_id,
+        details=f"reversal={rev_id};amount={amount};debit={debit_total};credit={credit_total};{remarks}",
+    )
+    db.commit()
+    return {
+        "success": True,
+        "transaction": txn,
+        "reversal": reverse_txn,
+        "glBalanced": True,
+        "state": saved,
+    }
 
 
 def _parse_money(value) -> float:
@@ -1486,6 +1798,9 @@ def _parse_money(value) -> float:
 
 
 def decide_approval(db: Session, actor: User, payload: dict) -> dict:
+    from app.services import finance_approval_limits as approval_limits
+    from app.services.purchase import COL_LIABILITIES, COL_POS, _get as purchase_get, _put as purchase_put
+
     state = fin.get_state(db, actor)
     data = dict(state["data"])
     approvals = list(data.get("approvals") or [])
@@ -1496,11 +1811,70 @@ def decide_approval(db: Session, actor: User, payload: dict) -> dict:
     row = next((a for a in approvals if a.get("id") == approval_id), None)
     if row is None:
         fail(404, "not_found", "Approval not found.")
+
+    amount = _parse_money(row.get("amount"))
+    category = str(row.get("category") or "general")
+    if category not in {"purchase", "material_request", "expense", "salary_advance", "general"}:
+        category = "general"
+    raised_by = row.get("raisedByEmail") or row.get("raisedBy")
+
+    if decision == "approved":
+        # Finance Head path still goes through authority helper (override allowed).
+        approval_limits.assert_may_approve_amount(
+            db,
+            actor,
+            amount=amount,
+            category=category,
+            raised_by_email=str(raised_by) if raised_by else None,
+            allow_finance_override=True,
+        )
+
     row["status"] = "Approved" if decision == "approved" else "Rejected"
     row["decidedAt"] = _now()
     row["decidedBy"] = actor.email
     row["remarks"] = payload.get("remarks") or ""
     data["approvals"] = approvals
+
+    # Mirror decision onto linked purchase order without nested finance saves.
+    linked = str(row.get("linkedRequestId") or "").strip()
+    if linked and category == "purchase":
+        try:
+            po_row, po = purchase_get(db, actor, COL_POS, linked)
+            if decision == "approved":
+                liability_id = f"LIAB-{linked}"
+                purchase_put(
+                    db,
+                    actor,
+                    COL_LIABILITIES,
+                    liability_id,
+                    {
+                        "id": liability_id,
+                        "poId": linked,
+                        "poNumber": po.get("poNumber"),
+                        "vendorId": po.get("vendorId"),
+                        "vendorName": po.get("vendorName"),
+                        "amount": amount,
+                        "status": "Open",
+                        "createdAt": _now(),
+                        "createdBy": actor.email,
+                    },
+                )
+                po["status"] = "Approved"
+                po["approvedAt"] = _now()
+                po["approvedBy"] = actor.email
+                po["linkedFinanceLiabilityVoucherId"] = liability_id
+                po["requiresFinanceApproval"] = False
+            else:
+                po["status"] = "Rejected"
+                po["rejectedAt"] = _now()
+                po["rejectedBy"] = actor.email
+            po["remarks"] = payload.get("remarks") or ""
+            po["history"] = list(po.get("history") or []) + [
+                {"at": _now(), "action": decision, "by": actor.email, "via": "finance_decide_approval"}
+            ]
+            purchase_put(db, actor, COL_POS, po_row.public_id, po)
+        except Exception:
+            pass
 
     # Approved claims become posted OUT expenditure so Reports / Collections track spend.
     if decision == "approved":
@@ -1581,31 +1955,49 @@ def post_transport_enrollment_fee(db: Session, actor: User, payload: dict) -> di
 
     structures = list(data.get("feeStructures") or [])
     structure_id = str(fee_structure.get("id") or f"FS-TRANSPORT-{assignment_id or student.get('id')}")
-    fee_structure = {**fee_structure, "id": structure_id, "feeCategoryId": fee_structure.get("feeCategoryId") or "CAT-TRANSPORT"}
+    fee_structure = {
+        **fee_structure,
+        "id": structure_id,
+        "feeCategoryId": fee_structure.get("feeCategoryId") or "CAT-TRANSPORT",
+        "academicYear": fee_structure.get("academicYear") or "2026-27",
+        "className": fee_structure.get("className") or fee_structure.get("classId") or "Transport",
+        "name": fee_structure.get("name") or "Transport Fee",
+    }
     structures = [row for row in structures if str(row.get("id")) != structure_id]
     structures.insert(0, fee_structure)
     data["feeStructures"] = structures
 
     students = list(data.get("students") or [])
     student_id = str(student.get("id"))
+    existing_student = next((row for row in students if str(row.get("id")) == student_id), None)
+    merged_student = {**(existing_student or {}), **student, "id": student_id}
     students = [row for row in students if str(row.get("id")) != student_id]
-    students.insert(0, student)
+    students.insert(0, merged_student)
     data["students"] = students
 
     installments = list(data.get("installments") or [])
-    installments = [
-        row
-        for row in installments
-        if str(row.get("transportAssignmentId") or "") != assignment_id
-        and not (
+    kept = []
+    for row in installments:
+        if str(row.get("transportAssignmentId") or "") == assignment_id:
+            if str(row.get("status") or "").upper() == "PAID" or float(row.get("paidAmount") or 0) > 0:
+                kept.append(row)
+            continue
+        if (
             str(row.get("source") or "") == "transport-enrollment"
             and str(row.get("studentId") or "") == student_id
             and str(row.get("feeStructureId") or "") == structure_id
-        )
-    ]
+            and not assignment_id
+        ):
+            continue
+        kept.append(row)
+
+    paid_ids = {str(row.get("id")) for row in kept if str(row.get("transportAssignmentId") or "") == assignment_id}
     normalized = []
     for row in installments_in:
         if not isinstance(row, dict):
+            continue
+        row_id = str(row.get("id") or "")
+        if row_id and row_id in paid_ids:
             continue
         normalized.append(
             {
@@ -1618,18 +2010,581 @@ def post_transport_enrollment_fee(db: Session, actor: User, payload: dict) -> di
                 "transportAssignmentId": assignment_id or row.get("transportAssignmentId"),
             }
         )
-    data["installments"] = normalized + installments
+    data["installments"] = normalized + kept
 
     saved = _save(db, actor, data)
+    audit_entity = str(assignment_id or student_id or "")[:64]
     write_audit(
         db,
         action="TRANSPORT_FEE_POSTED",
         entity_type="TransportEnrollment",
-        entity_id=assignment_id or student_id,
+        entity_id=audit_entity or None,
         actor_id=actor.id,
         campus_id=actor.campus_id,
         details=f"Posted {len(normalized)} transport installment(s) for {student.get('name') or student_id}",
     )
+    db.commit()
+    return {
+        "success": True,
+        "installmentsCreated": len(normalized),
+        "studentId": student_id,
+        "feeStructureId": structure_id,
+        "state": saved,
+    }
+
+
+def _activity_rows(data: dict) -> list[dict]:
+    rows = data.get("activityFees") or []
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def _split_activity_registry(data: dict) -> tuple[list[dict], list[dict]]:
+    fees: list[dict] = []
+    assignments: list[dict] = []
+    for row in _activity_rows(data):
+        kind = str(row.get("recordType") or row.get("kind") or "").lower()
+        if kind == "assignment" or row.get("feeId"):
+            assignments.append(row)
+        else:
+            fees.append({**row, "recordType": "fee"})
+    return fees, assignments
+
+
+def _write_activity_registry(data: dict, fees: list[dict], assignments: list[dict]) -> None:
+    data["activityFees"] = [
+        *[{**row, "recordType": "fee"} for row in fees],
+        *[{**row, "recordType": "assignment"} for row in assignments],
+    ]
+
+
+def _assignment_payment_status(installment: dict | None, fallback: str = "Unpaid") -> str:
+    if not installment:
+        return fallback or "Unpaid"
+    status = str(installment.get("status") or "").upper()
+    if status in {"PAID", "WAIVED"}:
+        return "Paid"
+    try:
+        paid = float(installment.get("paidAmount") or 0)
+        balance = float(installment.get("balanceAmount") or 0)
+    except (TypeError, ValueError):
+        paid, balance = 0.0, 0.0
+    if paid > 0 and balance > 0.009:
+        return "Partial"
+    if paid > 0 and balance <= 0.009:
+        return "Paid"
+    return "Unpaid"
+
+
+def _stable_assignment_id(fee_id: str, participant_type: str, student_id: str, outsider_name: str) -> str:
+    if str(participant_type).lower() == "outsider":
+        slug = "".join(ch for ch in (outsider_name or "guest").lower() if ch.isalnum())[:24] or "guest"
+        return f"ASN-{fee_id}-OUT-{slug}"
+    return f"ASN-{fee_id}-{student_id}"
+
+
+def list_activity_fees(db: Session, actor: User) -> dict:
+    if not actor.campus_id:
+        fail(400, "validation_error", "Campus context required.")
+    state = fin.get_state(db, actor)
+    data = state["data"]
+    fees, assignments = _split_activity_registry(data)
+    installments = {
+        str(row.get("id")): row
+        for row in (data.get("installments") or [])
+        if isinstance(row, dict) and row.get("id")
+    }
+    enriched = []
+    for row in assignments:
+        inst = installments.get(str(row.get("installmentId") or ""))
+        payment_status = _assignment_payment_status(inst, str(row.get("paymentStatus") or "Unpaid"))
+        receipt_no = row.get("receiptNo") or (inst or {}).get("receiptNo") or ""
+        enriched.append(
+            {
+                **row,
+                "recordType": "assignment",
+                "paymentStatus": payment_status,
+                "receiptNo": receipt_no,
+                "installmentBalance": (inst or {}).get("balanceAmount"),
+                "installmentPaid": (inst or {}).get("paidAmount"),
+            }
+        )
+    return {
+        "success": True,
+        "fees": fees,
+        "assignments": enriched,
+        "feeCount": len(fees),
+        "assignmentCount": len(enriched),
+    }
+
+
+def upsert_activity_fee(db: Session, actor: User, payload: dict) -> dict:
+    code = role_code_for(db, actor)
+    if code not in _ACTIVITY_FEE_ROLES:
+        fail(403, "forbidden", "Not allowed to manage activity fees.")
+    if not actor.campus_id:
+        fail(400, "validation_error", "Campus context required.")
+
+    activity_type = str((payload or {}).get("activityType") or "Other").strip() or "Other"
+    custom_name = str((payload or {}).get("customName") or (payload or {}).get("activityName") or "").strip()
+    activity_name = custom_name if activity_type.lower() == "other" else activity_type
+    if not activity_name:
+        fail(400, "validation_error", "Activity name is required.")
+
+    try:
+        insider = float((payload or {}).get("insiderAmount") or 0)
+        outsider = float((payload or {}).get("outsiderAmount") or 0)
+    except (TypeError, ValueError):
+        fail(400, "validation_error", "Amounts must be numbers.")
+    if insider < 0 or outsider < 0:
+        fail(400, "validation_error", "Amounts cannot be negative.")
+
+    state = fin.get_state(db, actor)
+    data = dict(state["data"])
+    fees, assignments = _split_activity_registry(data)
+    fee_id = str((payload or {}).get("id") or f"ACT-{uuid4().hex[:10].upper()}")
+    existing = next((row for row in fees if str(row.get("id")) == fee_id), None)
+    fee = {
+        **(existing or {}),
+        "id": fee_id,
+        "recordType": "fee",
+        "activityName": activity_name,
+        "activityType": activity_type,
+        "insiderAmount": insider,
+        "outsiderAmount": outsider,
+        "academicYear": str((payload or {}).get("academicYear") or "2026-27"),
+        "attendanceRequired": bool(
+            (payload or {}).get("attendanceRequired")
+            in {True, "yes", "Yes", "true", "True", 1, "1"}
+        ),
+        "concessionApplicable": bool(
+            (payload or {}).get("concessionApplicable")
+            in {True, "yes", "Yes", "true", "True", 1, "1"}
+        ),
+        "status": str((payload or {}).get("status") or "Active"),
+        "remarks": str((payload or {}).get("remarks") or ""),
+        "campusId": str(actor.campus_id),
+        "updatedAt": _now(),
+        "updatedBy": actor.email,
+    }
+    if existing is None:
+        fee["createdAt"] = _now()
+        fee["createdBy"] = actor.email
+        fees.insert(0, fee)
+    else:
+        fees = [fee if str(row.get("id")) == fee_id else row for row in fees]
+
+    _write_activity_registry(data, fees, assignments)
+    saved = fin.persist_state(
+        db,
+        actor,
+        {"data": data},
+        commit=False,
+        audit_action="FINANCE_ACTIVITY_FEE_UPSERT_STATE",
+    )
+    write_audit(
+        db,
+        action="finance.activity_fee.upsert",
+        entity_type="activity_fee",
+        entity_id=fee_id,
+        actor_id=actor.id,
+        campus_id=actor.campus_id,
+        details=f"name={activity_name};insider={insider};outsider={outsider}",
+    )
+    db.commit()
+    return {"success": True, "fee": fee, "state": saved}
+
+
+def assign_activity_fee(db: Session, actor: User, payload: dict) -> dict:
+    code = role_code_for(db, actor)
+    if code not in _ACTIVITY_FEE_ROLES:
+        fail(403, "forbidden", "Not allowed to assign activity fees.")
+    if not actor.campus_id:
+        fail(400, "validation_error", "Campus context required.")
+
+    fee_id = str((payload or {}).get("feeId") or "").strip()
+    participant_type = str((payload or {}).get("participantType") or "Insider").strip() or "Insider"
+    student_id = str((payload or {}).get("studentId") or "").strip()
+    outsider_name = str((payload or {}).get("outsiderName") or (payload or {}).get("participantName") or "").strip()
+    if not fee_id:
+        fail(400, "validation_error", "feeId is required.")
+    if participant_type.lower() == "insider" and not student_id:
+        fail(400, "validation_error", "studentId is required for Insider assignments.")
+    if participant_type.lower() == "outsider" and not outsider_name:
+        fail(400, "validation_error", "outsiderName is required for Outsider assignments.")
+
+    state = fin.get_state(db, actor)
+    data = dict(state["data"])
+    fees, assignments = _split_activity_registry(data)
+    fee = next((row for row in fees if str(row.get("id")) == fee_id), None)
+    if fee is None:
+        fail(404, "not_found", "Activity fee definition was not found.")
+
+    assignment_id = str((payload or {}).get("id") or "").strip() or _stable_assignment_id(
+        fee_id, participant_type, student_id, outsider_name
+    )
+    existing = next((row for row in assignments if str(row.get("id")) == assignment_id), None)
+    if existing is not None:
+        listed = list_activity_fees(db, actor)
+        match = next((row for row in listed["assignments"] if str(row.get("id")) == assignment_id), existing)
+        return {
+            "success": True,
+            "skipped": True,
+            "reason": "already_assigned",
+            "assignment": match,
+        }
+
+    gross = float(fee.get("outsiderAmount") if participant_type.lower() == "outsider" else fee.get("insiderAmount") or 0)
+    concession_mode = str((payload or {}).get("concessionMode") or "No Concession")
+    try:
+        concession_value = float((payload or {}).get("concessionValue") or 0)
+    except (TypeError, ValueError):
+        concession_value = 0.0
+    if not fee.get("concessionApplicable"):
+        concession_mode = "No Concession"
+        concession_value = 0.0
+    if concession_mode == "Percentage":
+        payable = max(0.0, gross - gross * concession_value / 100.0)
+    elif concession_mode == "Fixed Amount":
+        payable = max(0.0, gross - concession_value)
+    else:
+        payable = gross
+
+    ledger_student_id = student_id if participant_type.lower() == "insider" else f"OUT-{assignment_id}"
+    participant_name = (
+        outsider_name
+        if participant_type.lower() == "outsider"
+        else str((payload or {}).get("participantName") or "")
+    )
+    if participant_type.lower() == "insider" and not participant_name:
+        student_row = next(
+            (row for row in (data.get("students") or []) if str(row.get("id")) == student_id),
+            None,
+        )
+        participant_name = str((student_row or {}).get("name") or student_id)
+
+    installment_id = f"INST-ACT-{assignment_id}"
+    student_payload = {
+        "id": ledger_student_id,
+        "name": participant_name,
+        "academicYear": fee.get("academicYear") or "2026-27",
+        "className": "Activity" if participant_type.lower() == "outsider" else None,
+        "isActivityOutsider": participant_type.lower() == "outsider",
+    }
+    # Drop None fields for outsider className cleanliness
+    student_payload = {k: v for k, v in student_payload.items() if v is not None}
+
+    posted = post_activity_enrollment_fee(
+        db,
+        actor,
+        {
+            "activityAssignmentId": assignment_id,
+            "student": student_payload,
+            "feeStructure": {
+                "id": f"FS-ACTIVITY-{fee_id}",
+                "name": fee.get("activityName") or "Activity Fee",
+                "academicYear": fee.get("academicYear") or "2026-27",
+                "className": "Activity",
+                "activityFeeId": fee_id,
+                "activityAssignmentId": assignment_id,
+            },
+            "installments": [
+                {
+                    "id": installment_id,
+                    "feeAmount": payable,
+                    "netAmount": payable,
+                    "paidAmount": 0,
+                    "balanceAmount": payable,
+                    "status": "UNPAID",
+                    "installmentLabel": fee.get("activityName") or "Activity Fee",
+                    "dueDate": _now()[:10],
+                    "academicYear": fee.get("academicYear") or "2026-27",
+                }
+            ],
+        },
+    )
+
+    assignment = {
+        "id": assignment_id,
+        "recordType": "assignment",
+        "feeId": fee_id,
+        "activityName": fee.get("activityName"),
+        "participantType": participant_type,
+        "participantName": participant_name,
+        "studentId": ledger_student_id,
+        "sourceStudentId": student_id or None,
+        "gross": gross,
+        "concessionMode": concession_mode,
+        "concessionValue": concession_value,
+        "payable": payable,
+        "attendance": str((payload or {}).get("attendance") or ""),
+        "paymentStatus": "Unpaid",
+        "receiptNo": "",
+        "installmentId": installment_id,
+        "feeStructureId": posted.get("feeStructureId"),
+        "campusId": str(actor.campus_id),
+        "createdAt": _now(),
+        "createdBy": actor.email,
+    }
+    # Reload after enrollment post (committed) and append assignment.
+    state = fin.get_state(db, actor)
+    data = dict(state["data"])
+    fees, assignments = _split_activity_registry(data)
+    if any(str(row.get("id")) == assignment_id for row in assignments):
+        return {"success": True, "skipped": True, "reason": "already_assigned", "assignment": assignment}
+    assignments.insert(0, assignment)
+    _write_activity_registry(data, fees, assignments)
+    saved = fin.persist_state(
+        db,
+        actor,
+        {"data": data},
+        commit=False,
+        audit_action="FINANCE_ACTIVITY_FEE_ASSIGN_STATE",
+    )
+    write_audit(
+        db,
+        action="finance.activity_fee.assign",
+        entity_type="activity_assignment",
+        entity_id=assignment_id,
+        actor_id=actor.id,
+        campus_id=actor.campus_id,
+        details=f"fee={fee_id};payable={payable};student={ledger_student_id}",
+    )
+    db.commit()
+    return {
+        "success": True,
+        "skipped": False,
+        "assignment": assignment,
+        "installmentId": installment_id,
+        "state": saved,
+    }
+
+
+def update_activity_attendance(db: Session, actor: User, payload: dict) -> dict:
+    code = role_code_for(db, actor)
+    if code not in _ACTIVITY_FEE_ROLES:
+        fail(403, "forbidden", "Not allowed to update activity attendance.")
+    assignment_id = str((payload or {}).get("assignmentId") or (payload or {}).get("id") or "").strip()
+    if not assignment_id:
+        fail(400, "validation_error", "assignmentId is required.")
+    attendance = str((payload or {}).get("attendance") or "").strip()
+
+    state = fin.get_state(db, actor)
+    data = dict(state["data"])
+    fees, assignments = _split_activity_registry(data)
+    row = next((item for item in assignments if str(item.get("id")) == assignment_id), None)
+    if row is None:
+        fail(404, "not_found", "Activity assignment was not found on this campus.")
+    row["attendance"] = attendance
+    row["attendanceUpdatedAt"] = _now()
+    row["attendanceUpdatedBy"] = actor.email
+    _write_activity_registry(data, fees, assignments)
+    saved = fin.persist_state(
+        db,
+        actor,
+        {"data": data},
+        commit=False,
+        audit_action="FINANCE_ACTIVITY_ATTENDANCE_STATE",
+    )
+    write_audit(
+        db,
+        action="finance.activity_fee.attendance",
+        entity_type="activity_assignment",
+        entity_id=assignment_id,
+        actor_id=actor.id,
+        campus_id=actor.campus_id,
+        details=f"attendance={attendance}",
+    )
+    db.commit()
+    return {"success": True, "assignment": row, "state": saved}
+
+
+def collect_activity_fee(db: Session, actor: User, payload: dict) -> dict:
+    """Collect activity installment via collect_payment and mark assignment Paid."""
+    assignment_id = str((payload or {}).get("assignmentId") or (payload or {}).get("id") or "").strip()
+    if not assignment_id:
+        fail(400, "validation_error", "assignmentId is required.")
+
+    state = fin.get_state(db, actor)
+    data = state["data"]
+    fees, assignments = _split_activity_registry(data)
+    assignment = next((row for row in assignments if str(row.get("id")) == assignment_id), None)
+    if assignment is None:
+        fail(404, "not_found", "Activity assignment was not found on this campus.")
+
+    installment_id = str(assignment.get("installmentId") or f"INST-ACT-{assignment_id}")
+    installment = next(
+        (row for row in (data.get("installments") or []) if str(row.get("id")) == installment_id),
+        None,
+    )
+    if installment is None:
+        fail(404, "not_found", "Linked activity installment was not found.")
+
+    if _assignment_payment_status(installment) == "Paid":
+        return {
+            "success": True,
+            "skipped": True,
+            "reason": "already_paid",
+            "assignment": {**assignment, "paymentStatus": "Paid", "receiptNo": assignment.get("receiptNo")},
+        }
+
+    student_id = str(assignment.get("studentId") or installment.get("studentId") or "")
+    amount = float(installment.get("balanceAmount") or assignment.get("payable") or 0)
+    collected = collect_payment(
+        db,
+        actor,
+        {
+            "studentId": student_id,
+            "paymentMode": str((payload or {}).get("paymentMode") or "CASH").upper(),
+            "allocations": [{"installmentId": installment_id, "amount": amount}],
+        },
+    )
+
+    # Refresh and stamp assignment
+    state = fin.get_state(db, actor)
+    data = dict(state["data"])
+    fees, assignments = _split_activity_registry(data)
+    row = next((item for item in assignments if str(item.get("id")) == assignment_id), None)
+    if row is None:
+        fail(500, "state_error", "Assignment missing after collection.")
+    receipt = collected.get("receipt") or {}
+    row["paymentStatus"] = "Paid"
+    row["receiptNo"] = receipt.get("receiptNo") or row.get("receiptNo") or ""
+    row["paidAt"] = _now()
+    row["paidBy"] = actor.email
+    _write_activity_registry(data, fees, assignments)
+    saved = fin.persist_state(
+        db,
+        actor,
+        {"data": data},
+        commit=False,
+        audit_action="FINANCE_ACTIVITY_FEE_COLLECT_STATE",
+    )
+    write_audit(
+        db,
+        action="finance.activity_fee.collect",
+        entity_type="activity_assignment",
+        entity_id=assignment_id,
+        actor_id=actor.id,
+        campus_id=actor.campus_id,
+        details=f"receipt={row.get('receiptNo')};amount={amount}",
+    )
+    db.commit()
+    return {
+        "success": True,
+        "skipped": False,
+        "assignment": row,
+        "receipt": receipt,
+        "transaction": collected.get("transaction"),
+        "state": saved,
+    }
+
+
+def post_activity_enrollment_fee(db: Session, actor: User, payload: dict) -> dict:
+    """PRM / Finance: attach activity fee installments to the campus ledger (idempotent by assignment)."""
+    code = role_code_for(db, actor)
+    if code not in _ACTIVITY_FEE_ROLES:
+        fail(403, "forbidden", "Only Programme / Academic / Finance roles can post activity enrollment fees.")
+
+    student = payload.get("student") or {}
+    fee_structure = payload.get("feeStructure") or {}
+    installments_in = payload.get("installments") or []
+    assignment_id = str(
+        payload.get("activityAssignmentId") or fee_structure.get("activityAssignmentId") or ""
+    ).strip()
+
+    if not isinstance(student, dict) or not student.get("id"):
+        fail(400, "validation_error", "student.id is required.")
+    if not isinstance(installments_in, list) or not installments_in:
+        fail(400, "validation_error", "installments are required.")
+
+    state = fin.get_state(db, actor)
+    data = dict(state["data"])
+
+    categories = list(data.get("feeCategories") or [])
+    if not any(str(c.get("id")) == "CAT-ACTIVITY" for c in categories):
+        categories.insert(
+            0,
+            {
+                "id": "CAT-ACTIVITY",
+                "name": "Activity Fee",
+                "code": "ACTIVITY",
+                "active": True,
+            },
+        )
+    data["feeCategories"] = categories
+
+    structures = list(data.get("feeStructures") or [])
+    structure_id = str(fee_structure.get("id") or f"FS-ACTIVITY-{assignment_id or student.get('id')}")
+    fee_structure = {
+        **fee_structure,
+        "id": structure_id,
+        "feeCategoryId": fee_structure.get("feeCategoryId") or "CAT-ACTIVITY",
+        "academicYear": fee_structure.get("academicYear") or "2026-27",
+        "className": fee_structure.get("className") or fee_structure.get("classId") or "Activity",
+        "name": fee_structure.get("name") or "Activity Fee",
+    }
+    structures = [row for row in structures if str(row.get("id")) != structure_id]
+    structures.insert(0, fee_structure)
+    data["feeStructures"] = structures
+
+    students = list(data.get("students") or [])
+    student_id = str(student.get("id"))
+    existing_student = next((row for row in students if str(row.get("id")) == student_id), None)
+    merged_student = {**(existing_student or {}), **student, "id": student_id}
+    students = [row for row in students if str(row.get("id")) != student_id]
+    students.insert(0, merged_student)
+    data["students"] = students
+
+    installments = list(data.get("installments") or [])
+    # Idempotent replace for this assignment — keep paid rows intact.
+    kept = []
+    for row in installments:
+        if str(row.get("activityAssignmentId") or "") == assignment_id:
+            if str(row.get("status") or "").upper() == "PAID" or float(row.get("paidAmount") or 0) > 0:
+                kept.append(row)
+            continue
+        if (
+            str(row.get("source") or "") == "activity-enrollment"
+            and str(row.get("studentId") or "") == student_id
+            and str(row.get("feeStructureId") or "") == structure_id
+            and not assignment_id
+        ):
+            continue
+        kept.append(row)
+
+    paid_ids = {str(row.get("id")) for row in kept if str(row.get("activityAssignmentId") or "") == assignment_id}
+    normalized = []
+    for row in installments_in:
+        if not isinstance(row, dict):
+            continue
+        row_id = str(row.get("id") or "")
+        if row_id and row_id in paid_ids:
+            continue
+        normalized.append(
+            {
+                **row,
+                "studentId": student_id,
+                "feeStructureId": structure_id,
+                "feeCategoryId": row.get("feeCategoryId") or "CAT-ACTIVITY",
+                "feeHead": row.get("feeHead") or fee_structure.get("name") or "Activity Fee",
+                "source": "activity-enrollment",
+                "activityAssignmentId": assignment_id or row.get("activityAssignmentId"),
+            }
+        )
+    data["installments"] = normalized + kept
+
+    saved = _save(db, actor, data)
+    write_audit(
+        db,
+        action="ACTIVITY_FEE_POSTED",
+        entity_type="ActivityEnrollment",
+        entity_id=assignment_id or student_id,
+        actor_id=actor.id,
+        campus_id=actor.campus_id,
+        details=f"Posted {len(normalized)} activity installment(s) for {student.get('name') or student_id}",
+    )
+    # _save already committed the snapshot; commit audit row.
+    db.commit()
     return {
         "success": True,
         "installmentsCreated": len(normalized),

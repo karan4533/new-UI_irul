@@ -335,6 +335,7 @@ def test_hr_concession_and_payroll_voucher(client):
         json=[{
             "id": "PAY-FIN-1",
             "employeeId": "EMP-2026-001",
+            "employeeName": "Seed Staff",
             "month": "June",
             "year": 2026,
             "paymentStatus": "Paid",
@@ -344,5 +345,27 @@ def test_hr_concession_and_payroll_voucher(client):
     assert payroll.status_code == 200, payroll.text
     finance = client.get("/api/v1/finance/state", headers=admin)
     assert finance.status_code == 200
-    txns = finance.json()["data"]["transactions"]
-    assert any(row.get("sourceModule") == "PAYROLL" and row.get("amount") == 42000 for row in txns)
+    data = finance.json()["data"]
+    txns = data["transactions"]
+    payroll_txn = next(row for row in txns if row.get("sourceModule") == "PAYROLL" and row.get("amount") == 42000)
+    assert payroll_txn.get("voucherNo", "").startswith("PV-")
+    assert payroll_txn.get("voucherStatus") == "Issued"
+    # Ledger posting for payroll OUT
+    gl = data.get("glEntries") or []
+    assert any(str(g.get("sourceTransactionId") or "") == payroll_txn["id"] for g in gl)
+    # Idempotent re-save does not duplicate
+    again = client.put(
+        "/api/v1/hr/payroll-months",
+        headers=hr,
+        json=[{
+            "id": "PAY-FIN-1",
+            "employeeId": "EMP-2026-001",
+            "month": "June",
+            "year": 2026,
+            "paymentStatus": "Paid",
+            "netSalary": 42000,
+        }],
+    )
+    assert again.status_code == 200
+    finance2 = client.get("/api/v1/finance/state", headers=admin).json()["data"]["transactions"]
+    assert len([r for r in finance2 if r.get("id") == payroll_txn["id"]]) == 1

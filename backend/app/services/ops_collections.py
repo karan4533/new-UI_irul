@@ -129,6 +129,26 @@ _CCTV_ROOM = {"cctv"} | _ADMINS
 _PRO = {"pro"} | _ADMINS
 # Dept Head / JD / MD approve footage and sensitive file access (Non-Academics §4.14–4.15).
 _APPROVER_CHAIN = {"principal", "director", "jointdirector", "managing_director"} | _ADMINS
+# Ops collections where status→Approved/Issued can spend stock or money — Finance limits apply.
+_SPEND_APPROVAL_COLLECTIONS = frozenset(
+    {
+        "stationery-requests",
+        "stationery-requirements",
+        "stationery-stock-issues",
+        "stationery-procurement",
+        "hk-requests",
+        "hk-inventory-requirements",
+        "hk-procurement",
+        "it-requests",
+        "it-procurement",
+        "canteen-requests",
+        "shared-inventory-requirements",
+        "shared-procurement",
+        "jd-request-approvals",
+        "transport-approval-requests",
+        "transport-expenses",
+    }
+)
 # Principal final-approves maintenance/fuel requests and posts the linked expense.
 _TRANSPORT_PRINCIPAL_WRITE = {
     "transport-approval-requests",
@@ -391,6 +411,8 @@ def replace_records(db: Session, actor: User, collection: str, items: list) -> l
         fail(422, "invalid_body", "Body must be a JSON array.")
 
     previous = _rows(db, actor, collection)
+    if collection in _SPEND_APPROVAL_COLLECTIONS:
+        _enforce_material_approval_limits(db, actor, previous, items)
     scope = _driver_scope(db, actor) if collection.startswith("transport-") else None
     if scope is not None:
         for raw in items:
@@ -441,6 +463,14 @@ def replace_records(db: Session, actor: User, collection: str, items: list) -> l
     saved = list_records(db, actor, collection)
     from app.services.integrations.events import notify_saved_ops
     notify_saved_ops(db, actor, collection, previous, saved)
+    if collection == "transport-student-assignments":
+        try:
+            from app.services.finance_transport_fees import sync_ops_transport_assignments
+
+            sync_ops_transport_assignments(db, actor, saved)
+        except Exception:
+            # Ops assignment remains saved; finance sync is best-effort and audited inside assign.
+            pass
     return saved
 
 
@@ -826,6 +856,56 @@ def _rows(db: Session, actor: User, collection: str) -> list[dict]:
     return [_as_item(row) for row in rows]
 
 
+def _enforce_material_approval_limits(db: Session, actor: User, previous: list[dict], items: list) -> None:
+    """When a stationery/material request becomes Approved, enforce Finance spend caps."""
+    from app.services import finance_approval_limits as approval_limits
+
+    prev_by_id = {str(row.get("id")): row for row in previous}
+    for raw in items:
+        if not isinstance(raw, dict):
+            continue
+        public_id = str(raw.get("id") or "")
+        new_status = str(raw.get("status") or "").strip().lower()
+        if new_status not in {"approved", "issued", "fulfilled"}:
+            continue
+        old = prev_by_id.get(public_id) or {}
+        old_status = str(old.get("status") or "").strip().lower()
+        if old_status in {"approved", "issued", "fulfilled"}:
+            continue
+        amount = (
+            raw.get("estimatedAmount")
+            or raw.get("amount")
+            or raw.get("totalAmount")
+            or raw.get("grandTotal")
+            or 0
+        )
+        try:
+            amount_f = float(
+                "".join(ch for ch in str(amount) if ch.isdigit() or ch in ".-") or "0"
+            )
+        except ValueError:
+            amount_f = 0.0
+        if amount_f <= 0:
+            continue
+        actor_role = _code(db, actor)
+        evaluation = approval_limits.evaluate_authority(
+            db, actor, amount=amount_f, role=actor_role, category="material_request"
+        )
+        # Only Finance Head (and MD/superadmin break-glass) may clear over-limit store spend.
+        # Generic finance.approve via admin dump must not silently bypass campus caps.
+        if evaluation.get("requiresFinance") and actor_role not in {
+            "accounthead",
+            "managing_director",
+            "superadmin",
+        }:
+            fail(
+                403,
+                "approval_limit_exceeded",
+                evaluation.get("message")
+                or "Amount exceeds role approval limit — escalate to Finance.",
+            )
+
+
 def _plate_key(value: object) -> str:
     return "".join(ch for ch in str(value or "").upper() if ch.isalnum())
 
@@ -1009,4 +1089,3 @@ def my_hostel(db: Session, actor: User) -> dict:
         if _hostel_row_keys(row) & allowed_ids
     ]
     return {"assignments": assignments, "payments": payments}
-

@@ -34,13 +34,16 @@ STATE_COLLECTIONS = (
     "onlineBookEntries",
     "reconciliationItems",
     "activityFees",
+    "transportFees",
     "wallets",
     "walletRecharges",
+    "walletSpends",
     "transportFleet",
     "transportMaintenance",
     "transportCompliance",
     "transportSalaries",
     "approvals",
+    "financeSettings",
     "sequence",
     "meta",
 )
@@ -387,7 +390,15 @@ def get_state(db: Session, actor: User) -> dict:
     }
 
 
-def save_state(db: Session, actor: User, payload: dict) -> dict:
+def persist_state(
+    db: Session,
+    actor: User,
+    payload: dict,
+    *,
+    commit: bool = True,
+    audit_action: str = "FINANCE_STATE_SAVED",
+) -> dict:
+    """Write campus finance snapshot. Set commit=False to participate in an outer transaction."""
     data = payload.get("data")
     if not isinstance(data, dict):
         fail(400, "validation_error", "Finance state data object is required.")
@@ -418,22 +429,32 @@ def save_state(db: Session, actor: User, payload: dict) -> dict:
         db.add(row)
     else:
         row.body = cleaned
+        from sqlalchemy.orm.attributes import flag_modified
+
+        flag_modified(row, "body")
 
     write_audit(
         db,
-        action="FINANCE_STATE_SAVED",
+        action=audit_action,
         entity_type="finance_snapshot",
         entity_id=_SNAPSHOT_ID,
         actor_id=actor.id,
         campus_id=actor.campus_id,
     )
-    db.commit()
-    db.refresh(row)
+    if commit:
+        db.commit()
+        db.refresh(row)
+    else:
+        db.flush()
     return {
         "data": {k: v for k, v in cleaned.items() if k != "_savedAt"},
         "savedAt": cleaned["_savedAt"],
         "seeded": True,
     }
+
+
+def save_state(db: Session, actor: User, payload: dict) -> dict:
+    return persist_state(db, actor, payload, commit=True)
 
 
 def list_collection(db: Session, actor: User, collection: str) -> list:

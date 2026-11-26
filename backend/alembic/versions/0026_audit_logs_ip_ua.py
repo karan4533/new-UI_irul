@@ -1,7 +1,7 @@
 """Add audit_logs.ip_address and audit_logs.user_agent.
 
-Revision ID: 0025_audit_logs_ip_ua
-Revises: 0024_tc_request_nocs
+Revision ID: 0026_audit_logs_ip_ua
+Revises: 0025_tc_request_nocs
 Create Date: 2026-11-21
 """
 
@@ -10,8 +10,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0025_audit_logs_ip_ua"
-down_revision = "0024_tc_request_nocs"
+revision = "0026_audit_logs_ip_ua"
+down_revision = "0025_tc_request_nocs"
 branch_labels = None
 depends_on = None
 

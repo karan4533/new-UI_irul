@@ -1,7 +1,7 @@
 """TC request manager NOC rows + widened status check.
 
-Revision ID: 0024_tc_request_nocs
-Revises: 0023_attendance_dual_session
+Revision ID: 0025_tc_request_nocs
+Revises: 0024_attendance_dual_session
 Create Date: 2026-11-05
 """
 
@@ -12,8 +12,8 @@ from alembic import op
 
 from app.services.schema_helpers import create_missing_tables, drop_tables_if_empty
 
-revision = "0024_tc_request_nocs"
-down_revision = "0023_attendance_dual_session"
+revision = "0025_tc_request_nocs"
+down_revision = "0024_attendance_dual_session"
 branch_labels = None
 depends_on = None
 
