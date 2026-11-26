@@ -2,6 +2,7 @@ import AttendanceAndLeaveWorkspace from '../Common/AttendanceAndLeave/Attendance
 import React from 'react'
 import { Route, Routes as ReactRoutes, Navigate } from 'react-router-dom'
 import { EnterpriseOperationsRoutes } from './EnterpriseOperationsRoutes'
+import { TcRequestRoleRoutes } from './tcRequestRoleRoutes'
 import { TaskManagementRoutes } from '../Common/TaskManagement/TaskManagementRoutes'
 import StoresProcurementWorkspace from '../Common/StoresProcurement/StoresProcurementWorkspace'
 import Dashboard from '../Pages/StationeryStoreManager/Dashboard/Dashboard'
@@ -50,6 +51,7 @@ const StationeryStoreManagerRoutes = () => {
 
             {/* Enterprise Functional Operations (Stores, Gate Pass, File Room, Ticketing, Monitoring, Lost & Found) */}
             {EnterpriseOperationsRoutes({ basePath: '/stationery-store-manager', role: 'stationery-store-manager' })}
+            {TcRequestRoleRoutes({ basePath: '/stationery-store-manager' })}
 
                         <Route path="/stationery-store-manager/attendance-and-leave" element={<AttendanceAndLeaveWorkspace defaultTab="overview" />} />
             <Route path="*" element={<Navigate to="/stationery-store-manager/dashboard" replace />} />

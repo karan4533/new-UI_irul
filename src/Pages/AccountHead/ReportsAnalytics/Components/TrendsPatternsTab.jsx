@@ -2,16 +2,16 @@ import React from 'react'
 import { TRENDS_SUMMARY, YEAR_ON_YEAR } from '../reportsAnalyticsData'
 import { FlowBars, Panel, SummaryCards } from './ReportsShared'
 
-const TrendsPatternsTab = () => (
+const TrendsPatternsTab = ({ pack }) => (
     <div className='space-y-6'>
-        <SummaryCards cards={TRENDS_SUMMARY} />
+        <SummaryCards cards={pack ? pack.trends.cards : TRENDS_SUMMARY} />
 
         <div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
             <Panel title='Year-on-year comparison'>
-                <FlowBars items={YEAR_ON_YEAR} />
+                <FlowBars items={pack ? pack.trends.yearOnYear : YEAR_ON_YEAR} />
             </Panel>
 
-            <Panel title='Pattern observations'>
+            {!pack && <Panel title='Pattern observations'>
                 <p className='text-sm text-[#667085] leading-relaxed mb-3'>
                     Fee collection consistently peaks in
                     {' '}
@@ -36,7 +36,7 @@ const TrendsPatternsTab = () => (
                     {' '}
                     month-to-month.
                 </p>
-            </Panel>
+            </Panel>}
         </div>
     </div>
 )

@@ -4,7 +4,7 @@ import { matchesWalletRole, USER_WALLETS, USER_WALLETS_SUMMARY } from '../wallet
 import { RoleChip, SummaryCards, UserAvatar } from './WalletShared'
 
 const STATUS_FILTERS = ['All Status', 'Active', 'Zero Balance', 'Frozen', 'Flagged']
-const UserWalletsTab = ({ userWallets = USER_WALLETS, initialRole = 'All Roles' }) => {
+const UserWalletsTab = ({ userWallets = USER_WALLETS, initialRole = 'All Roles', cards = USER_WALLETS_SUMMARY, live = false, busy = false, onStatusChange }) => {
     const [query, setQuery] = useState('')
     const [status, setStatus] = useState(STATUS_FILTERS[0])
     const rows = useMemo(() => userWallets.filter((row) => {
@@ -25,8 +25,8 @@ const UserWalletsTab = ({ userWallets = USER_WALLETS, initialRole = 'All Roles' 
 
     return (
         <div className='space-y-5'>
-            <IntegrationNotice state='demo' title='Sample wallet population' description='Summary cards and seeded wallets are browser demonstration records, not balances from an authoritative wallet ledger.' />
-            <SummaryCards cards={USER_WALLETS_SUMMARY} />
+            {live ? <IntegrationNotice state='connected' title='Live wallet ledger (PostgreSQL)' description='Balances come from recorded recharges and spends. Freezing or flagging a wallet blocks spends and recharges and is audited.' /> : <IntegrationNotice state='demo' title='Sample wallet population' description='Summary cards and seeded wallets are browser demonstration records, not balances from an authoritative wallet ledger.' />}
+            <SummaryCards cards={cards} />
             <section className='overflow-hidden rounded-[var(--erp-radius-surface)] border border-[var(--erp-line)] bg-white' aria-labelledby='wallet-register-title'>
                 <div className='px-4 pt-4 sm:px-5'><h3 id='wallet-register-title' className='text-base font-semibold text-[var(--erp-ink)]'>User wallet register</h3></div>
                 <DataToolbar query={query} onQueryChange={setQuery} searchLabel='Search user wallets' searchPlaceholder='Name, email, role or wallet ID…' resultCount={rows.length} onReset={() => { setQuery(''); setStatus(STATUS_FILTERS[0]) }} filters={(
@@ -34,7 +34,7 @@ const UserWalletsTab = ({ userWallets = USER_WALLETS, initialRole = 'All Roles' 
                         <select value={status} onChange={(event) => setStatus(event.target.value)} className='min-h-10 rounded-lg border border-[var(--erp-line-strong)] bg-white px-3 text-sm'>{STATUS_FILTERS.map((item) => <option key={item}>{item}</option>)}</select>
                     </label>
                 )} />
-                <DataTable caption='User wallet register' rows={rows} columns={columns} rowKey='id' emptyTitle='No wallets found' emptyDescription='Reset the filters to see other browser-stored wallets.' renderActions={() => <button type='button' disabled title='Wallet ledger detail requires the connected wallet API.' className='min-h-9 rounded-md border border-[var(--erp-line-strong)] px-3 text-sm font-semibold text-[var(--erp-muted)] opacity-60'>Ledger unavailable</button>} />
+                <DataTable caption='User wallet register' rows={rows} columns={columns} rowKey='id' emptyTitle='No wallets found' emptyDescription='Reset the filters to see other browser-stored wallets.' renderActions={(row) => (live ? (row.storedStatus === 'Active' ? <button type='button' disabled={busy} onClick={() => onStatusChange?.(row, 'Frozen')} className='min-h-9 rounded-md border border-[var(--erp-red)] px-3 text-sm font-semibold text-[var(--erp-red)] disabled:opacity-50'>Freeze</button> : <button type='button' disabled={busy} onClick={() => onStatusChange?.(row, 'Active')} className='min-h-9 rounded-md border border-[var(--erp-green)] px-3 text-sm font-semibold text-[var(--erp-green)] disabled:opacity-50'>Reactivate</button>) : <button type='button' disabled title='Wallet ledger detail requires the connected wallet API.' className='min-h-9 rounded-md border border-[var(--erp-line-strong)] px-3 text-sm font-semibold text-[var(--erp-muted)] opacity-60'>Ledger unavailable</button>)} />
             </section>
         </div>
     )

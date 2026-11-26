@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Download, CheckCircle2 } from 'lucide-react'
 import pdf_icon from '../../../assets/images/pdf-icon.png'
 import { useActiveStudent } from '../../../context/ActiveStudentContext'
-import { getTcRequestById, statusBadgeColor, DEFAULT_NOC_CLEARANCES } from '../../../Common/TcRequest/tcRequestData'
+import { getTcRequestById, displayTcStatus, tcStatusBadgeClass, DEFAULT_NOC_CLEARANCES } from '../../../Common/TcRequest/tcRequestData'
 import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 import { getTcRequest } from '../../../services/api/tcApiService'
 import IntegrationNotice from '../../../Common/ui/IntegrationNotice'
@@ -99,8 +99,8 @@ const ViewTcRequest = () => {
                     <div className='bg-white rounded-2xl shadow-md p-4'>
                         <div className='flex flex-wrap items-center gap-3'>
                             <h1 className='text-2xl font-semibold text-black'>{request.requestId}</h1>
-                            <span className={`px-3 py-1.5 rounded-lg text-sm font-semibold whitespace-nowrap ${statusBadgeColor[request.status] || ''}`}>
-                                {request.status}
+                            <span className={`px-3 py-1.5 rounded-lg text-sm font-semibold whitespace-nowrap ${tcStatusBadgeClass(request)}`}>
+                                {displayTcStatus(request)}
                             </span>
                         </div>
                         <p className='text-sm text-[#667085] mt-2'>

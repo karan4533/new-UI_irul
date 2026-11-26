@@ -1,10 +1,13 @@
 import { useCallback, useMemo, useState } from 'react'
+import { toast } from 'react-toastify'
 import { AlertCircle, Bell, Calculator, Download, Plus, Settings2, Upload } from 'lucide-react'
 import { DataTable, DataToolbar, IntegrationNotice, PageHeader, StatusBadge } from '../../../Common/ui'
 import { useFinance } from '../financeDomain/FinanceContext'
 import { FEE_FREQUENCIES } from '../financeDomain/financeConstants'
 import { formatCurrency } from '../financeDomain/financeHelpers'
 import ActivityFeesTab from './Components/ActivityFeesTab'
+import TransportFeesTab from './Components/TransportFeesTab'
+import FeeStructureLiveTab, { saveFeeStructureLive } from './Components/FeeStructureLiveTab'
 import ConfigureFeeStructureModal from './Components/ConfigureFeeStructureModal'
 import FeeIncrementSimulatorModal from './Components/FeeIncrementSimulatorModal'
 import ChequeBounceTrackerModal from './Components/ChequeBounceTrackerModal'
@@ -15,7 +18,10 @@ import FeeCollectionTab from './Components/FeeCollectionTab'
 import AdmissionClearancesTab from './Components/AdmissionClearancesTab'
 import ReceiptManagementTab from './Components/ReceiptManagementTab'
 import RefundsManagementTab from './Components/RefundsManagementTab'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore.js'
 import { ACADEMIC_YEARS, FEE_TABS, GRADES, QUICK_STATS } from './feesManagementData'
+
+const LIVE_FEE_TABS = new Set(['fee-structure', 'concessions-waivers', 'defaulters', 'activity-fees', 'transport-fees'])
 
 const primaryButton = 'inline-flex min-h-10 items-center gap-2 rounded-lg bg-[var(--erp-indigo)] px-4 text-sm font-semibold text-white'
 const secondaryButton = 'inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--erp-indigo)] bg-white px-4 text-sm font-semibold text-[var(--erp-indigo)]'
@@ -116,8 +122,21 @@ const FeesManagement = () => {
     const [configureFeeModal, setConfigureFeeModal] = useState(false)
     const [incrementSimulatorModal, setIncrementSimulatorModal] = useState(false)
     const [chequeBounceModal, setChequeBounceModal] = useState(false)
-    const { addFeeStructure, addFeeCategory } = useFinance()
+    const [structureRefreshKey, setStructureRefreshKey] = useState(0)
+    const { addFeeStructure, addFeeCategory, rehydrateFromApi } = useFinance()
+    const live = isLiveApiEnabled()
     const activeTabLabel = activeTab === 'defaulters' ? 'Defaulters management' : FEE_TABS.find((tab) => tab.id === activeTab)?.label ?? 'Fee structure'
+    const tabIsLive = live && LIVE_FEE_TABS.has(activeTab)
+
+    const handleSaveFeeStructure = async (payload) => {
+        if (live) {
+            const res = await saveFeeStructureLive(payload, { rehydrateFromApi })
+            if (res?.success) setStructureRefreshKey((value) => value + 1)
+            return
+        }
+        addFeeStructure?.(payload)
+        toast.success('Fee structure saved.')
+    }
 
     const exportUnavailable = <button type='button' disabled title='Export requires the connected fee reporting API.' className={unavailableButton}><Download aria-hidden='true' size={16} /> Export unavailable</button>
     const reminderUnavailable = <button type='button' disabled title='Reminder delivery requires connected email or WhatsApp services.' className={unavailableButton}><Bell aria-hidden='true' size={16} /> Reminder unavailable</button>
@@ -140,14 +159,46 @@ const FeesManagement = () => {
         <section className='space-y-5'>
             <PageHeader
                 title={activeTabLabel}
-                description='Manage browser-stored fee configuration, collections, concessions, defaulters and receipts without implying connected banking or delivery services.'
-                context='Browser-stored finance workspace · production APIs disconnected'
+                description={
+                    activeTab === 'activity-fees'
+                        ? 'Create activity fees, assign participants and collect payment against the live campus finance snapshot on PostgreSQL.'
+                        : activeTab === 'transport-fees'
+                            ? 'Define route transport fees, assign students and collect payment against the live campus finance snapshot on PostgreSQL.'
+                            : activeTab === 'fee-structure' && live
+                                ? 'Define and maintain academic fee structures on the live campus finance snapshot.'
+                                : activeTab === 'concessions-waivers' && live
+                                    ? 'Create and review concessions against the live campus finance snapshot.'
+                                    : activeTab === 'defaulters' && live
+                                        ? 'Track unpaid installments and outstanding balances from the live campus ledger.'
+                                        : 'Manage browser-stored fee configuration, collections, concessions, defaulters and receipts without implying connected banking or delivery services.'
+                }
+                context={
+                    tabIsLive
+                        ? 'Live campus finance snapshot API'
+                        : 'Browser-stored finance workspace · production APIs disconnected'
+                }
                 actions={actions}
             />
             <IntegrationNotice
-                state='demo'
-                title='Local fee-management workspace'
-                description='Fee records and decisions on this screen are demonstration data stored in this browser. Production requires server-side permissions, accounting locks, immutable audit history and connected payment services.'
+                state={tabIsLive ? 'connected' : 'demo'}
+                title={
+                    activeTab === 'activity-fees'
+                        ? 'Live activity fee register'
+                        : activeTab === 'transport-fees'
+                            ? 'Live transport fee register'
+                            : activeTab === 'fee-structure' && live
+                                ? 'Live fee structure register'
+                                : activeTab === 'concessions-waivers' && live
+                                    ? 'Live concessions register'
+                                    : activeTab === 'defaulters' && live
+                                        ? 'Live defaulters register'
+                                        : 'Local fee-management workspace'
+                }
+                description={
+                    tabIsLive
+                        ? 'Records on this tab persist on the campus finance snapshot (PostgreSQL). Demo/localStorage rows are not mixed in while live API mode is on.'
+                        : 'Fee records and decisions on this screen are demonstration data stored in this browser. Production requires server-side permissions, accounting locks, immutable audit history and connected payment services.'
+                }
             />
 
             <div className='flex gap-2 overflow-x-auto border-b border-[var(--erp-line)]' role='tablist' aria-label='Fee management views'>
@@ -156,16 +207,26 @@ const FeesManagement = () => {
                 ))}
             </div>
 
-            {activeTab === 'fee-structure' && <FeeStructureTab />}
+            {activeTab === 'fee-structure' && (live
+                ? <FeeStructureLiveTab key={structureRefreshKey} onRequestDefine={() => setDefineFeeModal(true)} />
+                : <FeeStructureTab />)}
             {activeTab === 'fee-collection' && <FeeCollectionTab />}
             {activeTab === 'admission-clearances' && <AdmissionClearancesTab />}
             {activeTab === 'concessions-waivers' && <ConcessionsWaiversTab />}
             {activeTab === 'defaulters' && <DefaultersTab />}
             {activeTab === 'receipt-management' && <ReceiptManagementTab />}
             {activeTab === 'activity-fees' && <ActivityFeesTab />}
+            {activeTab === 'transport-fees' && <TransportFeesTab />}
             {activeTab === 'refunds-adjustments' && <RefundsManagementTab />}
 
-            {defineFeeModal && <DefineFeeStructureModal isOpen onClose={() => setDefineFeeModal(false)} onSave={addFeeStructure} onAddCategory={addFeeCategory} />}
+            {defineFeeModal && (
+                <DefineFeeStructureModal
+                    isOpen
+                    onClose={() => setDefineFeeModal(false)}
+                    onSave={handleSaveFeeStructure}
+                    onAddCategory={addFeeCategory}
+                />
+            )}
             <ConfigureFeeStructureModal isOpen={configureFeeModal} onClose={() => setConfigureFeeModal(false)} />
             <FeeIncrementSimulatorModal isOpen={incrementSimulatorModal} onClose={() => setIncrementSimulatorModal(false)} />
             <ChequeBounceTrackerModal isOpen={chequeBounceModal} onClose={() => setChequeBounceModal(false)} />

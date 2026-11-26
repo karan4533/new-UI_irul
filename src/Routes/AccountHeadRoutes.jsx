@@ -1,5 +1,6 @@
 import AttendanceAndLeaveWorkspace from '../Common/AttendanceAndLeave/AttendanceAndLeaveWorkspace'
 import { EnterpriseOperationsRoutes } from './EnterpriseOperationsRoutes'
+import { TcRequestRoleRoutes } from './tcRequestRoleRoutes'
 import React from 'react'
 import { Route, Routes as ReactRoutes, Navigate } from 'react-router-dom'
 import Dashboard from '../Pages/AccountHead/Dashboard/Dashboard'
@@ -12,7 +13,9 @@ import Approvals from '../Pages/AccountHead/Approvals/Approvals'
 import ReportsAnalytics from '../Pages/AccountHead/ReportsAnalytics/ReportsAnalytics'
 import Settings from '../Pages/AccountHead/Settings/Settings'
 import { TaskManagementRoutes } from '../Common/TaskManagement/TaskManagementRoutes'
-import { BookFeePage, BudgetPage, FeeProjectionPanel, MfpPlaceholder } from '../Common/demoDomain/DemoScreens'
+import { FeeProjectionPanel, MfpPlaceholder } from '../Common/demoDomain/DemoScreens'
+import BookFee from '../Pages/AccountHead/BookFee/BookFee'
+import AnnualBudget from '../Pages/AccountHead/AnnualBudget/AnnualBudget'
 import PaymentVouchers from '../Pages/AccountHead/PaymentVouchers/PaymentVouchers'
 import PosEdcSyncWorkspace from '../Pages/AccountHead/PosEdcSync/PosEdcSyncWorkspace'
 
@@ -31,13 +34,14 @@ const AccountHeadRoutes = () => {
             <Route path="/account-head/settings" element={<Settings />} />
             <Route path="/account-head/pos-sync" element={<PosEdcSyncWorkspace />} />
             <Route path="/account-head/payment-vouchers" element={<PaymentVouchers />} />
-            <Route path="/account-head/book-fee" element={<BookFeePage />} />
-            <Route path="/account-head/annual-budget" element={<BudgetPage />} />
+            <Route path="/account-head/book-fee" element={<BookFee />} />
+            <Route path="/account-head/annual-budget" element={<AnnualBudget />} />
             <Route path="/account-head/mfp" element={<MfpPlaceholder />} />
             <Route path="/account-head/fee-projection" element={<FeeProjectionPanel />} />
             {TaskManagementRoutes({ basePath: '/account-head' })}
                         <Route path="/account-head/attendance-and-leave" element={<AttendanceAndLeaveWorkspace defaultTab="overview" />} />
             {EnterpriseOperationsRoutes({ basePath: '/account-head', role: 'accounthead' })}
+            {TcRequestRoleRoutes({ basePath: '/account-head' })}
             <Route path="*" element={<Navigate to="/account-head/dashboard" replace />} />
         </ReactRoutes>
     )

@@ -6,6 +6,7 @@ export const FEE_TABS = [
     { id: 'defaulters', label: 'Defaulters' },
     { id: 'receipt-management', label: 'Receipt Management' },
     { id: 'activity-fees', label: 'Activity Fees' },
+    { id: 'transport-fees', label: 'Transport Fees' },
     { id: 'refunds-adjustments', label: 'Refunds & Adjustments' },
 ]
 

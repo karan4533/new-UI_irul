@@ -12,16 +12,32 @@ export const TC_STATUSES = [
     'Rejected',
 ]
 
-/** Display labels that mirror the client document chain. */
+/** Display labels for persisted API status values. */
 export const TC_STATUS_LABELS = {
-    'Pending PRM Review': 'Pending Class Teacher / PRM intake',
+    'Pending PRM Review': 'Pending PRM Review',
+    'Pending Manager NOCs': 'Pending department NOCs',
     'Pending Super Admin Approval': 'Pending MD final (after NOCs)',
     Approved: 'TC issued (MD final)',
     Rejected: 'Rejected',
 }
 
+/**
+ * Live API keeps status="Pending PRM Review" through CT→DA; use workflowStage for the
+ * true client-facing label until NOC / MD statuses kick in.
+ */
+export const TC_WORKFLOW_STAGE_LABELS = {
+    prm: 'Pending PRM Review',
+    class_teacher: 'Pending Class Teacher review',
+    coordinator: 'Pending Coordinator review',
+    principal: 'Pending Principal review',
+    da: 'Pending Director of Academics review',
+    noc: 'Pending department NOCs',
+    md: 'Pending MD final (after NOCs)',
+}
+
 export const CLIENT_TC_WORKFLOW_STEPS = [
     { key: 'student', label: 'Student / Guardian files TC' },
+    { key: 'prm', label: 'PRM / Front Office intake' },
     { key: 'class_teacher', label: 'Class Teacher review' },
     { key: 'coordinator', label: 'Coordinator review' },
     { key: 'principal', label: 'Principal review' },
@@ -32,9 +48,68 @@ export const CLIENT_TC_WORKFLOW_STEPS = [
 
 export const statusBadgeColor = {
     'Pending PRM Review': 'bg-[#FF980033] text-[#FF9800]',
+    'Pending Manager NOCs': 'bg-[#FF980033] text-[#FF9800]',
     'Pending Super Admin Approval': 'bg-[#2196F333] text-[#2196F3]',
     Approved: 'bg-[#4CAF5033] text-[#4CAF50]',
     Rejected: 'bg-[#FF000033] text-[#FF0000]',
+    // Stage-aware labels used when status alone is still PRM intake
+    'Pending Class Teacher review': 'bg-[#FF980033] text-[#FF9800]',
+    'Pending Coordinator review': 'bg-[#FF980033] text-[#FF9800]',
+    'Pending Principal review': 'bg-[#FF980033] text-[#FF9800]',
+    'Pending Director of Academics review': 'bg-[#FF980033] text-[#FF9800]',
+    'Pending department NOCs': 'bg-[#FF980033] text-[#FF9800]',
+    'Pending MD final (after NOCs)': 'bg-[#2196F333] text-[#2196F3]',
+    'TC issued (MD final)': 'bg-[#4CAF5033] text-[#4CAF50]',
+}
+
+/** Normalize API workflowStage; Approved locks to md for timeline display. */
+export const resolveTcWorkflowStage = (request = {}) => {
+    const status = String(request.status || '')
+    if (status === 'Approved') return 'md'
+    if (status === 'Rejected') {
+        const stage = String(request.workflowStage || 'prm').toLowerCase()
+        return stage || 'prm'
+    }
+    if (status === 'Pending Manager NOCs') return 'noc'
+    if (status === 'Pending Super Admin Approval') return 'md'
+    return String(request.workflowStage || 'prm').toLowerCase() || 'prm'
+}
+
+export const isTcWorkflowStepCurrent = (stepKey, request = {}) =>
+    resolveTcWorkflowStage(request) === stepKey
+
+/** Prefer workflow stage when API status has not advanced past PRM intake. */
+export const displayTcStatus = (statusOrRequest, workflowStage) => {
+    const isObj = statusOrRequest && typeof statusOrRequest === 'object'
+    const status = isObj ? statusOrRequest.status : statusOrRequest
+    const stage = isObj
+        ? resolveTcWorkflowStage(statusOrRequest)
+        : String(workflowStage || '').toLowerCase()
+
+    if (status === 'Approved' || status === 'Rejected') {
+        return TC_STATUS_LABELS[status] || status
+    }
+    if (status === 'Pending Super Admin Approval' || stage === 'md') {
+        return TC_STATUS_LABELS['Pending Super Admin Approval']
+    }
+    if (status === 'Pending Manager NOCs' || stage === 'noc') {
+        return TC_STATUS_LABELS['Pending Manager NOCs']
+    }
+    if (stage && TC_WORKFLOW_STAGE_LABELS[stage]) {
+        return TC_WORKFLOW_STAGE_LABELS[stage]
+    }
+    return TC_STATUS_LABELS[status] || status || '—'
+}
+
+export const tcStatusBadgeClass = (statusOrRequest, workflowStage) => {
+    const label = displayTcStatus(statusOrRequest, workflowStage)
+    const isObj = statusOrRequest && typeof statusOrRequest === 'object'
+    const status = isObj ? statusOrRequest.status : statusOrRequest
+    return (
+        statusBadgeColor[label]
+        || statusBadgeColor[status]
+        || 'bg-slate-100 text-slate-700'
+    )
 }
 
 const SEED_REQUESTS = [
@@ -131,8 +206,6 @@ export const allNocsCleared = (request) => {
     const clearances = request?.nocClearances || DEFAULT_NOC_CLEARANCES
     return clearances.every((c) => String(c.status || '').toLowerCase() === 'cleared')
 }
-
-export const displayTcStatus = (status) => TC_STATUS_LABELS[status] || status || '—'
 
 const loadRequests = () => {
     try {

@@ -9,7 +9,7 @@ import { RoleChip, SummaryCards, UserAvatar } from './WalletShared'
 
 const CATEGORY_FILTERS = ['All categories', 'Canteen', 'Stationery', 'Events', 'Other']
 
-const SpendingHistoryTab = ({ spendingHistory = SPENDING_HISTORY, initialRole = 'All Roles' }) => {
+const SpendingHistoryTab = ({ spendingHistory = SPENDING_HISTORY, initialRole = 'All Roles', cards = SPENDING_SUMMARY, live = false }) => {
     const [query, setQuery] = useState('')
     const [category, setCategory] = useState(CATEGORY_FILTERS[0])
     const rows = useMemo(() => spendingHistory.filter((row) => {
@@ -37,8 +37,8 @@ const SpendingHistoryTab = ({ spendingHistory = SPENDING_HISTORY, initialRole = 
 
     return (
         <div className='space-y-5'>
-            <IntegrationNotice state='demo' title='Sample spending reference' description='Spending rows and summary cards are demonstration records. Production disputes, merchant evidence and balance effects require the connected wallet ledger.' />
-            <SummaryCards cards={SPENDING_SUMMARY} />
+            {live ? <IntegrationNotice state='connected' title='Live spending ledger' description='Each spend debits the wallet once (POS bill reference is the idempotency key) and posts to the ledger. Overdrafts and frozen wallets are rejected.' /> : <IntegrationNotice state='demo' title='Sample spending reference' description='Spending rows and summary cards are demonstration records. Production disputes, merchant evidence and balance effects require the connected wallet ledger.' />}
+            <SummaryCards cards={cards} />
             <section className='overflow-hidden rounded-[var(--erp-radius-surface)] border border-[var(--erp-line)] bg-white' aria-labelledby='wallet-spending-register-title'>
                 <div className='px-4 pt-4 sm:px-5'><h3 id='wallet-spending-register-title' className='text-base font-semibold text-[var(--erp-ink)]'>Spending history</h3></div>
                 <DataToolbar

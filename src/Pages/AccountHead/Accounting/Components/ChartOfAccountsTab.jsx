@@ -7,10 +7,18 @@ import {
 } from '../accountingData'
 import { Panel, SummaryCards, TableCard, TablePagination, tdClass, thClass } from './AccountingShared'
 
-const AccountTreePanel = () => (
+const treeFromAccounts = (accounts) => ['Asset', 'Liability', 'Equity', 'Income', 'Expense']
+    .map((type) => ({
+        title: `${type}s`,
+        children: accounts.filter((row) => row.accountType === type).map((row) => `${row.accountCode && row.accountCode !== '—' ? `${row.accountCode} · ` : ''}${row.accountName}`),
+    }))
+    .filter((section) => section.children.length > 0)
+
+const AccountTreePanel = ({ tree = COA_ACCOUNT_TREE }) => (
     <Panel title='Account tree'>
         <div className='space-y-5'>
-            {COA_ACCOUNT_TREE.map((section) => (
+            {tree.length === 0 ? <p className='text-sm text-[#667085]'>No accounts yet. Add an account or post a transaction.</p> : null}
+            {tree.map((section) => (
                 <div key={section.title}>
                     <p className='text-sm font-semibold text-[#1E1E1E] mb-2'>{section.title}</p>
                     <div className='space-y-1.5 pl-3 border-l-2 border-[#515DEF]/20'>
@@ -27,13 +35,13 @@ const AccountTreePanel = () => (
     </Panel>
 )
 
-const ChartOfAccountsTab = ({ accounts, summary }) => (
+const ChartOfAccountsTab = ({ accounts, summary, live = false }) => (
     <div className='space-y-6' id='chart-of-accounts-print-area'>
         <SummaryCards cards={summary} />
 
         <div className='grid grid-cols-1 xl:grid-cols-3 gap-6'>
             <div className='xl:col-span-1'>
-                <AccountTreePanel />
+                <AccountTreePanel tree={live ? treeFromAccounts(accounts) : COA_ACCOUNT_TREE} />
             </div>
 
             <div className='xl:col-span-2'>

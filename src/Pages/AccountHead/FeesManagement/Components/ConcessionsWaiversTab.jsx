@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import ReactECharts from 'echarts-for-react'
+import { toast } from 'react-toastify'
 import {
     AlertCircle,
     ChevronLeft,
@@ -24,6 +25,8 @@ import {
 } from '../feesManagementData'
 import { useFinance } from '../../financeDomain/FinanceContext'
 import { formatCurrency } from '../../financeDomain/financeHelpers'
+import { createConcessionApi, listConcessionsApi } from '../../../../services/api/concessionApiService.js'
+import { isLiveApiEnabled } from '../../../../services/api/tokenStore.js'
 
 const thClass = 'px-2 py-3.5 text-[#0C1E5B] font-medium uppercase'
 const tdClass = 'px-2 py-4 text-[#667085]'
@@ -57,35 +60,94 @@ const Panel = ({ title, subtitle, children, action, className = '' }) => (
 const ConcessionsWaiversTab = () => {
     const [selectedConcession, setSelectedConcession] = useState(null)
     const [detailsOpen, setDetailsOpen] = useState(false)
-    const { concessions, students, feeCategories, getStudentSummary } = useFinance()
+    const [apiRows, setApiRows] = useState([])
+    const [loading, setLoading] = useState(false)
+    const [error, setError] = useState('')
+    const [saving, setSaving] = useState(false)
+    const { concessions, students, feeCategories, getStudentSummary, rehydrateFromApi } = useFinance()
+    const live = isLiveApiEnabled()
 
-    const liveConcessionRows = concessions.map((item) => {
+    const refresh = useCallback(async () => {
+        if (!live) return
+        setLoading(true)
+        setError('')
+        const res = await listConcessionsApi()
+        if (!res.success) {
+            setError(res.error || 'Could not load concessions.')
+            setApiRows([])
+            setLoading(false)
+            return
+        }
+        setApiRows(res.data.concessions || [])
+        setLoading(false)
+    }, [live])
+
+    useEffect(() => {
+        refresh()
+    }, [refresh])
+
+    const sourceRows = live ? apiRows : concessions
+    const liveConcessionRows = sourceRows.map((item) => {
         const student = students.find((row) => row.id === item.studentId)
         const category = feeCategories.find((row) => row.id === item.feeCategoryId)
         const summary = student ? getStudentSummary(student.id, item.academicYear) : null
+        const amountLabel = item.amountType === 'PERCENT' ? `${item.amount}%` : formatCurrency(item.amount)
         return {
             id: item.id,
-            student: student?.name ?? 'Student',
-            studentId: student?.admissionNo ?? item.studentId,
-            className: student ? `${student.className}-${student.section}` : '—',
+            student: item.studentName || student?.name || 'Student',
+            studentId: item.admissionNo || student?.admissionNo || item.studentId,
+            className: student ? `${student.className}-${student.section || ''}` : (item.className || '—'),
             avatarColor: 'bg-[#515DEF]',
             concessionType: item.type,
-            feeHead: category?.name || item.feeCategoryId,
+            feeHead: item.feeCategoryName || category?.name || item.feeCategoryId,
             originalAmount: formatCurrency(summary?.totalFee || 0),
-            deduction: formatCurrency(item.amount),
-            dedPercent: summary?.totalFee ? `${Math.round((item.amount / summary.totalFee) * 100)}%` : '—',
+            deduction: amountLabel,
+            dedPercent: item.amountType === 'PERCENT'
+                ? `${item.amount}%`
+                : (summary?.totalFee ? `${Math.round((item.amount / summary.totalFee) * 100)}%` : '—'),
             dedTone: 'success',
             netFee: formatCurrency(summary?.netPayable || 0),
             status: item.status,
             rollNumber: student?.rollNo,
-            gradeSection: student ? `${student.className} - ${student.section}` : '—',
+            gradeSection: student ? `${student.className} - ${student.section || ''}` : '—',
             policyId: item.id,
-            approvalDate: 'Live',
-            totalSavings: `-${formatCurrency(item.amount)}`,
+            approvalDate: live ? 'Live API' : 'Local',
+            totalSavings: `-${amountLabel}`,
             documents: [],
         }
     })
-    const concessionRows = [...liveConcessionRows, ...CONCESSIONS_REGISTER]
+    const concessionRows = live ? liveConcessionRows : [...liveConcessionRows, ...CONCESSIONS_REGISTER]
+
+    const createConcession = async (event) => {
+        event.preventDefault()
+        if (!live) {
+            toast.info('Switch to live API mode to create concessions on PostgreSQL.')
+            return
+        }
+        const form = event.currentTarget
+        const data = new FormData(form)
+        setSaving(true)
+        const res = await createConcessionApi({
+            studentId: data.get('studentId'),
+            feeCategoryId: data.get('feeCategoryId') || 'CAT-TUITION',
+            type: data.get('type') || 'Waiver',
+            amount: data.get('amount'),
+            amountType: data.get('amountType') || 'FIXED',
+            academicYear: data.get('academicYear') || '2026-27',
+            remarks: data.get('remarks') || '',
+        })
+        setSaving(false)
+        if (!res.success) {
+            toast.error(res.error || 'Could not create concession.')
+            return
+        }
+        const body = res.data && typeof res.data === 'object' ? res.data : res
+        if (body?.skipped) toast.info('Concession already exists.')
+        else toast.success('Concession saved to campus ledger.')
+        form.reset()
+        await refresh()
+        if (typeof rehydrateFromApi === 'function') await rehydrateFromApi()
+    }
 
     const openDetails = (row) => {
         setSelectedConcession(row)
@@ -172,10 +234,72 @@ const ConcessionsWaiversTab = () => {
         }],
     }), [])
 
+    const liveSummary = live
+        ? [
+            { label: 'Total Concessions', value: String(concessionRows.length), iconTone: 'info' },
+            {
+                label: 'Scholarships',
+                value: String(concessionRows.filter((row) => /scholar/i.test(row.concessionType || '')).length),
+                iconTone: 'success',
+            },
+            {
+                label: 'Sibling Discounts',
+                value: String(concessionRows.filter((row) => /sibling/i.test(row.concessionType || '')).length),
+                iconTone: 'info',
+            },
+            {
+                label: 'Special Waivers',
+                value: String(concessionRows.filter((row) => /waiv/i.test(row.concessionType || '')).length),
+                iconTone: 'danger',
+            },
+        ]
+        : CONCESSIONS_SUMMARY
+
     return (
         <div className='space-y-6'>
+            {error ? (
+                <div className='rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 flex items-center justify-between gap-3'>
+                    <span>{error}</span>
+                    <button type='button' onClick={refresh} className='underline cursor-pointer'>Retry</button>
+                </div>
+            ) : null}
+            {loading ? <p className='text-sm text-[#667085]'>Loading concessions from campus finance…</p> : null}
+
+            {live ? (
+                <form onSubmit={createConcession} className='bg-white rounded-2xl shadow-md p-4 grid md:grid-cols-3 gap-3'>
+                    <h2 className='md:col-span-3 text-lg font-medium'>Create concession</h2>
+                    <select name='studentId' required className='border border-[#D9D9D9] rounded-md px-2 py-2 text-sm' disabled={saving}>
+                        <option value=''>Select student</option>
+                        {students.map((student) => (
+                            <option key={student.id} value={student.id}>{student.name}</option>
+                        ))}
+                    </select>
+                    <select name='feeCategoryId' className='border border-[#D9D9D9] rounded-md px-2 py-2 text-sm' disabled={saving} defaultValue='CAT-TUITION'>
+                        {feeCategories.map((category) => (
+                            <option key={category.id} value={category.id}>{category.name || category.id}</option>
+                        ))}
+                        {!feeCategories.length ? <option value='CAT-TUITION'>Tuition</option> : null}
+                    </select>
+                    <select name='type' className='border border-[#D9D9D9] rounded-md px-2 py-2 text-sm' disabled={saving} defaultValue='Special Waiver'>
+                        {['Merit Scholarship', 'Sibling Discount', 'Special Waiver', 'Staff Child'].map((type) => (
+                            <option key={type}>{type}</option>
+                        ))}
+                    </select>
+                    <select name='amountType' className='border border-[#D9D9D9] rounded-md px-2 py-2 text-sm' disabled={saving} defaultValue='FIXED'>
+                        <option value='FIXED'>Fixed ₹</option>
+                        <option value='PERCENT'>Percent %</option>
+                    </select>
+                    <input name='amount' type='number' min='1' required placeholder='Amount' className='border border-[#D9D9D9] rounded-md px-2 py-2 text-sm' disabled={saving} />
+                    <input name='academicYear' defaultValue='2026-27' className='border border-[#D9D9D9] rounded-md px-2 py-2 text-sm' disabled={saving} />
+                    <input name='remarks' placeholder='Remarks' className='border border-[#D9D9D9] rounded-md px-2 py-2 text-sm md:col-span-2' disabled={saving} />
+                    <button type='submit' disabled={saving} className='bg-[#515DEF] text-white rounded-md text-sm cursor-pointer disabled:opacity-60'>
+                        {saving ? 'Saving…' : 'Save concession'}
+                    </button>
+                </form>
+            ) : null}
+
             <div className='grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4'>
-                {CONCESSIONS_SUMMARY.map((card) => {
+                {liveSummary.map((card) => {
                     const Icon = SUMMARY_ICONS[card.label] ?? Wallet
                     return (
                         <div key={card.label} className='bg-white rounded-2xl shadow-md p-4'>

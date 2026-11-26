@@ -8,6 +8,7 @@ import {
     listTransportStudentAssignments,
     upsertTransportStudentAssignment,
 } from '../../../services/api/transportApiService'
+import { assignTransportFeeApi } from '../../../services/api/transportFeeApiService'
 
 const emptyForm = {
     studentId: '',
@@ -105,14 +106,39 @@ const StudentTransport = () => {
         }
         setSaving(true)
         const res = await upsertTransportStudentAssignment(form)
-        setSaving(false)
         if (!res.success) {
+            setSaving(false)
             toast.error(typeof res.error === 'string' ? res.error : 'Could not save assignment.')
             return
         }
-        toast.success('Student transport assignment saved on the server.')
+        const route = routes.find((row) => String(row.id) === String(form.routeId))
+        const feeRes = await assignTransportFeeApi({
+            studentId: form.studentId,
+            studentName: form.studentName,
+            routeId: form.routeId,
+            routeName: form.routeName || route?.routeName,
+            stopName: form.stopName,
+            opsAssignmentId: res.data?.id || form.id,
+            amount: route?.yearlyFees || route?.amount || form.amount || 12000,
+            billingCycle: 'Yearly',
+            className: form.classSection || 'Transport',
+        })
+        setSaving(false)
+        if (!feeRes.success) {
+            toast.warning(
+                `Assignment saved, but finance fee sync failed: ${feeRes.error || 'unknown error'}`,
+            )
+        } else {
+            const body = feeRes.data && typeof feeRes.data === 'object' ? feeRes.data : feeRes
+            toast.success(
+                body?.skipped
+                    ? 'Assignment saved. Transport fee installment already existed.'
+                    : 'Assignment saved and transport fee installment posted.',
+            )
+        }
         setForm(emptyForm)
         setRows(res.rows || [])
+        await load()
     }
 
     return (

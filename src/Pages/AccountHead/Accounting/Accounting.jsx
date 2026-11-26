@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowRightLeft, BookOpen, Check, Download, FileText, Plus, RefreshCw, Upload } from 'lucide-react'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
 import { ConfirmAction, IntegrationNotice, PageHeader } from '../../../Common/ui'
@@ -36,7 +36,19 @@ import {
     GENERAL_LEDGER_REGISTER,
     JOURNAL_VOUCHERS_REGISTER,
     ONLINE_BOOK_REGISTER,
+    parseRupeeAmount,
 } from './accountingData'
+import {
+    createJournalVoucherApi,
+    getFinancialStatementsApi,
+    listBankReconciliationApi,
+    listChartOfAccountsApi,
+    listJournalVouchersApi,
+    postJournalVoucherApi,
+    reconcileBankEntryApi,
+    upsertAccountApi,
+} from '../../../services/api/accountingApiService.js'
+import { isLiveApiEnabled } from '../../../services/api/tokenStore.js'
 
 const SECTION_SUBTITLES = {
     'day-book': 'Maintain the chronological record of offline and manual transactions.',
@@ -58,21 +70,28 @@ const Accounting = () => {
     const { section } = useParams()
     const navigate = useNavigate()
     const finance = useFinance()
+    const live = isLiveApiEnabled()
+    // Live mode: every register comes from the server — demo registers are never shown.
     const [academicYear, setAcademicYear] = useState(ACCOUNTING_YEARS[0])
     const [addAccountModal, setAddAccountModal] = useState(false)
     const [newVoucherModal, setNewVoucherModal] = useState(false)
     const [addOfflineModal, setAddOfflineModal] = useState(false)
     const [postConfirmationOpen, setPostConfirmationOpen] = useState(false)
-    const [dayBookEntries, setDayBookEntries] = useState(DAY_BOOK_REGISTER)
-    const [onlineBookEntries] = useState(ONLINE_BOOK_REGISTER)
+    const [dayBookEntries, setDayBookEntries] = useState(live ? [] : DAY_BOOK_REGISTER)
+    const [onlineBookEntries] = useState(live ? [] : ONLINE_BOOK_REGISTER)
     const [selectedOnlineTransaction, setSelectedOnlineTransaction] = useState(null)
-    const [generalLedgerEntries] = useState(GENERAL_LEDGER_REGISTER)
-    const [cashBookEntries] = useState(CASH_BOOK_REGISTER)
-    const [bankBookEntries] = useState(BANK_BOOK_REGISTER)
-    const [coaAccounts, setCoaAccounts] = useState(COA_ACCOUNTS)
-    const [journalVouchers, setJournalVouchers] = useState(JOURNAL_VOUCHERS_REGISTER)
+    const [generalLedgerEntries] = useState(live ? [] : GENERAL_LEDGER_REGISTER)
+    const [cashBookEntries] = useState(live ? [] : CASH_BOOK_REGISTER)
+    const [bankBookEntries] = useState(live ? [] : BANK_BOOK_REGISTER)
+    const [coaAccounts, setCoaAccounts] = useState(live ? [] : COA_ACCOUNTS)
+    const [journalVouchers, setJournalVouchers] = useState(live ? [] : JOURNAL_VOUCHERS_REGISTER)
     const [selectedVoucherId, setSelectedVoucherId] = useState(null)
-    const [reconciliationEntries, setReconciliationEntries] = useState(BANK_RECONCILIATION_REGISTER)
+    const [reconciliationEntries, setReconciliationEntries] = useState(live ? [] : BANK_RECONCILIATION_REGISTER)
+    const [liveStatements, setLiveStatements] = useState(null)
+    const [loading, setLoading] = useState(false)
+    const [busy, setBusy] = useState(false)
+    const [error, setError] = useState('')
+    const [notice, setNotice] = useState('')
     const [selectedReconciliationId, setSelectedReconciliationId] = useState(null)
     const [reconciliationDrawerOpen, setReconciliationDrawerOpen] = useState(false)
     const [selectedSuggestionId, setSelectedSuggestionId] = useState(null)
@@ -80,12 +99,12 @@ const Accounting = () => {
     const [fsFilters, setFsFilters] = useState({
         financialYear: ACCOUNTING_YEARS[0],
         dateFrom: '2026-04-01',
-        dateTo: '2026-06-26',
+        dateTo: live ? new Date().toISOString().slice(0, 10) : '2026-06-26',
         department: 'All Departments',
         campus: 'All Campuses',
     })
     const [appliedFsFilters, setAppliedFsFilters] = useState(fsFilters)
-    const [fsLastGeneratedAt, setFsLastGeneratedAt] = useState('26 Jun 2026, 4:30 PM')
+    const [fsLastGeneratedAt, setFsLastGeneratedAt] = useState(live ? '' : '26 Jun 2026, 4:30 PM')
     const ledgerRegisterRef = useRef(null)
 
     const activeSection = useMemo(
@@ -95,23 +114,92 @@ const Accounting = () => {
     const activeLabel = ACCOUNTING_SECTIONS.find((item) => item.id === activeSection)?.label ?? 'Accounting'
     const selectedVoucher = journalVouchers.find((row) => row.id === selectedVoucherId) || null
 
+    const loadRegisters = useCallback(async () => {
+        if (!live) return
+        setLoading(true)
+        setError('')
+        const [coaRes, jvRes, reconRes] = await Promise.all([
+            listChartOfAccountsApi(),
+            listJournalVouchersApi(),
+            listBankReconciliationApi(),
+        ])
+        const failed = [coaRes, jvRes, reconRes].find((res) => !res.success)
+        if (failed) {
+            setError(failed.error || 'Could not load accounting registers.')
+        } else {
+            setCoaAccounts(coaRes.data.accounts)
+            setJournalVouchers(jvRes.data.vouchers)
+            setReconciliationEntries(reconRes.data.items)
+        }
+        setLoading(false)
+    }, [live])
+
+    const loadStatements = useCallback(async (filters) => {
+        if (!live) return
+        setBusy(true)
+        setError('')
+        const res = await getFinancialStatementsApi({ dateFrom: filters.dateFrom, dateTo: filters.dateTo, department: filters.department })
+        if (!res.success) {
+            setError(res.error || 'Could not generate financial statements.')
+        } else {
+            setLiveStatements(res.data)
+            setFsLastGeneratedAt(new Date().toLocaleString('en-IN', {
+                day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
+            }))
+        }
+        setBusy(false)
+    }, [live])
+
+    useEffect(() => {
+        loadRegisters()
+    }, [loadRegisters])
+
+    useEffect(() => {
+        if (live && activeSection === 'financial-statements' && !liveStatements) {
+            loadStatements(appliedFsFilters)
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [live, activeSection])
+
+    // Run a mutating action, then refresh registers and the shared finance snapshot so the debounced state PUT never writes stale data.
+    const runAction = async (action, successMessage) => {
+        setBusy(true)
+        setError('')
+        setNotice('')
+        const res = await action()
+        if (!res.success) {
+            setError(res.error || 'Action failed.')
+            setBusy(false)
+            return res
+        }
+        setNotice(res.data?.skipped ? 'Already recorded — no duplicate created.' : successMessage)
+        await loadRegisters()
+        if (typeof finance.rehydrateFromApi === 'function') await finance.rehydrateFromApi()
+        setLiveStatements(null)
+        setBusy(false)
+        return res
+    }
+
     const mergedDayBook = useMemo(() => [...finance.dayBookEntries, ...dayBookEntries], [finance.dayBookEntries, dayBookEntries])
     const mergedOnlineBook = useMemo(() => [...finance.onlineBookEntries, ...onlineBookEntries], [finance.onlineBookEntries, onlineBookEntries])
     const mergedGeneralLedger = useMemo(() => [...finance.glEntries, ...generalLedgerEntries], [finance.glEntries, generalLedgerEntries])
     const mergedCashBook = useMemo(() => [...finance.cashBookEntries, ...cashBookEntries], [finance.cashBookEntries, cashBookEntries])
     const mergedBankBook = useMemo(() => [...finance.bankBookEntries, ...bankBookEntries], [finance.bankBookEntries, bankBookEntries])
 
-    const dayBookSummary = useMemo(() => buildDayBookSummary(mergedDayBook, DAY_BOOK_OPENING_BALANCE), [mergedDayBook])
+    const dayBookOpening = live ? 0 : DAY_BOOK_OPENING_BALANCE
+    const cashBookOpening = live ? 0 : CASH_BOOK_OPENING_BALANCE
+    const bankBookOpening = live ? 0 : BANK_BOOK_OPENING_BALANCE
+    const dayBookSummary = useMemo(() => buildDayBookSummary(mergedDayBook, dayBookOpening), [mergedDayBook, dayBookOpening])
     const onlineBookSummary = useMemo(() => buildOnlineBookSummary(mergedOnlineBook), [mergedOnlineBook])
     const generalLedgerSummary = useMemo(() => buildGeneralLedgerSummary(mergedGeneralLedger), [mergedGeneralLedger])
-    const cashBookSummary = useMemo(() => buildCashBookSummary(mergedCashBook, CASH_BOOK_OPENING_BALANCE), [mergedCashBook])
-    const bankBookSummary = useMemo(() => buildBankBookSummary(mergedBankBook, BANK_BOOK_OPENING_BALANCE), [mergedBankBook])
+    const cashBookSummary = useMemo(() => buildCashBookSummary(mergedCashBook, cashBookOpening), [mergedCashBook, cashBookOpening])
+    const bankBookSummary = useMemo(() => buildBankBookSummary(mergedBankBook, bankBookOpening), [mergedBankBook, bankBookOpening])
     const coaSummary = useMemo(() => buildCoaSummary(coaAccounts), [coaAccounts])
     const journalVoucherSummary = useMemo(() => buildJournalVoucherSummary(journalVouchers), [journalVouchers])
     const bankReconciliationSummary = useMemo(() => buildBankReconciliationSummary(reconciliationEntries), [reconciliationEntries])
 
     const handleAddOfflineEntry = (entry) => {
-        setDayBookEntries((previous) => appendDayBookEntry(previous, DAY_BOOK_OPENING_BALANCE, entry))
+        setDayBookEntries((previous) => appendDayBookEntry(previous, dayBookOpening, entry))
         finance.addManualEntry({
             date: entry.date,
             amount: entry.debit !== '—' ? entry.debit : entry.credit,
@@ -124,12 +212,53 @@ const Accounting = () => {
     }
 
     const handleAddJournalVoucher = (voucher) => {
+        if (live) {
+            runAction(
+                () => createJournalVoucherApi({
+                    voucherNo: voucher.voucherNo,
+                    dateIso: voucher.dateIso,
+                    description: voucher.description,
+                    debitAccount: voucher.debitAccount,
+                    creditAccount: voucher.creditAccount,
+                    amount: parseRupeeAmount(voucher.amount),
+                    remarks: voucher.remarks,
+                }),
+                'Journal voucher saved as draft.',
+            )
+            setSelectedVoucherId(null)
+            return
+        }
         setJournalVouchers((previous) => appendJournalVoucher(previous, voucher))
         setSelectedVoucherId(null)
     }
 
+    const handleAddAccount = (account) => {
+        if (live) {
+            runAction(
+                () => upsertAccountApi({
+                    accountCode: account.accountCode,
+                    accountName: account.accountName,
+                    accountType: account.accountType,
+                    parentAccount: account.parentAccount,
+                    status: account.status,
+                    openingBalance: parseRupeeAmount(account.balance),
+                }),
+                'Account saved.',
+            )
+            return
+        }
+        setCoaAccounts((previous) => appendCoaAccount(previous, account))
+    }
+
     const handlePostVoucher = () => {
         if (!selectedVoucherId) return
+        if (live) {
+            const voucherId = selectedVoucherId
+            setPostConfirmationOpen(false)
+            runAction(() => postJournalVoucherApi(voucherId), 'Journal voucher posted to the ledger.')
+            setSelectedVoucherId(null)
+            return
+        }
         setJournalVouchers((previous) => postJournalVouchers(previous, selectedVoucherId))
         setSelectedVoucherId(null)
         setPostConfirmationOpen(false)
@@ -142,7 +271,16 @@ const Accounting = () => {
         setReconciliationDrawerOpen(true)
     }
 
-    const reconcileEntry = (entryId, suggestionId) => {
+    const reconcileEntry = (entryId, suggestionId, evidence) => {
+        if (live) {
+            setReconciliationDrawerOpen(false)
+            setSelectedReconciliationId(null)
+            runAction(
+                () => reconcileBankEntryApi({ entryId, ...evidence }),
+                'Bank statement evidence recorded.',
+            )
+            return
+        }
         setReconciliationEntries((previous) => reconcileReconciliationEntry(previous, entryId, suggestionId))
         setReconciliationDrawerOpen(false)
         setSelectedReconciliationId(null)
@@ -151,6 +289,10 @@ const Accounting = () => {
 
     const generatePreview = () => {
         setAppliedFsFilters({ ...fsFilters })
+        if (live) {
+            loadStatements(fsFilters)
+            return
+        }
         setFsLastGeneratedAt(new Date().toLocaleString('en-IN', {
             day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
         }))
@@ -204,7 +346,11 @@ const Accounting = () => {
         if (activeSection === 'bank-reconciliation') return (
             <>
                 <button type='button' disabled title='Statement import requires a connected bank feed or approved file parser.' className={unavailableButton}><Upload aria-hidden='true' size={16} /> Import unavailable</button>
-                <button type='button' onClick={() => setReconciliationEntries((previous) => autoMatchReconciliation(previous))} className={secondaryButton}><RefreshCw aria-hidden='true' size={16} /> Run local match rules</button>
+                {live ? (
+                    <button type='button' onClick={loadRegisters} disabled={loading} className={secondaryButton}><RefreshCw aria-hidden='true' size={16} /> Refresh</button>
+                ) : (
+                    <button type='button' onClick={() => setReconciliationEntries((previous) => autoMatchReconciliation(previous))} className={secondaryButton}><RefreshCw aria-hidden='true' size={16} /> Run local match rules</button>
+                )}
                 {exportUnavailable}
             </>
         )
@@ -224,7 +370,7 @@ const Accounting = () => {
             <PageHeader
                 title={activeLabel}
                 description={SECTION_SUBTITLES[activeSection]}
-                context={`Academic year ${academicYear} · browser-stored workspace`}
+                context={`Academic year ${academicYear} · ${live ? 'live campus ledger' : 'browser-stored workspace'}`}
                 actions={renderActions()}
             />
 
@@ -236,18 +382,36 @@ const Accounting = () => {
                 </label>
             </div>
 
-            <IntegrationNotice
-                state='demo'
-                title='Browser-stored accounting workspace'
-                description='Entries, posting decisions and reconciliation changes remain in this browser. No banking, accounting, reporting or document-storage API is connected.'
-            />
+            {live ? (
+                <IntegrationNotice
+                    state='connected'
+                    title='Live accounting ledger (PostgreSQL)'
+                    description='Chart of accounts, journal vouchers, bank reconciliation evidence and financial statements are saved on the server with audit events. Bank statement import and report export are not connected yet.'
+                />
+            ) : (
+                <IntegrationNotice
+                    state='demo'
+                    title='Browser-stored accounting workspace'
+                    description='Entries, posting decisions and reconciliation changes remain in this browser. No banking, accounting, reporting or document-storage API is connected.'
+                />
+            )}
+            {error ? (
+                <div role='alert' className='flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700'>
+                    <span>{error}</span>
+                    {live ? <button type='button' onClick={loadRegisters} className='underline cursor-pointer'>Retry</button> : null}
+                </div>
+            ) : null}
+            {notice ? (
+                <div role='status' className='rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800'>{notice}</div>
+            ) : null}
+            {loading || busy ? <p className='text-sm text-[#667085]'>{busy ? 'Saving to the campus ledger…' : 'Loading accounting registers from campus finance…'}</p> : null}
 
             {activeSection === 'day-book' && <DayBookTab entries={mergedDayBook} summary={dayBookSummary} onEditNarration={finance.editNarration} />}
             {activeSection === 'online-book' && <OnlineBookTab entries={mergedOnlineBook} summary={onlineBookSummary} selectedTransaction={selectedOnlineTransaction} onSelectTransaction={setSelectedOnlineTransaction} onCloseDetails={() => setSelectedOnlineTransaction(null)} />}
             {activeSection === 'general-ledger' && <GeneralLedgerTab entries={mergedGeneralLedger} summary={generalLedgerSummary} registerRef={ledgerRegisterRef} />}
             {activeSection === 'cash-book' && <CashBookTab entries={mergedCashBook} summary={cashBookSummary} />}
             {activeSection === 'bank-book' && <BankBookTab entries={mergedBankBook} summary={bankBookSummary} />}
-            {activeSection === 'chart-of-accounts' && <ChartOfAccountsTab accounts={coaAccounts} summary={coaSummary} />}
+            {activeSection === 'chart-of-accounts' && <ChartOfAccountsTab accounts={coaAccounts} summary={coaSummary} live={live} />}
             {activeSection === 'journal-vouchers' && <JournalVouchersTab vouchers={journalVouchers} summary={journalVoucherSummary} selectedId={selectedVoucherId} onSelect={setSelectedVoucherId} />}
             {activeSection === 'bank-reconciliation' && (
                 <BankReconciliationTab
@@ -260,20 +424,24 @@ const Accounting = () => {
                     onReconcile={reconcileEntry}
                     selectedSuggestionId={selectedSuggestionId}
                     onSelectSuggestion={setSelectedSuggestionId}
+                    live={live}
+                    busy={busy}
                 />
             )}
-            {activeSection === 'financial-statements' && <FinancialStatementsTab statementType={financialStatementType} onStatementTypeChange={setFinancialStatementType} filters={fsFilters} onFilterChange={(key, value) => setFsFilters((previous) => ({ ...previous, [key]: value }))} appliedFilters={appliedFsFilters} lastGeneratedAt={fsLastGeneratedAt} isGenerating={false} />}
+            {activeSection === 'financial-statements' && <FinancialStatementsTab statementType={financialStatementType} onStatementTypeChange={setFinancialStatementType} filters={fsFilters} onFilterChange={(key, value) => setFsFilters((previous) => ({ ...previous, [key]: value }))} appliedFilters={appliedFsFilters} lastGeneratedAt={fsLastGeneratedAt} isGenerating={live && busy && !liveStatements} liveStatements={liveStatements} liveMode={live} />}
 
             <ConfirmAction
                 open={postConfirmationOpen}
                 onClose={() => setPostConfirmationOpen(false)}
                 onConfirm={handlePostVoucher}
                 title={`Post ${selectedVoucher?.id || 'selected voucher'}?`}
-                description='Posting changes this browser-stored voucher from draft to posted. Production posting must also enforce a locked accounting period, balanced lines, permissions and an immutable audit event.'
+                description={live
+                    ? 'Posting writes balanced debit and credit lines to the campus general ledger with an audit event. A posted voucher cannot be edited.'
+                    : 'Posting changes this browser-stored voucher from draft to posted. Production posting must also enforce a locked accounting period, balanced lines, permissions and an immutable audit event.'}
                 confirmLabel='Post voucher'
                 confirmDisabled={!selectedVoucher || selectedVoucher.status === 'Posted'}
             />
-            <AddAccountModal isOpen={addAccountModal} onClose={() => setAddAccountModal(false)} onSubmit={(account) => setCoaAccounts((previous) => appendCoaAccount(previous, account))} />
+            <AddAccountModal isOpen={addAccountModal} onClose={() => setAddAccountModal(false)} onSubmit={handleAddAccount} />
             <NewJournalVoucherModal isOpen={newVoucherModal} onClose={() => setNewVoucherModal(false)} onSubmit={handleAddJournalVoucher} />
             <AddOfflineEntryModal isOpen={addOfflineModal} onClose={() => setAddOfflineModal(false)} onSubmit={handleAddOfflineEntry} />
         </section>

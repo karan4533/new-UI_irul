@@ -6,14 +6,15 @@ import {
 } from '../walletManagementData'
 import { Panel, SummaryCards } from './WalletShared'
 
-const WalletOverviewTab = () => (
+const WalletOverviewTab = ({ cards = OVERVIEW_SUMMARY, balanceByRole = BALANCE_BY_ROLE, spendCategories = SPEND_CATEGORIES }) => (
     <div className='space-y-6'>
-        <SummaryCards cards={OVERVIEW_SUMMARY} />
+        <SummaryCards cards={cards} />
 
         <div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
             <Panel title='Wallet balance by role'>
                 <div className='space-y-4'>
-                    {BALANCE_BY_ROLE.map((item) => (
+                    {balanceByRole.length === 0 ? <p className='text-sm text-[#667085]'>No wallets yet.</p> : null}
+                    {balanceByRole.map((item) => (
                         <div key={item.label}>
                             <div className='flex items-center justify-between text-sm mb-1.5'>
                                 <span className='text-[#667085]'>{item.label}</span>
@@ -32,7 +33,8 @@ const WalletOverviewTab = () => (
 
             <Panel title='Spend categories (this month)'>
                 <div className='space-y-3'>
-                    {SPEND_CATEGORIES.map((item) => (
+                    {spendCategories.length === 0 ? <p className='text-sm text-[#667085]'>No spending recorded this month.</p> : null}
+                    {spendCategories.map((item) => (
                         <div key={item.label} className='flex items-center justify-between text-sm'>
                             <span className='text-[#667085]'>{item.label}</span>
                             <span className='font-semibold text-[#1E1E1E]'>

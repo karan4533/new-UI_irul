@@ -1,5 +1,6 @@
 import AttendanceAndLeaveWorkspace from '../Common/AttendanceAndLeave/AttendanceAndLeaveWorkspace'
 import { EnterpriseOperationsRoutes } from './EnterpriseOperationsRoutes'
+import { TcRequestRoleRoutes } from './tcRequestRoleRoutes'
 import { TaskManagementRoutes } from '../Common/TaskManagement/TaskManagementRoutes'
 import React from 'react'
 import CommunicationInbox from '../Pages/TransportManager/Communication/Inbox'
@@ -97,6 +98,7 @@ const TransportManagerRoutes = () => {
 
             {/* Enterprise Functional Operations (Stores, Gate Pass, File Room, Ticketing, Monitoring, Lost & Found) */}
             {EnterpriseOperationsRoutes({ basePath: '/transport-manager', role: 'transportmanager' })}
+            {TcRequestRoleRoutes({ basePath: '/transport-manager' })}
 
             <Route path="*" element={<Navigate to="/transport-manager/dashboard" replace />} />
         </ReactRoutes>

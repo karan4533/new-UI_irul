@@ -10,7 +10,7 @@ import { RoleChip, SummaryCards, UserAvatar } from './WalletShared'
 const MODE_FILTERS = ['All modes', 'UPI', 'Card', 'Net Banking', 'Offline']
 const STATUS_FILTERS = ['All statuses', 'Success', 'Failed', 'Refunded']
 
-const RechargeRecordsTab = ({ rechargeRecords = RECHARGE_RECORDS, initialRole = 'All Roles' }) => {
+const RechargeRecordsTab = ({ rechargeRecords = RECHARGE_RECORDS, initialRole = 'All Roles', cards = RECHARGE_SUMMARY, live = false }) => {
     const [query, setQuery] = useState('')
     const [mode, setMode] = useState(MODE_FILTERS[0])
     const [status, setStatus] = useState(STATUS_FILTERS[0])
@@ -42,8 +42,9 @@ const RechargeRecordsTab = ({ rechargeRecords = RECHARGE_RECORDS, initialRole = 
 
     return (
         <div className='space-y-5'>
-            <IntegrationNotice state='demo' title='Browser-stored recharge evidence' description='These records combine seeded examples with local cash credits created in this session. Online gateway status, settlement and refund state require the wallet ledger API.' />
-            <SummaryCards cards={RECHARGE_SUMMARY} />
+            {live ? <IntegrationNotice state='connected' title='Live recharge ledger' description='Cash, cheque and bank-transfer credits recorded on the server with a voucher and ledger posting. Online gateway recharges are not connected.' /> : null}
+            {live ? null : <IntegrationNotice state='demo' title='Browser-stored recharge evidence' description='These records combine seeded examples with local cash credits created in this session. Online gateway status, settlement and refund state require the wallet ledger API.' />}
+            <SummaryCards cards={cards} />
             <section className='overflow-hidden rounded-[var(--erp-radius-surface)] border border-[var(--erp-line)] bg-white' aria-labelledby='wallet-recharge-register-title'>
                 <div className='px-4 pt-4 sm:px-5'><h3 id='wallet-recharge-register-title' className='text-base font-semibold text-[var(--erp-ink)]'>Recharge transaction register</h3></div>
                 <DataToolbar

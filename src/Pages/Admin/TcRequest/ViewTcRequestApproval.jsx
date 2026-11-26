@@ -9,8 +9,10 @@ import {
     CLIENT_TC_WORKFLOW_STEPS,
     displayTcStatus,
     getTcRequestById,
+    isTcWorkflowStepCurrent,
     rejectTcRequest,
-    statusBadgeColor,
+    resolveTcWorkflowStage,
+    tcStatusBadgeClass,
     TC_STATUS_LABELS,
 } from '../../../Common/TcRequest/tcRequestData'
 import { isLiveApiEnabled } from '../../../services/api/tokenStore'
@@ -35,10 +37,11 @@ const Field = ({ label, value }) => (
     </div>
 )
 
-const ViewTcRequestApproval = () => {
+const ViewTcRequestApproval = ({ basePath = '/admin/tc-request-approval' }) => {
     const live = isLiveApiEnabled()
     const { id } = useParams()
     const navigate = useNavigate()
+    const listBase = String(basePath || '/admin/tc-request-approval').replace(/\/$/, '')
     const [request, setRequest] = useState(() => (live ? null : getTcRequestById(id)))
     const [loading, setLoading] = useState(Boolean(live))
     const [error, setError] = useState('')
@@ -122,7 +125,7 @@ const ViewTcRequestApproval = () => {
 
     return (
         <section className='space-y-6'>
-            <button type='button' onClick={() => navigate('/admin/tc-request-approval')} className='inline-flex items-center gap-2 text-sm text-[#515DEF] border border-[#515DEF] rounded-md px-4 py-2 hover:bg-[#515DEF] hover:text-white transition-colors cursor-pointer'>
+            <button type='button' onClick={() => navigate(listBase)} className='inline-flex items-center gap-2 text-sm text-[#515DEF] border border-[#515DEF] rounded-md px-4 py-2 hover:bg-[#515DEF] hover:text-white transition-colors cursor-pointer'>
                 <ArrowLeft size={18} />
                 Back to list
             </button>
@@ -144,8 +147,8 @@ const ViewTcRequestApproval = () => {
                     <div className='bg-white rounded-2xl shadow-md p-4'>
                         <div className='flex flex-wrap items-center gap-3'>
                             <h1 className='text-2xl font-semibold text-black'>{request.requestId}</h1>
-                            <span className={`px-3 py-1.5 rounded-lg text-sm font-semibold whitespace-nowrap ${statusBadgeColor[request.status] || 'bg-slate-100 text-slate-700'}`}>
-                                {displayTcStatus(request.status)}
+                            <span className={`px-3 py-1.5 rounded-lg text-sm font-semibold whitespace-nowrap ${tcStatusBadgeClass(request)}`}>
+                                {displayTcStatus(request)}
                             </span>
                         </div>
                         <p className='text-sm text-[#667085] mt-2'>
@@ -156,10 +159,7 @@ const ViewTcRequestApproval = () => {
                     <Section title='Client TC workflow'>
                         <ol className='grid gap-2 text-sm text-slate-700'>
                             {CLIENT_TC_WORKFLOW_STEPS.map((step, index) => {
-                                const stage = String(request.workflowStage || '').toLowerCase()
-                                const active = stage === step.key
-                                  || (step.key === 'class_teacher' && stage === 'prm')
-                                  || (step.key === 'md' && request.status === 'Pending Super Admin Approval')
+                                const active = isTcWorkflowStepCurrent(step.key, request)
                                 return (
                                 <li key={step.key} className={`flex gap-2 rounded-lg px-2 py-1 ${active ? 'bg-indigo-50 font-semibold text-indigo-900' : ''}`}>
                                     <span className='font-semibold text-slate-500'>{index + 1}.</span>
@@ -169,7 +169,7 @@ const ViewTcRequestApproval = () => {
                             })}
                         </ol>
                         <p className='mt-3 text-xs text-slate-500'>
-                            Live stages via workflowStage ({request.workflowStage || '—'}). Status: {TC_STATUS_LABELS[request.status] || request.status}.
+                            Live stage: {resolveTcWorkflowStage(request)}. API status: {TC_STATUS_LABELS[request.status] || request.status}. Shown as: {displayTcStatus(request)}.
                         </p>
                         {live && request.status !== 'Approved' && request.status !== 'Rejected' && request.workflowStage !== 'md' ? (
                             <button
@@ -270,7 +270,7 @@ const ViewTcRequestApproval = () => {
                     </Section>
                     ) : null}
 
-                    {request.status === 'Pending Super Admin Approval' ? (
+                    {resolveTcWorkflowStage(request) === 'md' && request.status !== 'Approved' && request.status !== 'Rejected' ? (
                         <Section title='MD final decision (after dept NOCs)'>
                             {!live && !allNocsCleared(request) ? (
                                 <p className='mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900'>
@@ -308,7 +308,7 @@ const ViewTcRequestApproval = () => {
                         </Section>
                     ) : (
                         <Section title='Decision'>
-                            <Field label='Status' value={request.status} />
+                            <Field label='Status' value={displayTcStatus(request)} />
                             <Field label='Remarks' value={request.superAdminRemarks} />
                             <Field label='TC Number' value={request.tcNumber} />
                         </Section>

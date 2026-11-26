@@ -5,19 +5,18 @@ import { TableCard } from './ReportsShared'
 import { tdClass, thClass } from './reportStyles'
 import { FeeProjectionPanel } from '../../../../Common/demoDomain/DemoScreens'
 
-const FeeComparisonTab = () => {
-    const comparison = useMemo(
-        () => compareAcademicYears(CURRENT_YEAR_FEE_STATS, PREVIOUS_YEAR_FEE_STATS),
-        [],
-    )
+const FeeComparisonTab = ({ pack }) => {
+    const current = pack ? pack.feeComparison.current : CURRENT_YEAR_FEE_STATS
+    const previous = pack ? pack.feeComparison.previous : PREVIOUS_YEAR_FEE_STATS
+    const comparison = useMemo(() => compareAcademicYears(current, previous), [current, previous])
 
     const rows = [
-        ['Total Demand', PREVIOUS_YEAR_FEE_STATS.totalDemand, CURRENT_YEAR_FEE_STATS.totalDemand],
-        ['Total Concession', PREVIOUS_YEAR_FEE_STATS.totalConcession, CURRENT_YEAR_FEE_STATS.totalConcession],
-        ['Net Demand', PREVIOUS_YEAR_FEE_STATS.netDemand, CURRENT_YEAR_FEE_STATS.netDemand],
-        ['Total Collected', PREVIOUS_YEAR_FEE_STATS.collected, CURRENT_YEAR_FEE_STATS.collected],
-        ['Outstanding', PREVIOUS_YEAR_FEE_STATS.outstanding, CURRENT_YEAR_FEE_STATS.outstanding],
-        ['Fine Collected', PREVIOUS_YEAR_FEE_STATS.fineCollected, CURRENT_YEAR_FEE_STATS.fineCollected],
+        ['Total Demand', previous.totalDemand, current.totalDemand],
+        ['Total Concession', previous.totalConcession, current.totalConcession],
+        ['Net Demand', previous.netDemand, current.netDemand],
+        ['Total Collected', previous.collected, current.collected],
+        ['Outstanding', previous.outstanding, current.outstanding],
+        ['Fine Collected', previous.fineCollected, current.fineCollected],
     ]
 
     const pctChange = (current, previous) => {
@@ -28,7 +27,7 @@ const FeeComparisonTab = () => {
 
     return (
         <div className='space-y-6'>
-            <p className='text-sm text-[var(--erp-slate)]'>All-class, all-category reference comparison. Class and fee-category filters will be enabled only when the reporting API can recalculate these figures.</p>
+            <p className='text-sm text-[var(--erp-slate)]'>{pack ? `All-class comparison from fee installments on the server (${current.installmentCount} installments in ${current.academicYear}, ${previous.installmentCount} in ${previous.academicYear}).` : 'All-class, all-category reference comparison. Class and fee-category filters will be enabled only when the reporting API can recalculate these figures.'}</p>
 
             <div className='grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4'>
                 <div className='bg-white rounded-2xl shadow-md p-4'>
@@ -52,13 +51,13 @@ const FeeComparisonTab = () => {
                 </div>
             </div>
 
-            <TableCard title='Fee collection comparison · All classes'>
+            <TableCard title={pack ? `Fee collection comparison · All classes · ${current.defaulters} student(s) with dues` : 'Fee collection comparison · All classes'}>
                 <table className='w-full text-sm mt-4'>
                     <thead className='text-xs bg-[#EDEEF5]'>
                         <tr>
                             <th className={`${thClass} rounded-s-lg`}>Metric</th>
-                            <th className={thClass}>2025-2026</th>
-                            <th className={thClass}>2026-2027</th>
+                            <th className={thClass}>{previous.academicYear}</th>
+                            <th className={thClass}>{current.academicYear}</th>
                             <th className={`${thClass} rounded-e-lg`}>Change</th>
                         </tr>
                     </thead>
@@ -76,7 +75,7 @@ const FeeComparisonTab = () => {
                     </tbody>
                 </table>
             </TableCard>
-            <FeeProjectionPanel />
+            {!pack && <FeeProjectionPanel />}
         </div>
     )
 }

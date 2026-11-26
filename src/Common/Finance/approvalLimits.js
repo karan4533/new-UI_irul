@@ -1,7 +1,10 @@
 /**
  * Client Finance rule: Finance sets per-role spend/approval limits.
- * Amounts above the role limit escalate to Finance via the department head.
+ * Live mode reads/writes PostgreSQL via /api/v1/finance/approval-limits.
  */
+
+import { apiClient } from '../../services/api/apiClient.js'
+import { isLiveApiEnabled } from '../../services/api/tokenStore.js'
 
 const STORAGE_KEY = 'qmis-finance-approval-limits'
 
@@ -28,9 +31,10 @@ export function loadApprovalLimits() {
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed) || !parsed.length) return [...DEFAULT_APPROVAL_LIMITS]
     return parsed.map((row) => ({
-      role: normalizeRole(row.role),
+      role: normalizeRole(row.role || row.roleCode),
       label: row.label || row.role,
       limitInr: Number(row.limitInr ?? row.limit ?? 0) || 0,
+      category: row.category || 'general',
     }))
   } catch {
     return [...DEFAULT_APPROVAL_LIMITS]
@@ -41,12 +45,80 @@ export function saveApprovalLimitsLocal(limits = []) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(limits))
 }
 
+export async function fetchApprovalLimitsApi() {
+  if (!isLiveApiEnabled()) {
+    return { success: true, data: loadApprovalLimits(), live: false }
+  }
+  const res = await apiClient.get('/api/v1/finance/approval-limits', { skipMock: true })
+  if (!res.success) return { ...res, data: loadApprovalLimits(), live: true }
+  const rows = res.data?.limits || res.data?.data?.limits || []
+  const mapped = (Array.isArray(rows) ? rows : []).map((row) => ({
+    role: normalizeRole(row.role || row.roleCode),
+    label: row.label || row.role,
+    limitInr: Number(row.limitInr ?? row.limit ?? 0) || 0,
+    category: row.category || 'general',
+  }))
+  if (mapped.length) saveApprovalLimitsLocal(mapped)
+  return { success: true, data: mapped.length ? mapped : loadApprovalLimits(), live: true }
+}
+
+export async function saveApprovalLimitsApi(limits = []) {
+  if (!isLiveApiEnabled()) {
+    saveApprovalLimitsLocal(limits)
+    return { success: true, data: limits, live: false }
+  }
+  const res = await apiClient.put(
+    '/api/v1/finance/approval-limits',
+    {
+      limits: limits.map((row) => ({
+        role: row.role,
+        label: row.label,
+        limitInr: Number(row.limitInr) || 0,
+        category: row.category || 'general',
+      })),
+    },
+    { skipMock: true },
+  )
+  if (!res.success) return res
+  const rows = res.data?.limits || []
+  const mapped = rows.map((row) => ({
+    role: normalizeRole(row.role || row.roleCode),
+    label: row.label || row.role,
+    limitInr: Number(row.limitInr ?? 0) || 0,
+    category: row.category || 'general',
+  }))
+  saveApprovalLimitsLocal(mapped.length ? mapped : limits)
+  return { success: true, data: mapped.length ? mapped : limits, live: true }
+}
+
+export async function evaluateSpendAgainstLimitApi({ amountInr, actorRole, category = 'general' } = {}) {
+  if (!isLiveApiEnabled()) {
+    return evaluateSpendAgainstLimit({ amountInr, actorRole })
+  }
+  const res = await apiClient.post(
+    '/api/v1/finance/approval-limits/evaluate',
+    { amountInr, role: actorRole, category },
+    { skipMock: true },
+  )
+  if (!res.success) {
+    return evaluateSpendAgainstLimit({ amountInr, actorRole })
+  }
+  const body = res.data || {}
+  return {
+    withinLimit: Boolean(body.withinLimit),
+    limitInr: body.limitInr ?? null,
+    requiresFinance: Boolean(body.requiresFinance),
+    message: body.message || '',
+  }
+}
+
 export function getLimitForRole(role, limits = loadApprovalLimits()) {
   const key = normalizeRole(role)
   const aliases = {
     stationerystoremanager: 'store',
     housekeepingmanager: 'store',
     itsupportmanager: 'store',
+    canteenmanager: 'store',
     jointdirectoroperations: 'jointdirector',
     jointdirectoraudit: 'jointdirector',
     managingdirector: 'director',

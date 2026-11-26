@@ -6,16 +6,18 @@ import ExportModal from '../../../Common/CommonComponents/ExportModal'
 import { FeedbackState } from '../../../Common/ui'
 import {
     TC_STATUSES,
+    displayTcStatus,
     getAllTcRequests,
     getPendingSuperAdminCount,
-    statusBadgeColor,
+    tcStatusBadgeClass,
 } from '../../../Common/TcRequest/tcRequestData'
 import { isLiveApiEnabled } from '../../../services/api/tokenStore'
 import { listTcRequests } from '../../../services/api/tcApiService'
 
-const TcRequestApprovalList = () => {
+const TcRequestApprovalList = ({ basePath = '/admin/tc-request-approval' }) => {
     const live = isLiveApiEnabled()
     const location = useLocation()
+    const listBase = String(basePath || '/admin/tc-request-approval').replace(/\/$/, '')
     const [requests, setRequests] = useState(() => (live ? [] : []))
     const [statusFilter, setStatusFilter] = useState('')
     const [exportModal, setExportModal] = useState(false)
@@ -147,8 +149,8 @@ const TcRequestApprovalList = () => {
                                         <td className='px-3 py-3'>{request.studentName}</td>
                                         <td className='px-3 py-3'>{request.admissionNumber}</td>
                                         <td className='px-3 py-3'>
-                                            <span className={`px-2 py-1 rounded-md text-xs font-semibold ${statusBadgeColor[request.status] || 'bg-slate-100 text-slate-700'}`}>
-                                                {request.status}
+                                            <span className={`px-2 py-1 rounded-md text-xs font-semibold ${tcStatusBadgeClass(request)}`}>
+                                                {displayTcStatus(request)}
                                             </span>
                                         </td>
                                         <td className='px-3 py-3'>{request.requestedOn}</td>
@@ -157,7 +159,7 @@ const TcRequestApprovalList = () => {
                                                 buttonContent={<span className='inline-flex p-1.5 rounded hover:bg-[#EDEEF5]'><EllipsisIcon size={16} /></span>}
                                             >
                                                 <NavLink
-                                                    to={`/admin/tc-request-approval/view/${request.id}`}
+                                                    to={`${listBase}/view/${request.id}`}
                                                     className='flex items-center gap-2 p-2 hover:bg-[#515DEF] hover:text-white rounded'
                                                 >
                                                     Review <ChevronRight size={14} />
